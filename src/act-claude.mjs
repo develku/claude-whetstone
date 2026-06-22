@@ -6,6 +6,7 @@
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { dirname } from 'node:path'
 
 const hashFile = (p) => {
   try {
@@ -47,7 +48,11 @@ export function makeClaudeAct({ artifactPath, maxTurns = 12, model = null, claud
     if (model) args.push('--model', model)
     if (mcpConfig) args.push('--mcp-config', mcpConfig, '--strict-mcp-config')
 
-    const res = spawnSync(claudeBin, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    // Run in the artifact's own directory so the nested edit inherits THAT project's
+    // config — not whatever cwd the driver was launched from. (A driver launched inside
+    // another project's session would otherwise hand the child a restrictive deny layer
+    // that silently blocks the edit; validated 2026-06-22.)
+    const res = spawnSync(claudeBin, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, cwd: dirname(artifactPath) })
     if (res.error) throw new Error(`failed to spawn ${claudeBin}: ${res.error.message}`)
 
     const after = hashFile(artifactPath)

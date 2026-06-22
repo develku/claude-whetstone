@@ -67,9 +67,13 @@ Directly measured on this machine (2026-06-22), **not** hand-waved:
 - `--bare` (which would zero the tax) **does not work for OAuth/subscription (Max/Pro)
   auth** — it returns "Not logged in"; it needs `ANTHROPIC_API_KEY`. Use `--mcp-config`
   + a clean cwd instead.
-- Run the driver from a **plain terminal, not from inside a Claude Code session** — the
-  outer session's permission layer can block the nested edit (the no-op guard then halts
-  a pass that "succeeded" but changed nothing).
+- The act step runs the nested `claude -p` **in the artifact's own directory**, so the
+  edit inherits *that* project's config. Keep the artifact in a repo *without* a
+  restrictive `settings.json`/CLAUDE.md deny layer — otherwise the nested edit is blocked
+  and the no-op guard halts a pass that "succeeded" but changed nothing.
+
+Validated end-to-end 2026-06-22: `TODO` → `DONE` converged at pass 1 on Haiku for
+**$0.05** (gate owned the stop, the model owned the edit, the scorer owned the number).
 
 ## When to use (and not)
 

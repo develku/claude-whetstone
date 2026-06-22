@@ -3,6 +3,7 @@
 // state.json, the Claude act step) into the pure loop. buildContext takes an
 // injectable `act` so the whole pipeline is testable without spending money.
 import { spawnSync } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
 import {
   initState,
   recordPass,
@@ -85,7 +86,9 @@ function parseCli(argv) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Robust entry-point check: pathToFileURL percent-encodes the path (spaces, etc.)
+// so it matches import.meta.url even when the repo lives under a path with spaces.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const cfg = parseCli(process.argv)
   if (!cfg.goal || !cfg.artifactPath || !cfg.scorerCmd) {
     process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--model ...] [--mcp-config <path>] [--loop-dir <dir>]\n')
