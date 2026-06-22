@@ -26,6 +26,16 @@ export async function runLoop({ state, evaluate, act, persist, log = () => {}, a
   while (v.status === 'running') {
     const a = await currentAct(s)
     if (!a.changed) {
+      // A no-op means the current editor gave up — that is exactly when to escalate,
+      // not to error. Only error once the stronger editor has also been tried.
+      if (actEscalated && !escalated) {
+        escalated = true
+        currentAct = actEscalated
+        graceUntilPass = s.pass + (escalationGrace ?? s.plateau_window)
+        s = { ...s, escalated: true, escalated_at_pass: s.pass }
+        log({ pass: s.pass, score: s.current_score, best: s.best_score, status: 'running', reason: 'no-op — escalating to the stronger editor' })
+        continue
+      }
       v = { status: 'error', reason: noopReason }
       s = { ...s, status: 'error', status_reason: noopReason }
       break

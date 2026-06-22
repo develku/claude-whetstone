@@ -43,3 +43,31 @@ test('if the escalated model also plateaus, the loop stops at plateau (escalated
   assert.equal(verdict.status, 'plateau')
   assert.ok(h.calls.esc > 0)
 })
+
+test('a no-op from the cheap editor escalates instead of erroring', async () => {
+  // the cheap editor gives up (no change) — that is exactly when to escalate.
+  const scoreQ = [50, 95]
+  let escUsed = 0
+  const { state, verdict } = await runLoop({
+    state: cfg({ targetScore: 90 }),
+    evaluate: async () => ({ score: scoreQ.shift(), critique: 'c' }),
+    act: async () => ({ changed: false }),
+    actEscalated: async () => { escUsed++; return { changed: true } },
+    persist: (s, ev) => recordPass(s, ev),
+    log: () => {},
+  })
+  assert.equal(state.escalated, true)
+  assert.ok(escUsed > 0, 'the stronger editor was tried after the no-op')
+  assert.equal(verdict.status, 'done')
+})
+
+test('a no-op with no escalation model still errors', async () => {
+  const { verdict } = await runLoop({
+    state: cfg(),
+    evaluate: async () => ({ score: 50, critique: 'c' }),
+    act: async () => ({ changed: false }),
+    persist: (s, ev) => recordPass(s, ev),
+    log: () => {},
+  })
+  assert.equal(verdict.status, 'error')
+})

@@ -50,7 +50,8 @@ test('halts with error on a no-op pass (the model changed nothing)', async () =>
   const noopAct = async () => ({ changed: false, costUsd: 0 })
 
   const { verdict } = await runFromConfig(
-    { goal: 'demo', artifactPath: artifact, scorerCmd, targetScore: 90, hardCap: 10, loopDir: join(dir, '.loop') },
+    // noEscalate so a no-op halts (error) instead of escalating to a real claude spawn
+    { goal: 'demo', artifactPath: artifact, scorerCmd, targetScore: 90, hardCap: 10, loopDir: join(dir, '.loop'), noEscalate: true },
     { act: noopAct, log: () => {} },
   )
   assert.equal(verdict.status, 'error')
