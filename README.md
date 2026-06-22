@@ -55,17 +55,21 @@ Run state lands in `.loop/<run>/` (gitignored): `state.json`, `snapshots/iter_NN
 
 ## ⚠️ Cost & auth (read before the first live run)
 
-Empirically measured on this machine, **not** hand-waved:
+Directly measured on this machine (2026-06-22), **not** hand-waved:
 
-- A headless `claude -p` spawn that does nothing but print "PONG" cost **~$0.046 /
-  ~39K tokens**, because a non-bare spawn reloads the *whole* environment (every MCP
-  server, every CLAUDE.md / rule). A real edit pass is larger. Budget accordingly;
-  the `--budget` ceiling is code-owned and halts the run.
-- `--bare` (which zeroes that tax) **does not work for OAuth/subscription (Max/Pro)
-  auth** — it returns "Not logged in" and needs `ANTHROPIC_API_KEY`. Pass
-  `--mcp-config <empty.json>` to suppress MCP loading instead.
-- The nested edit can be **permission-blocked** by the surrounding environment; the
-  no-op guard catches a pass that "succeeded" but changed nothing.
+- A single trivial `claude -p` call (reply "OK", clean cwd, MCP suppressed) cost
+  **$0.22 on Opus / ~$0.05 on Haiku**, burning **~44K tokens** of context tax (system
+  prompt + slash commands + tool defs) *even with no CLAUDE.md and no MCP loaded*. So
+  **use `--model haiku` (or sonnet) for the act step** — Opus at `--cap 10` is ~$2.2+
+  per loop in overhead alone. The code-owned `--budget` ceiling halts the run.
+- `--mcp-config empty-mcp.json --strict-mcp-config` **works** (`mcp_servers` → `[]`) —
+  a real cost lever. An empty config is bundled at `empty-mcp.json`.
+- `--bare` (which would zero the tax) **does not work for OAuth/subscription (Max/Pro)
+  auth** — it returns "Not logged in"; it needs `ANTHROPIC_API_KEY`. Use `--mcp-config`
+  + a clean cwd instead.
+- Run the driver from a **plain terminal, not from inside a Claude Code session** — the
+  outer session's permission layer can block the nested edit (the no-op guard then halts
+  a pass that "succeeded" but changed nothing).
 
 ## When to use (and not)
 
