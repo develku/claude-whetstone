@@ -1,0 +1,9 @@
+# Ephemeral loop run state (snapshots, reviews, state.json) — never synced/tracked
+.loop/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# OS
+.DS_Store

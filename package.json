@@ -1,0 +1,11 @@
+{
+  "name": "claude-loopcraft",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "A deterministic loop-engineering driver: code owns the gate, the model owns diagnosis + edits. Raises one artifact toward a measured score threshold.",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "license": "MIT"
+}
