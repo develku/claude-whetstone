@@ -3,6 +3,7 @@
 // Side effects (spawning Claude, running the scorer, writing files) are injected
 // so this orchestrator stays pure-ish and unit-testable with stubs — no spend.
 import { gateVerdict } from './gate.mjs'
+import { restoreTarget } from './regression.mjs'
 
 const noopReason = 'pass produced no artifact change (permission block? max-turns starvation?)'
 
@@ -13,7 +14,7 @@ const noopReason = 'pass produced no artifact change (permission block? max-turn
 //   persist(state, { score, critique, costUsd }) -> newState   snapshot + review + recordPass + save
 //   escalationGrace                              passes the escalated editor gets before plateau is re-judged (default = plateau_window)
 //   log(event)                                   progress sink
-export async function runLoop({ state, evaluate, act, persist, log = () => {}, actEscalated = null, escalationGrace = null }) {
+export async function runLoop({ state, evaluate, act, persist, log = () => {}, actEscalated = null, escalationGrace = null, restore = null }) {
   let currentAct = act
   let escalated = false
   let graceUntilPass = -1 // while pass < this, a plateau is ignored (give the escalated editor a fresh window)
@@ -41,6 +42,9 @@ export async function runLoop({ state, evaluate, act, persist, log = () => {}, a
       break
     }
     s = persist(s, { ...(await evaluate(s)), costUsd: a.costUsd ?? 0 })
+
+    const target = restoreTarget(s)
+    if (target != null && restore != null) await restore(target)
 
     if (s.budget_usd != null && s.spent_usd > s.budget_usd) {
       v = { status: 'capped', reason: `budget $${s.budget_usd} exceeded (spent $${s.spent_usd.toFixed(2)})` }

@@ -3,6 +3,8 @@
 // state.json, the Claude act step) into the pure loop. buildContext takes an
 // injectable `act` so the whole pipeline is testable without spending money.
 import { spawnSync } from 'node:child_process'
+import { copyFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   initState,
@@ -66,7 +68,10 @@ export async function runFromConfig(cfg, deps = {}) {
     deps.actEscalated ??
     (escalateModel ? makeClaudeAct({ artifactPath: state.artifact_path, model: escalateModel, mcpConfig: cfg.mcpConfig }) : null)
 
-  const { state: final, verdict } = await runLoop({ state, evaluate, act, actEscalated, persist, log: deps.log ?? defaultLog })
+  // keep-best: restore a prior snapshot back over the live artifact when a pass regressed
+  const restore = deps.restore ?? ((snap) => copyFileSync(join(loopDir, snap), state.artifact_path))
+
+  const { state: final, verdict } = await runLoop({ state, evaluate, act, actEscalated, persist, restore, log: deps.log ?? defaultLog })
   saveState(loopDir, final)
   return { state: final, verdict }
 }
