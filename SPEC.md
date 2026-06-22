@@ -19,6 +19,13 @@ Pure function. Reads only numbers the scorer produced. Precedence is deliberate:
 Two further code-owned guards live in the loop, not the gate: a **no-op** pass
 (artifact byte-identical after ACT) → `error`; **spend over `budget_usd`** → `capped`.
 
+**Escalation.** On the first `plateau`, if a stronger editor (`actEscalated`, default
+`--model-escalate opus`) is available, the loop switches to it for one fresh window
+(`escalationGrace`, default `plateau_window` passes) before plateau is re-judged. It
+escalates at most once; the hard cap still bounds total passes. This is how a cheap
+editor stays the default while Opus is paid for only when the loop *proves* it's stuck.
+`scorers/llm-judge.mjs` is the subjective-quality scorer (Opus-as-judge by default).
+
 ## 2. The scorer (a CLI the user supplies per task)
 
 Invoked as: `<scorer_cmd> --output <produced-output> --loop-dir <dir> --pass <NNN>`.
@@ -50,6 +57,7 @@ else is testable with a stub.
 goal, artifact_path, observe_cmd, scorer_cmd,
 target_score(90), min_delta(1), plateau_window(3), hard_cap(10), budget_usd(null), model,
 pass, last_critique, current_score, best_score, best_pass, spent_usd,
+escalated, escalated_at_pass,   # set when a plateau triggered the stronger editor
 status(running|done|capped|plateau|error), status_reason, started_at, updated_at,
 history: [{ pass, score, critique_ref, snapshot, ts }]
 ```

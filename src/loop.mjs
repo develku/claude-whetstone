@@ -8,17 +8,23 @@ const noopReason = 'pass produced no artifact change (permission block? max-turn
 
 // deps:
 //   evaluate(state) -> { score, critique }       observe the real output + score it
-//   act(state)      -> { changed, costUsd }      model edits the artifact using the last critique
+//   act(state)      -> { changed, costUsd }      cheap editor: model edits the artifact using the last critique
+//   actEscalated(state) -> { changed, costUsd }  OPTIONAL stronger editor, used ONLY after a plateau (spend Opus only when the cheap model is provably stuck)
 //   persist(state, { score, critique, costUsd }) -> newState   snapshot + review + recordPass + save
+//   escalationGrace                              passes the escalated editor gets before plateau is re-judged (default = plateau_window)
 //   log(event)                                   progress sink
-export async function runLoop({ state, evaluate, act, persist, log = () => {} }) {
+export async function runLoop({ state, evaluate, act, persist, log = () => {}, actEscalated = null, escalationGrace = null }) {
+  let currentAct = act
+  let escalated = false
+  let graceUntilPass = -1 // while pass < this, a plateau is ignored (give the escalated editor a fresh window)
+
   // Baseline: score the initial artifact before any edit (iter_000).
   let s = persist(state, await evaluate(state))
   let v = gateVerdict(s)
   log({ pass: s.pass, score: s.current_score, best: s.best_score, ...v })
 
   while (v.status === 'running') {
-    const a = await act(s)
+    const a = await currentAct(s)
     if (!a.changed) {
       v = { status: 'error', reason: noopReason }
       s = { ...s, status: 'error', status_reason: noopReason }
@@ -33,6 +39,20 @@ export async function runLoop({ state, evaluate, act, persist, log = () => {} })
     }
 
     v = gateVerdict(s)
+
+    if (v.status === 'plateau') {
+      if (s.pass < graceUntilPass) {
+        v = { status: 'running', reason: 'post-escalation grace window' }
+      } else if (actEscalated && !escalated) {
+        escalated = true
+        currentAct = actEscalated
+        graceUntilPass = s.pass + (escalationGrace ?? s.plateau_window)
+        s = { ...s, escalated: true, escalated_at_pass: s.pass }
+        v = { status: 'running', reason: `plateau at pass ${s.pass} — escalating to the stronger editor` }
+      }
+      // else: already escalated (or no escalation available) -> plateau stands, loop exits
+    }
+
     log({ pass: s.pass, score: s.current_score, best: s.best_score, ...v })
   }
 

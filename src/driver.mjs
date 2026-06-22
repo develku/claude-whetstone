@@ -59,9 +59,14 @@ export async function runFromConfig(cfg, deps = {}) {
   saveState(loopDir, state)
 
   const { evaluate, persist } = buildContext(loopDir)
+  // Cheap editor every pass; stronger editor only after a plateau (escalation).
   const act = deps.act ?? makeClaudeAct({ artifactPath: state.artifact_path, model: state.model, mcpConfig: cfg.mcpConfig })
+  const escalateModel = cfg.noEscalate ? null : cfg.escalateModel ?? 'opus'
+  const actEscalated =
+    deps.actEscalated ??
+    (escalateModel ? makeClaudeAct({ artifactPath: state.artifact_path, model: escalateModel, mcpConfig: cfg.mcpConfig }) : null)
 
-  const { state: final, verdict } = await runLoop({ state, evaluate, act, persist, log: deps.log ?? defaultLog })
+  const { state: final, verdict } = await runLoop({ state, evaluate, act, actEscalated, persist, log: deps.log ?? defaultLog })
   saveState(loopDir, final)
   return { state: final, verdict }
 }
@@ -80,7 +85,9 @@ function parseCli(argv) {
     targetScore: get('--target') ? Number(get('--target')) : undefined,
     hardCap: get('--cap') ? Number(get('--cap')) : undefined,
     budgetUsd: get('--budget') ? Number(get('--budget')) : undefined,
-    model: get('--model', null),
+    model: get('--model', 'sonnet'),
+    escalateModel: get('--model-escalate', 'opus'),
+    noEscalate: argv.includes('--no-escalate'),
     mcpConfig: get('--mcp-config', null),
     loopDir: get('--loop-dir', `.loop/run_${new Date().toISOString().replace(/[:.]/g, '').slice(0, 15)}`),
   }
@@ -91,11 +98,13 @@ function parseCli(argv) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const cfg = parseCli(process.argv)
   if (!cfg.goal || !cfg.artifactPath || !cfg.scorerCmd) {
-    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--model ...] [--mcp-config <path>] [--loop-dir <dir>]\n')
+    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--model sonnet] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>]\n')
     process.exit(2)
   }
   const { state, verdict } = await runFromConfig(cfg)
   process.stdout.write(`\n${verdict.status.toUpperCase()}: ${verdict.reason}\n`)
-  process.stdout.write(`best score ${state.best_score} at pass ${state.best_pass} · ${state.history.length} passes · spent $${state.spent_usd.toFixed(4)}\n`)
+  process.stdout.write(
+    `best score ${state.best_score} at pass ${state.best_pass} · ${state.history.length} passes · spent $${state.spent_usd.toFixed(4)}${state.escalated ? ` · escalated at pass ${state.escalated_at_pass}` : ''}\n`,
+  )
   process.exit(verdict.status === 'done' ? 0 : 1)
 }

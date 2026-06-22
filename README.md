@@ -53,6 +53,23 @@ node src/driver.mjs "make the suite pass" \
 Run state lands in `.loop/<run>/` (gitignored): `state.json`, `snapshots/iter_NNN.*`,
 `reviews/review_NNN.json`.
 
+## Model allocation (haiku / sonnet / opus)
+
+Quality in a loop is `model × scorer × iterations`, not raw model strength alone. So
+spend the strong model where it buys the most and keep the per-pass editor cheap:
+
+| Role | Default | Use |
+|---|---|---|
+| **Editor** — every pass | **sonnet** | real code/content edits. Drop to **haiku** for trivial/mechanical artifacts (the canary converged on Haiku for $0.05). |
+| **Scorer** — deterministic | **code** | test-pass-rate, compile, type-check, SSIM — a perfect, free signal. No model at all. |
+| **Scorer** — subjective | **opus** judge (`scorers/llm-judge.mjs`) | when "good" can't be checked by code. Put the reasoning budget in the *critic*, not the editor. |
+| **Escalation** — on plateau only | **opus** | when the cheap editor is *provably stuck* (the gate emits `plateau`) the loop switches to Opus for one fresh window, then gives up if still stuck. `--no-escalate` to disable. |
+
+Why: editing ("apply this specific critique") is the easy half and runs every pass — a
+cheap model does it well, and `--cap 10` of Opus edits is wasteful. *Evaluation* defines
+the gradient, so put strength there (or in code). You pay Opus-as-editor only when the
+loop **proves** you need it (a plateau), never up front.
+
 ## ⚠️ Cost & auth (read before the first live run)
 
 Directly measured on this machine (2026-06-22), **not** hand-waved:
