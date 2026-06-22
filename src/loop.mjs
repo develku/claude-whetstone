@@ -14,10 +14,11 @@ const noopReason = 'pass produced no artifact change (permission block? max-turn
 //   persist(state, { score, critique, costUsd }) -> newState   snapshot + review + recordPass + save
 //   escalationGrace                              passes the escalated editor gets before plateau is re-judged (default = plateau_window)
 //   log(event)                                   progress sink
-export async function runLoop({ state, evaluate, act, persist, log = () => {}, actEscalated = null, escalationGrace = null, restore = null }) {
+export async function runLoop({ state, evaluate, act, persist, log = () => {}, actEscalated = null, escalationGrace = null, restore = null, noopThreshold = 2 }) {
   let currentAct = act
   let escalated = false
   let graceUntilPass = -1 // while pass < this, a plateau is ignored (give the escalated editor a fresh window)
+  let consecutiveNoops = 0
 
   // Baseline: score the initial artifact before any edit (iter_000).
   let s = persist(state, await evaluate(state))
@@ -27,20 +28,26 @@ export async function runLoop({ state, evaluate, act, persist, log = () => {}, a
   while (v.status === 'running') {
     const a = await currentAct(s)
     if (!a.changed) {
-      // A no-op means the current editor gave up — that is exactly when to escalate,
-      // not to error. Only error once the stronger editor has also been tried.
-      if (actEscalated && !escalated) {
+      consecutiveNoops++
+      // Escalate only after N consecutive no-ops, not on the first.
+      if (consecutiveNoops >= noopThreshold && actEscalated && !escalated) {
         escalated = true
         currentAct = actEscalated
         graceUntilPass = s.pass + (escalationGrace ?? s.plateau_window)
         s = { ...s, escalated: true, escalated_at_pass: s.pass }
         log({ pass: s.pass, score: s.current_score, best: s.best_score, status: 'running', reason: 'no-op — escalating to the stronger editor' })
+        consecutiveNoops = 0
+        continue
+      }
+      if (consecutiveNoops < noopThreshold) {
+        log({ pass: s.pass, score: s.current_score, best: s.best_score, status: 'running', reason: `no-op (${consecutiveNoops}/${noopThreshold}) — retrying` })
         continue
       }
       v = { status: 'error', reason: noopReason }
       s = { ...s, status: 'error', status_reason: noopReason }
       break
     }
+    consecutiveNoops = 0
     s = persist(s, { ...(await evaluate(s)), costUsd: a.costUsd ?? 0 })
 
     const target = restoreTarget(s)
