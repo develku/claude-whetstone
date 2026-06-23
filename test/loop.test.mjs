@@ -72,3 +72,32 @@ test('the final status is written onto the returned state', async () => {
   const { state } = await runLoop({ state: cfg(), ...h })
   assert.equal(state.status, 'done')
 })
+
+test('skipBaseline resumes from the given state without re-scoring a baseline', async () => {
+  // A state that already carries history (as if loaded from a capped run): pass 1, two
+  // scored passes. With skipBaseline the loop must NOT re-evaluate a baseline first — the
+  // first thing it does is act, then score (pass 2). No duplicate baseline pass is added.
+  let s = cfg({ targetScore: 90, hardCap: 10 })
+  s = recordPass(s, { score: 50 })
+  s = recordPass(s, { score: 60 }) // pass 1, history length 2
+  const calls = []
+  const evalQ = [95]
+  const { state, verdict } = await runLoop({
+    state: s,
+    evaluate: async () => {
+      calls.push('eval')
+      return { score: evalQ.shift(), critique: 'c' }
+    },
+    act: async () => {
+      calls.push('act')
+      return { changed: true }
+    },
+    persist: (st, ev) => recordPass(st, ev),
+    skipBaseline: true,
+    log: () => {},
+  })
+  assert.equal(verdict.status, 'done')
+  assert.equal(calls[0], 'act') // acted first — no baseline re-score
+  assert.equal(calls.filter((c) => c === 'eval').length, 1)
+  assert.equal(state.history.length, 3) // 2 preserved + 1 new; no duplicate baseline
+})

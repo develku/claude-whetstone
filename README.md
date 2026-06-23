@@ -53,6 +53,21 @@ node src/driver.mjs "make the suite pass" \
 Run state lands in `.loop/<run>/` (gitignored): `state.json`, `snapshots/iter_NNN.*`,
 `reviews/review_NNN.json`.
 
+### Resuming a capped run
+
+A run that hit its cap or budget below target can continue from `state.json` instead of
+starting over — history, best score, snapshots, and spend all carry forward:
+
+```bash
+node src/driver.mjs --resume --loop-dir .loop/<run> --cap 16   # raise the limit, keep going
+```
+
+You **must** relax the binding limit (`--cap`/`--budget`) — otherwise the gate that stopped
+the run stops it again immediately, and resume refuses with an actionable message. Resume
+restarts the editor ladder from the cheap model (re-escalating only if it plateaus again) and
+skips re-scoring a baseline (the live artifact is already the best snapshot). Optionally
+override `--target`/`--model` too; anything you don't pass keeps its saved value.
+
 ## Model allocation (haiku / sonnet / opus)
 
 Quality in a loop is `model × scorer × iterations`, not raw model strength alone. So
@@ -125,12 +140,13 @@ so you don't have to. Most tasks don't need a feedback controller.
 src/gate.mjs        code-owned gate (pure)            test/gate.test.mjs
 src/state.mjs       state.json + snapshots/reviews    (covered via loop/driver)
 src/loop.mjs        control flow (deps injected)      test/loop.test.mjs
+src/resume.mjs      --resume gate pre-check (pure)     test/resume.test.mjs
 src/act-claude.mjs  the headless claude -p edit step  (live-validated, not unit-tested)
-src/driver.mjs      CLI + real wiring                 test/driver.test.mjs
+src/driver.mjs      CLI + real wiring                 test/driver.test.mjs, test/resume-driver.test.mjs
 scorers/test-pass-rate.mjs   reference scorer          test/scorer.test.mjs
 ```
 
-`npm test` runs the suite (62 tests, no spend — `act` and the scorer are stubbed
+`npm test` runs the suite (76 tests, no spend — `act` and the scorer are stubbed
 or deterministic). See `SPEC.md` for the file/scorer/gate contracts.
 
 ## Prior art & inspiration

@@ -14,14 +14,16 @@ const noopReason = 'pass produced no artifact change (permission block? max-turn
 //   persist(state, { score, critique, costUsd }) -> newState   snapshot + review + recordPass + save
 //   escalationGrace                              passes the escalated editor gets before plateau is re-judged (default = plateau_window)
 //   log(event)                                   progress sink
-export async function runLoop({ state, evaluate, act, persist, log = () => {}, actEscalated = null, escalationGrace = null, restore = null, noopThreshold = 2 }) {
+export async function runLoop({ state, evaluate, act, persist, log = () => {}, actEscalated = null, escalationGrace = null, restore = null, noopThreshold = 2, skipBaseline = false }) {
   let currentAct = act
   let escalated = false
   let graceUntilPass = -1 // while pass < this, a plateau is ignored (give the escalated editor a fresh window)
   let consecutiveNoops = 0
 
-  // Baseline: score the initial artifact before any edit (iter_000).
-  let s = persist(state, await evaluate(state))
+  // Baseline: score the initial artifact before any edit (iter_000). On --resume the state
+  // already carries a scored history and the live artifact is the best snapshot, so skip the
+  // baseline and continue straight into the edit loop from the loaded state.
+  let s = skipBaseline ? state : persist(state, await evaluate(state))
   let v = gateVerdict(s)
   log({ pass: s.pass, score: s.current_score, best: s.best_score, ...v })
 
