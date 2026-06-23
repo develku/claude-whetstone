@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -92,4 +92,28 @@ test('refuses to resume on a non-numeric override (NaN cap) before spending', as
     /hard_cap/,
   )
   assert.equal(acted, false) // no paid pass before the refusal
+})
+
+// Resume reads an EXISTING run. A typo'd --loop-dir must fail with an actionable message
+// (not a raw ENOENT) AND must not leave an empty snapshots/+reviews/ tree behind.
+test('refuses to resume a non-existent run dir with an actionable error and no orphan dir', async () => {
+  const loopDir = join(mkdtempSync(join(tmpdir(), 'whetstone-resume-')), 'no-such-run')
+
+  await assert.rejects(
+    () => resumeFromConfig({ loopDir, overrides: { hard_cap: 3 }, noEscalate: true }, { act: async () => ({ changed: true }), log: () => {} }),
+    /no run found/i,
+  )
+  assert.equal(existsSync(loopDir), false) // a failed resume must not create the run dir
+})
+
+// A corrupt state.json must fail with a clear "corrupt" message, not a raw JSON parse error.
+test('refuses to resume a corrupt state.json with an actionable error', async () => {
+  const loopDir = join(mkdtempSync(join(tmpdir(), 'whetstone-resume-')), '.loop')
+  mkdirSync(loopDir, { recursive: true })
+  writeFileSync(join(loopDir, 'state.json'), '{ this is not valid json')
+
+  await assert.rejects(
+    () => resumeFromConfig({ loopDir, overrides: { hard_cap: 3 }, noEscalate: true }, { act: async () => ({ changed: true }), log: () => {} }),
+    /corrupt/i,
+  )
 })

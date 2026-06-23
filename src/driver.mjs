@@ -104,8 +104,16 @@ export async function runFromConfig(cfg, deps = {}) {
 // the GATE decide whether resuming can make progress (prepareResume). The run then continues
 // WITHOUT re-scoring a baseline — the live artifact is already the best snapshot.
 export async function resumeFromConfig(cfg, deps = {}) {
-  ensureLoopDir(cfg.loopDir)
-  const loaded = loadState(cfg.loopDir)
+  // Resume reads an EXISTING run, so load BEFORE creating anything — a typo'd --loop-dir must
+  // fail with an actionable message (not a raw ENOENT/JSON error) and leave no orphan dir behind.
+  let loaded
+  try {
+    loaded = loadState(cfg.loopDir)
+  } catch (e) {
+    if (e.code === 'ENOENT') throw new Error(`cannot resume: no run found at ${cfg.loopDir} (no state.json) — check --loop-dir`)
+    throw new Error(`cannot resume: state.json at ${cfg.loopDir} is corrupt (${e.message})`)
+  }
+  ensureLoopDir(cfg.loopDir) // run confirmed; ensure snapshots/ + reviews/ exist for persist
   const { state, error } = prepareResume(loaded, cfg.overrides ?? {})
   if (error) throw new Error(error)
   return runPrepared(cfg, state, deps, { skipBaseline: true })
