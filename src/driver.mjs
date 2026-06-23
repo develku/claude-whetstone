@@ -24,15 +24,21 @@ import { formatReport } from './summary.mjs'
 
 const shq = (s) => `'${String(s).replace(/'/g, "'\\''")}'`
 
+// Hard wall-clock cap on the scorer/observe children so a hung command (flaky endpoint, a
+// never-returning render/server step) can't wedge an unattended loop forever.
+const CHILD_TIMEOUT_MS = 5 * 60 * 1000
+
 function runScorer(scorerCmd, { output, loopDir, pass }) {
   const full = `${scorerCmd} --output ${shq(output)} --loop-dir ${shq(loopDir)} --pass ${zeroPad(pass)}`
-  const res = spawnSync(full, { shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
+  const res = spawnSync(full, { shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: CHILD_TIMEOUT_MS, killSignal: 'SIGKILL' })
+  if (res.error) throw new Error(`scorer failed (${res.error.code || res.error.message})`)
   if (res.status !== 0) throw new Error(`scorer exited ${res.status}: ${(res.stderr || '').slice(0, 500)}`)
   return JSON.parse(res.stdout)
 }
 
 function runObserve(observeCmd, loopDir) {
-  const res = spawnSync(observeCmd, { shell: true, encoding: 'utf8', cwd: loopDir, maxBuffer: 32 * 1024 * 1024 })
+  const res = spawnSync(observeCmd, { shell: true, encoding: 'utf8', cwd: loopDir, maxBuffer: 32 * 1024 * 1024, timeout: CHILD_TIMEOUT_MS, killSignal: 'SIGKILL' })
+  if (res.error) throw new Error(`observe failed (${res.error.code || res.error.message})`)
   if (res.status !== 0) throw new Error(`observe exited ${res.status}: ${(res.stderr || '').slice(0, 500)}`)
   return (res.stdout || '').trim()
 }

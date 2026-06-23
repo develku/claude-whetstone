@@ -26,78 +26,90 @@ export async function runLoop({ state, evaluate, act, persist, log = () => {}, a
   let escalated = false
   let graceUntilPass = -1 // while pass < this, a plateau is ignored (give the escalated editor a fresh window)
   let consecutiveNoops = 0
+  let s
+  let v
 
-  // Baseline: score the initial artifact before any edit (iter_000). On --resume the state
-  // already carries a scored history and the live artifact is the best snapshot, so skip the
-  // baseline and continue straight into the edit loop from the loaded state.
-  let s = skipBaseline ? state : persist(state, await evaluate(state))
-  let v = gateVerdict(s)
-  log({ pass: s.pass, score: s.current_score, best: s.best_score, ...v })
-
-  while (v.status === 'running') {
-    const a = await currentAct(s)
-    if (!a.changed) {
-      // A no-op still spent (the editor ran, returned cost, changed nothing). Charge it so a
-      // sequence of paid no-ops can still trip --budget — otherwise the spend silently vanishes.
-      s = { ...s, spent_usd: s.spent_usd + (a.costUsd ?? 0) }
-      const overBudget = overBudgetVerdict(s)
-      if (overBudget) {
-        v = overBudget
-        s = { ...s, status: 'capped', status_reason: overBudget.reason }
-        break
-      }
-      consecutiveNoops++
-      // Escalate only after N consecutive no-ops, not on the first.
-      if (consecutiveNoops >= noopThreshold && actEscalated && !escalated) {
-        escalated = true
-        currentAct = actEscalated
-        graceUntilPass = s.pass + (escalationGrace ?? s.plateau_window)
-        s = { ...s, escalated: true, escalated_at_pass: s.pass }
-        log({ pass: s.pass, score: s.current_score, best: s.best_score, status: 'running', reason: 'no-op — escalating to the stronger editor' })
-        consecutiveNoops = 0
-        continue
-      }
-      if (consecutiveNoops < noopThreshold) {
-        log({ pass: s.pass, score: s.current_score, best: s.best_score, status: 'running', reason: `no-op (${consecutiveNoops}/${noopThreshold}) — retrying` })
-        continue
-      }
-      v = { status: 'error', reason: noopReason }
-      s = { ...s, status: 'error', status_reason: noopReason }
-      break
-    }
-    consecutiveNoops = 0
-    s = persist(s, { ...(await evaluate(s)), costUsd: a.costUsd ?? 0 })
-
-    const target = restoreTarget(s)
-    if (target != null && restore != null) await restore(target)
-
+  // A side effect (scorer crash, editor spawn failure/timeout, maxBuffer overflow, disk error)
+  // throws out of evaluate/act/persist. Convert it to a terminal status=error verdict so the run
+  // returns a consistent state the caller can save — a later --resume sees the failure, not a
+  // half-finished loop that rejected and skipped its final save.
+  try {
+    // Baseline: score the initial artifact before any edit (iter_000). On --resume the state
+    // already carries a scored history and the live artifact is the best snapshot, so skip the
+    // baseline and continue straight into the edit loop from the loaded state.
+    s = skipBaseline ? state : persist(state, await evaluate(state))
     v = gateVerdict(s)
+    log({ pass: s.pass, score: s.current_score, best: s.best_score, ...v })
 
-    // Budget cap AFTER the gate, so precedence holds (error > done > capped): a pass that meets
-    // the target (done) or returns an invalid score (error) is NOT overridden by the budget cap.
-    if (v.status !== 'done' && v.status !== 'error') {
-      const overBudget = overBudgetVerdict(s)
-      if (overBudget) {
-        v = overBudget
-        s = { ...s, status: 'capped', status_reason: overBudget.reason }
+    while (v.status === 'running') {
+      const a = await currentAct(s)
+      if (!a.changed) {
+        // A no-op still spent (the editor ran, returned cost, changed nothing). Charge it so a
+        // sequence of paid no-ops can still trip --budget — otherwise the spend silently vanishes.
+        s = { ...s, spent_usd: s.spent_usd + (a.costUsd ?? 0) }
+        const overBudget = overBudgetVerdict(s)
+        if (overBudget) {
+          v = overBudget
+          s = { ...s, status: 'capped', status_reason: overBudget.reason }
+          break
+        }
+        consecutiveNoops++
+        // Escalate only after N consecutive no-ops, not on the first.
+        if (consecutiveNoops >= noopThreshold && actEscalated && !escalated) {
+          escalated = true
+          currentAct = actEscalated
+          graceUntilPass = s.pass + (escalationGrace ?? s.plateau_window)
+          s = { ...s, escalated: true, escalated_at_pass: s.pass }
+          log({ pass: s.pass, score: s.current_score, best: s.best_score, status: 'running', reason: 'no-op — escalating to the stronger editor' })
+          consecutiveNoops = 0
+          continue
+        }
+        if (consecutiveNoops < noopThreshold) {
+          log({ pass: s.pass, score: s.current_score, best: s.best_score, status: 'running', reason: `no-op (${consecutiveNoops}/${noopThreshold}) — retrying` })
+          continue
+        }
+        v = { status: 'error', reason: noopReason }
+        s = { ...s, status: 'error', status_reason: noopReason }
         break
       }
-    }
+      consecutiveNoops = 0
+      s = persist(s, { ...(await evaluate(s)), costUsd: a.costUsd ?? 0 })
 
-    if (v.status === 'plateau') {
-      if (s.pass < graceUntilPass) {
-        v = { status: 'running', reason: 'post-escalation grace window' }
-      } else if (actEscalated && !escalated) {
-        escalated = true
-        currentAct = actEscalated
-        graceUntilPass = s.pass + (escalationGrace ?? s.plateau_window)
-        s = { ...s, escalated: true, escalated_at_pass: s.pass }
-        v = { status: 'running', reason: `plateau at pass ${s.pass} — escalating to the stronger editor` }
+      const target = restoreTarget(s)
+      if (target != null && restore != null) await restore(target)
+
+      v = gateVerdict(s)
+
+      // Budget cap AFTER the gate, so precedence holds (error > done > capped): a pass that meets
+      // the target (done) or returns an invalid score (error) is NOT overridden by the budget cap.
+      if (v.status !== 'done' && v.status !== 'error') {
+        const overBudget = overBudgetVerdict(s)
+        if (overBudget) {
+          v = overBudget
+          s = { ...s, status: 'capped', status_reason: overBudget.reason }
+          break
+        }
       }
-      // else: already escalated (or no escalation available) -> plateau stands, loop exits
-    }
 
-    log({ pass: s.pass, score: s.current_score, best: s.best_score, ...v })
+      if (v.status === 'plateau') {
+        if (s.pass < graceUntilPass) {
+          v = { status: 'running', reason: 'post-escalation grace window' }
+        } else if (actEscalated && !escalated) {
+          escalated = true
+          currentAct = actEscalated
+          graceUntilPass = s.pass + (escalationGrace ?? s.plateau_window)
+          s = { ...s, escalated: true, escalated_at_pass: s.pass }
+          v = { status: 'running', reason: `plateau at pass ${s.pass} — escalating to the stronger editor` }
+        }
+        // else: already escalated (or no escalation available) -> plateau stands, loop exits
+      }
+
+      log({ pass: s.pass, score: s.current_score, best: s.best_score, ...v })
+    }
+  } catch (e) {
+    const reason = `pass failed: ${e.message}`
+    s = { ...(s ?? state), status: 'error', status_reason: reason }
+    v = { status: 'error', reason }
   }
 
   if (s.status === 'running') s = { ...s, status: v.status, status_reason: v.reason }

@@ -1,7 +1,7 @@
 // State is the durable, code-owned record of a run. The model never writes it.
 // recordPass is a PURE immutable update (operator coding-style: new objects, no
 // mutation); the file I/O helpers are the only side-effecting functions here.
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, mkdirSync, copyFileSync, existsSync } from 'node:fs'
 import { join, extname } from 'node:path'
 import { redactSecrets } from './redact.mjs'
 
@@ -64,7 +64,14 @@ export function ensureLoopDir(loopDir) {
 
 export const statePath = (loopDir) => join(loopDir, 'state.json')
 export const loadState = (loopDir) => JSON.parse(readFileSync(statePath(loopDir), 'utf8'))
-export const saveState = (loopDir, state) => writeFileSync(statePath(loopDir), JSON.stringify(state, null, 2))
+// Crash-safe write: state.json is --resume's only durable input, so write to a temp file and
+// rename over it (atomic on the same filesystem). A kill mid-write leaves the prior state.json
+// intact instead of a torn/truncated file that resume would reject as corrupt.
+export const saveState = (loopDir, state) => {
+  const tmp = statePath(loopDir) + '.tmp'
+  writeFileSync(tmp, JSON.stringify(state, null, 2))
+  renameSync(tmp, statePath(loopDir))
+}
 
 export function snapshotArtifact(loopDir, artifactPath, pass) {
   const rel = join('snapshots', `iter_${zeroPad(pass)}${extname(artifactPath)}`)

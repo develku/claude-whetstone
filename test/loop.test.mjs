@@ -86,6 +86,39 @@ test('reaching the target on the pass that tips over budget reports done, not ca
   assert.equal(state.best_score, 95)
 })
 
+test('an editor failure mid-loop ends the run as error, not an uncaught throw', async () => {
+  // act() throwing (spawn failure, timeout, maxBuffer overflow) must convert to status=error so
+  // the run returns a consistent state (saveable for a later --resume), not reject the whole loop.
+  const { state, verdict } = await runLoop({
+    state: cfg(),
+    evaluate: async () => ({ score: 50, critique: 'c' }),
+    act: async () => {
+      throw new Error('editor timed out')
+    },
+    persist: (st, ev) => recordPass(st, ev),
+    log: () => {},
+  })
+  assert.equal(verdict.status, 'error')
+  assert.match(verdict.reason, /editor timed out/)
+  assert.equal(state.status, 'error')
+})
+
+test('a scorer crash mid-loop ends the run as error', async () => {
+  let n = 0
+  const { verdict } = await runLoop({
+    state: cfg(),
+    evaluate: async () => {
+      if (++n === 1) return { score: 50, critique: 'c' }
+      throw new Error('scorer exited 1')
+    },
+    act: async () => ({ changed: true }),
+    persist: (st, ev) => recordPass(st, ev),
+    log: () => {},
+  })
+  assert.equal(verdict.status, 'error')
+  assert.match(verdict.reason, /scorer exited 1/)
+})
+
 test('the final status is written onto the returned state', async () => {
   const h = harness({ scores: [95] })
   const { state } = await runLoop({ state: cfg(), ...h })
