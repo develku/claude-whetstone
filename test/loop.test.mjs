@@ -61,6 +61,16 @@ test('halts when the per-run budget is exceeded', async () => {
   assert.ok(state.spent_usd > 0.5)
 })
 
+test('the budget cap is strict (spent == budget continues, does not cap)', async () => {
+  // budget check is `spent > budget`, so a run that lands exactly ON the budget keeps going.
+  // Pin that boundary so a future flip to >= is a deliberate, tested change.
+  const h = harness({ scores: [50, 60, 70, 95], costs: [0.3, 0.3] })
+  const { state, verdict } = await runLoop({ state: cfg({ targetScore: 90, budgetUsd: 0.6, hardCap: 20 }), ...h, log: () => {} })
+  assert.equal(verdict.status, 'done') // continued past the exact-budget pass (spent 0.6) to score 95
+  assert.equal(state.pass, 3)
+  assert.ok(Math.abs(state.spent_usd - 0.6) < 1e-9)
+})
+
 test('halts when the scorer returns an invalid score', async () => {
   const h = harness({ scores: [50, null] })
   const { verdict } = await runLoop({ state: cfg(), ...h })

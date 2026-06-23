@@ -53,3 +53,13 @@ test('exits 2 (scorer error) when counts cannot be parsed', () => {
   const r = run(`node -e "console.log('no counts here')"`)
   assert.equal(r.status, 2)
 })
+
+test('extracts failing test names into the findings array (the gate-facing JSON)', () => {
+  const r = run(`node -e "console.log('✖ test alpha (1ms)'); console.log('✖ test beta (1ms)'); console.log('ℹ pass 1'); console.log('ℹ fail 2')"`)
+  const j = JSON.parse(r.stdout)
+  assert.deepEqual(
+    j.findings.map((f) => f.area),
+    ['test alpha', 'test beta'],
+  )
+  assert.equal(j.findings[0].severity, 'high')
+})
