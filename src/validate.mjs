@@ -18,7 +18,8 @@ export function validateConfig(state) {
   if (!Number.isInteger(state.plateau_window) || state.plateau_window < 1) {
     errors.push('plateau_window must be an integer at least 1')
   }
-  // budget is optional (null = no budget); validate only when one is set.
+  // budget is optional; validate only when one is set. `!= null` treats both null (the
+  // initState default) and a missing key from an older state.json (undefined) as "no budget".
   if (state.budget_usd != null && (!Number.isFinite(state.budget_usd) || state.budget_usd <= 0)) {
     errors.push('budget_usd must be a positive number when set')
   }

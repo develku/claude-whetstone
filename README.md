@@ -176,7 +176,7 @@ src/driver.mjs      CLI + real wiring                 test/driver.test.mjs, test
 scorers/test-pass-rate.mjs   reference scorer          test/scorer.test.mjs
 ```
 
-`npm test` runs the suite (78 tests, no spend — `act` and the scorer are stubbed
+`npm test` runs the suite (92 tests, no spend — `act` and the scorer are stubbed
 or deterministic). See `SPEC.md` for the file/scorer/gate contracts.
 
 ## Prior art & inspiration
