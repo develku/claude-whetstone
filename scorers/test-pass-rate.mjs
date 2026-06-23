@@ -5,7 +5,7 @@
 // The critique carries the ASSERTION DETAIL (expected vs actual) of each failing
 // test, not just its name — that diff IS the gradient the editor needs to climb.
 //
-// Contract (every loopcraft scorer honors this): read --output/--target/--loop-dir/--pass,
+// Contract (every whetstone scorer honors this): read --output/--target/--loop-dir/--pass,
 // print {score, critique, findings} JSON to stdout, exit 0 on success, exit 2 on scorer error.
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'

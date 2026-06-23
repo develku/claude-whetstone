@@ -15,7 +15,7 @@ const scorerCmd = `node ${JSON.stringify(scriptedScorer)}`
 // / snapshots / reviews artifacts all wire together correctly.
 
 test('runs the full pipeline, persists artifacts, and converges to done', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'loopcraft-'))
+  const dir = mkdtempSync(join(tmpdir(), 'whetstone-'))
   const artifact = join(dir, 'artifact.txt')
   writeFileSync(artifact, 'v0')
   let n = 0
@@ -44,7 +44,7 @@ test('runs the full pipeline, persists artifacts, and converges to done', async 
 })
 
 test('halts with error on a no-op pass (the model changed nothing)', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'loopcraft-'))
+  const dir = mkdtempSync(join(tmpdir(), 'whetstone-'))
   const artifact = join(dir, 'artifact.txt')
   writeFileSync(artifact, 'v0')
   const noopAct = async () => ({ changed: false, costUsd: 0 })

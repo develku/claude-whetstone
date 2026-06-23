@@ -1,4 +1,4 @@
-# loopcraft contracts
+# whetstone contracts
 
 The durable design record. Three contracts make the loop work; keep them stable.
 

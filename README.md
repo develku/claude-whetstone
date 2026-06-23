@@ -1,4 +1,4 @@
-# claude-loopcraft
+# claude-whetstone
 
 A deterministic **loop-engineering** driver for Claude Code: raise *one* artifact
 toward a measured score threshold, where **code owns the gate** and the **model
@@ -98,15 +98,15 @@ The gate (`gate.mjs`), the loop (`loop.mjs`), and the scorers are backend-agnost
 they don't care *how* the edit happens. The shipped, guaranteed backend is the
 headless `claude -p` act step (`act-claude.mjs`): it runs from any plain terminal or
 cron with just the `claude` CLI. That portability — detached, unattended, own-quota —
-is loopcraft's reason to exist, so it takes **no dependency on the Claude Code Workflow
+is whetstone's reason to exist, so it takes **no dependency on the Claude Code Workflow
 tool**, which is entitlement-gated (e.g. Max 20×) and tied to a live session (it can't
 run detached/cron).
 
 If you're already *in* an interactive session with the Workflow tool, you don't need
-loopcraft for that — a short Workflow script with a `while (score < target)` gate does
+whetstone for that — a short Workflow script with a `while (score < target)` gate does
 the same code-owned loop in-session, and cheaper (warm subagents skip the per-spawn
 context-reload tax the CLI pays on each act). Pick by quadrant: **Workflow for
-attended/interactive, loopcraft for detached/unattended/cron.** The `act` step is just
+attended/interactive, whetstone for detached/unattended/cron.** The `act` step is just
 an injectable function returning `{ changed, costUsd }`, so a Workflow-backed `act`
 would be a drop-in if anyone ever wants it — a future option, not a dependency.
 
@@ -130,13 +130,13 @@ src/driver.mjs      CLI + real wiring                 test/driver.test.mjs
 scorers/test-pass-rate.mjs   reference scorer          test/scorer.test.mjs
 ```
 
-`npm test` runs the suite (25 tests, no spend — `act` and the scorer are stubbed
+`npm test` runs the suite (62 tests, no spend — `act` and the scorer are stubbed
 or deterministic). See `SPEC.md` for the file/scorer/gate contracts.
 
 ## Prior art & inspiration
 
 The "external evaluator owns the gate" thesis is from the **Loop Engineering** talk
 (코드팩토리). The code-owned hard-cap-with-re-injection pattern is the **Ralph
-Wiggum** technique, shipped as the official **ralph-loop** plugin — loopcraft reuses
+Wiggum** technique, shipped as the official **ralph-loop** plugin — whetstone reuses
 its code-owned cap but replaces its model-emitted "promise" completion gate with a
 real score threshold.
