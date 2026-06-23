@@ -51,7 +51,10 @@ node src/driver.mjs "make the suite pass" \
 ```
 
 Run state lands in `.loop/<run>/` (gitignored): `state.json`, `snapshots/iter_NNN.*`,
-`reviews/review_NNN.json`.
+`reviews/review_NNN.json`. Each pass writes a full verbatim copy of the artifact, so disk
+use scales with `artifact_size × total passes` — and `--resume --cap` raising the limit keeps
+extending the same run's directory. Budget the run dir accordingly for large artifacts or long
+resumed loops; there's no automatic snapshot pruning.
 
 ### Resuming a capped run
 

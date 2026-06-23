@@ -26,3 +26,11 @@ test('multiple passes are space-joined with the best marker and status', () => {
   }
   assert.equal(formatTrajectory(s), '#0=50 #1=75 #2=100 | best 100@2 | done')
 })
+
+test('a baseline-error run (no valid score) renders "best —", not a nonsensical "best 0@-1"', () => {
+  // when the very first scorer call returns null, Math.max(...[null]) is 0 and indexOf(0) is -1.
+  const s = { history: [{ pass: 0, score: null }], best_score: null, best_pass: 0, status: 'error' }
+  const out = formatTrajectory(s)
+  assert.match(out, /best —/)
+  assert.doesNotMatch(out, /best 0@-1/)
+})
