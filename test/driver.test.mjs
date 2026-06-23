@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { runFromConfig } from '../src/driver.mjs'
+import { runFromConfig, parseCli } from '../src/driver.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const scriptedScorer = join(here, 'fixtures', 'scripted-scorer.mjs')
@@ -41,6 +41,19 @@ test('runs the full pipeline, persists artifacts, and converges to done', async 
   }
   const saved = JSON.parse(readFileSync(join(dir, '.loop', 'state.json'), 'utf8'))
   assert.equal(saved.status, 'done')
+})
+
+test('parseCli takes the goal from a true positional only, not a later flag value', () => {
+  // flag-only (no positional goal): the value of --artifact must NOT be mistaken for the goal,
+  // so the usage guard can fire instead of running with a garbage goal in every edit prompt.
+  const cfg = parseCli(['node', 'driver.mjs', '--artifact', 'x.txt', '--scorer', 's', '--target', '90'])
+  assert.equal(cfg.goal, undefined)
+  assert.equal(cfg.artifactPath, 'x.txt')
+})
+
+test('parseCli reads a positional goal and an explicit --goal', () => {
+  assert.equal(parseCli(['node', 'driver.mjs', 'raise the score', '--artifact', 'x']).goal, 'raise the score')
+  assert.equal(parseCli(['node', 'driver.mjs', '--goal', 'explicit', '--artifact', 'x']).goal, 'explicit')
 })
 
 test('halts with error on a no-op pass (the model changed nothing)', async () => {

@@ -58,6 +58,13 @@ test('not plateau when best score is still climbing within the window', () => {
   assert.equal(gateVerdict(s).status, 'running')
 })
 
+test('plateau compares the best now against the best plateau_window passes ago (needs window+1 passes)', () => {
+  // window=2: with 3 scored passes the best now (80) is compared to the best 2 passes ago (50) ->
+  // improved by 30 -> still running. One more flat pass -> best now (80) vs best 2 ago (80) -> plateau.
+  assert.equal(gateVerdict(withHistory([50, 80, 80], { plateau_window: 2 })).status, 'running')
+  assert.equal(gateVerdict(withHistory([50, 80, 80, 80], { plateau_window: 2 })).status, 'plateau')
+})
+
 test('plateau is measured on best-so-far, not current — a single noise dip does not reset it', () => {
   // current oscillates but best stays 80; still a plateau
   const s = withHistory([50, 70, 80, 78, 80, 79])

@@ -180,8 +180,9 @@ src/driver.mjs      CLI + real wiring                 test/driver.test.mjs, test
 scorers/test-pass-rate.mjs   reference scorer          test/scorer.test.mjs
 ```
 
-`npm test` runs the suite (92 tests, no spend — `act` and the scorer are stubbed
-or deterministic). See `SPEC.md` for the file/scorer/gate contracts.
+`npm test` runs the full suite with no spend — the loop/driver tests inject a stub
+`act` and the scorers are deterministic; `act-claude.mjs`'s real `claude -p` spawn is
+live-validated, not unit-tested. See `SPEC.md` for the file/scorer/gate contracts.
 
 ## Prior art & inspiration
 

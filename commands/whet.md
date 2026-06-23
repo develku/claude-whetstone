@@ -28,7 +28,9 @@ Collect these (use AskUserQuestion; treat any other inline `$ARGUMENTS` text as 
    - **contains** *(trivial canary)* —
      `node ${CLAUDE_PLUGIN_ROOT}/scorers/contains.mjs --needle "<text>"`
    - **llm-judge** *(subjective; ⚠ SPENDS MONEY per pass, nondeterministic)* —
-     `node ${CLAUDE_PLUGIN_ROOT}/scorers/llm-judge.mjs --goal "<goal>" [--rubric @file]`
+     `node ${CLAUDE_PLUGIN_ROOT}/scorers/llm-judge.mjs --goal "<goal>" --mcp-config ${CLAUDE_PLUGIN_ROOT}/empty-mcp.json [--rubric @file]`
+     (the judge spawns its OWN `claude -p` every pass — pass `--mcp-config` so it skips the ~44K
+     MCP tax too, and count its per-pass spend in the cost estimate, not just the editor's).
    - or a **custom** shell command — warn the user it is exec'd with their full privileges
      (arbitrary code execution; no sandbox).
 4. **target** — score that means done (default `90`).
@@ -42,7 +44,8 @@ editor under strict MCP mode automatically, suppressing the ~44K-token per-spawn
 tax the project measured.
 
 Then **show the user the fully assembled command and a worst-case cost estimate**
-(cap × per-call cost for the chosen model) and ask for explicit confirmation. Only after they
+(cap × per-call cost for the chosen model; if the scorer is llm-judge, add its own per-pass
+spend — roughly cap × (editor + judge)) and ask for explicit confirmation. Only after they
 confirm, run it with Bash. Pass an **absolute** `--artifact` and an absolute `--loop-dir <dir>`
 to choose where the `.loop/` run state lands, so the run does not depend on the cwd:
 

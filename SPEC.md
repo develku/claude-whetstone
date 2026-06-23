@@ -11,9 +11,9 @@ Pure function. Reads only numbers the scorer produced. Precedence is deliberate:
 2. **done** — `latest >= target_score`. Beats capped: hitting target on the final
    allowed pass is a win.
 3. **capped** — `pass >= hard_cap`.
-4. **plateau** — best-so-far improved by `< min_delta` across the last
-   `plateau_window` passes. Measured on the **best-score** series, not current, so a
-   noise dip cannot reset it.
+4. **plateau** — best-so-far improved by `< min_delta`, comparing the best now against
+   the best `plateau_window` passes ago (so it needs `plateau_window`+1 scored passes).
+   Measured on the **best-score** series, not current, so a noise dip cannot reset it.
 5. **running** — otherwise.
 
 Two further code-owned guards live in the loop, not the gate: a **no-op** pass
@@ -30,7 +30,8 @@ editor stays the default while Opus is paid for only when the loop *proves* it's
 
 Invoked as: `<scorer_cmd> --output <produced-output> --loop-dir <dir> --pass <NNN>`.
 Must print `{ score, critique, findings }` JSON to stdout; **exit 0** on success,
-**exit 2** on scorer error (the driver halts `status=error`, never fabricates a pass).
+**non-zero** on scorer error (the driver halts `status=error` on any non-zero exit and
+never fabricates a pass; `exit 2` is the recommended convention).
 
 - `score`: number in `[0, 100]`.
 - `critique`: non-empty string when `score < target` — "what to change to raise the

@@ -126,14 +126,17 @@ export async function resumeFromConfig(cfg, deps = {}) {
   return runPrepared(cfg, state, deps, { skipBaseline: true })
 }
 
-function parseCli(argv) {
+export function parseCli(argv) {
   const get = (name, def) => {
     const i = argv.indexOf(name)
     return i >= 0 ? argv[i + 1] : def
   }
-  const goal = argv.find((a) => !a.startsWith('--') && argv.indexOf(a) > 1)
+  // The goal is the FIRST positional only (argv[2]). Scanning for any non-`--` token would pick
+  // up a flag's value (e.g. --artifact x.txt) as the goal when the positional is omitted, slipping
+  // past the usage guard and running with a garbage goal in every paid edit prompt.
+  const positional = argv[2] && !argv[2].startsWith('--') ? argv[2] : undefined
   return {
-    goal: goal ?? get('--goal'),
+    goal: positional ?? get('--goal'),
     artifactPath: get('--artifact'),
     scorerCmd: get('--scorer'),
     observeCmd: get('--observe', null),
