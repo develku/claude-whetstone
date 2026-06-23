@@ -67,6 +67,25 @@ test('halts when the scorer returns an invalid score', async () => {
   assert.equal(verdict.status, 'error')
 })
 
+test('a paid no-op pass charges spent_usd and can trip the budget', async () => {
+  // A no-op editor pass still spent money (it ran, returned cost, changed nothing). That
+  // cost must be charged and must be able to trip --budget — not silently vanish.
+  const h = harness({ scores: [50], changes: [false], costs: [0.6] })
+  const { state, verdict } = await runLoop({ state: cfg({ budgetUsd: 0.5, hardCap: 20 }), ...h, log: () => {} })
+  assert.equal(verdict.status, 'capped')
+  assert.match(verdict.reason, /budget/)
+  assert.ok(state.spent_usd >= 0.6, `no-op cost must be charged (spent_usd=${state.spent_usd})`)
+})
+
+test('reaching the target on the pass that tips over budget reports done, not capped', async () => {
+  // Precedence error > done > capped: a pass that meets the target AND pushes spend over
+  // budget is a win, not a budget cap.
+  const h = harness({ scores: [50, 95], costs: [0.6] })
+  const { state, verdict } = await runLoop({ state: cfg({ targetScore: 90, budgetUsd: 0.5, hardCap: 20 }), ...h, log: () => {} })
+  assert.equal(verdict.status, 'done')
+  assert.equal(state.best_score, 95)
+})
+
 test('the final status is written onto the returned state', async () => {
   const h = harness({ scores: [95] })
   const { state } = await runLoop({ state: cfg(), ...h })

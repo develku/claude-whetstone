@@ -16,7 +16,10 @@ const hashFile = (p) => {
   }
 }
 
-function extractCost(stdout) {
+// Parse the per-call cost from `claude -p --output-format json`. Best-effort: unparseable or
+// cost-less output reads as 0 — a pass with no readable cost does not freeze the budget because
+// --cap is the hard backstop (the README requires pairing --budget with --cap). Exported for test.
+export function extractCost(stdout) {
   try {
     const parsed = JSON.parse(stdout)
     // --output-format json may be a single result object or a stream array.

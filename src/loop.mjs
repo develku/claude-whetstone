@@ -7,6 +7,13 @@ import { restoreTarget } from './regression.mjs'
 
 const noopReason = 'pass produced no artifact change (permission block? max-turns starvation?)'
 
+// Budget is enforced in the loop, not the gate (the gate sees only scores). Every paid path —
+// including a no-op that changed nothing — must check spend, so this lives in one helper.
+const overBudgetVerdict = (s) =>
+  s.budget_usd != null && s.spent_usd > s.budget_usd
+    ? { status: 'capped', reason: `budget $${s.budget_usd} exceeded (spent $${s.spent_usd.toFixed(2)})` }
+    : null
+
 // deps:
 //   evaluate(state) -> { score, critique }       observe the real output + score it
 //   act(state)      -> { changed, costUsd }      cheap editor: model edits the artifact using the last critique
@@ -30,6 +37,15 @@ export async function runLoop({ state, evaluate, act, persist, log = () => {}, a
   while (v.status === 'running') {
     const a = await currentAct(s)
     if (!a.changed) {
+      // A no-op still spent (the editor ran, returned cost, changed nothing). Charge it so a
+      // sequence of paid no-ops can still trip --budget — otherwise the spend silently vanishes.
+      s = { ...s, spent_usd: s.spent_usd + (a.costUsd ?? 0) }
+      const overBudget = overBudgetVerdict(s)
+      if (overBudget) {
+        v = overBudget
+        s = { ...s, status: 'capped', status_reason: overBudget.reason }
+        break
+      }
       consecutiveNoops++
       // Escalate only after N consecutive no-ops, not on the first.
       if (consecutiveNoops >= noopThreshold && actEscalated && !escalated) {
@@ -55,13 +71,18 @@ export async function runLoop({ state, evaluate, act, persist, log = () => {}, a
     const target = restoreTarget(s)
     if (target != null && restore != null) await restore(target)
 
-    if (s.budget_usd != null && s.spent_usd > s.budget_usd) {
-      v = { status: 'capped', reason: `budget $${s.budget_usd} exceeded (spent $${s.spent_usd.toFixed(2)})` }
-      s = { ...s, status: 'capped', status_reason: v.reason }
-      break
-    }
-
     v = gateVerdict(s)
+
+    // Budget cap AFTER the gate, so precedence holds (error > done > capped): a pass that meets
+    // the target (done) or returns an invalid score (error) is NOT overridden by the budget cap.
+    if (v.status !== 'done' && v.status !== 'error') {
+      const overBudget = overBudgetVerdict(s)
+      if (overBudget) {
+        v = overBudget
+        s = { ...s, status: 'capped', status_reason: overBudget.reason }
+        break
+      }
+    }
 
     if (v.status === 'plateau') {
       if (s.pass < graceUntilPass) {
