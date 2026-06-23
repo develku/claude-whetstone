@@ -61,6 +61,10 @@ const defaultLog = (e) =>
 // Wire the loop's real side effects around an already-prepared state. Shared by a fresh run
 // and by --resume; the only difference is whether the loop scores a baseline first.
 async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
+  // Validate here — the one choke point both a fresh run and --resume pass through — so an
+  // invalid override (e.g. a non-numeric --cap that became NaN) can't slip past via resume.
+  const errors = validateConfig(state)
+  if (errors.length) throw new Error(errors.join('; '))
   const loopDir = cfg.loopDir
   saveState(loopDir, state)
 
@@ -92,9 +96,7 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
 export async function runFromConfig(cfg, deps = {}) {
   ensureLoopDir(cfg.loopDir)
   const state = initState(cfg)
-  const errors = validateConfig(state)
-  if (errors.length) throw new Error(errors.join('; '))
-  return runPrepared(cfg, state, deps)
+  return runPrepared(cfg, state, deps) // runPrepared validates the config before any side effect
 }
 
 // --resume: continue a previously-stopped run from its state.json. Load the durable state,

@@ -71,3 +71,25 @@ test('refuses to resume when the cap is not raised above the current run', async
     /cannot resume.*cap/is,
   )
 })
+
+// Resume must run the SAME config validation a fresh run does — otherwise a non-numeric
+// override (--cap abc -> NaN) slips past the gate (pass >= NaN === false) and the loop runs
+// with no pass ceiling. The refusal must happen BEFORE any paid act() pass.
+test('refuses to resume on a non-numeric override (NaN cap) before spending', async () => {
+  const { artifact, loopDir } = cappedRun()
+  await runFromConfig(
+    { goal: 'demo', artifactPath: artifact, scorerCmd, targetScore: 90, hardCap: 1, loopDir, noEscalate: true },
+    { act: bumpAct(artifact), log: () => {} },
+  )
+
+  let acted = false
+  await assert.rejects(
+    () =>
+      resumeFromConfig(
+        { loopDir, overrides: { hard_cap: NaN }, noEscalate: true },
+        { act: async () => { acted = true; return { changed: true, costUsd: 0.01 } }, log: () => {} },
+      ),
+    /hard_cap/,
+  )
+  assert.equal(acted, false) // no paid pass before the refusal
+})
