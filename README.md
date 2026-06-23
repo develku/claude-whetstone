@@ -142,19 +142,25 @@ so you don't have to. Most tasks don't need a feedback controller.
 
 whetstone ships as a single-plugin Claude Code marketplace (`.claude-plugin/`). To use it
 privately — no GitHub repo, nothing published — register *this directory* as a local
-marketplace and install from it (run these in Claude Code):
+marketplace and install from it. Run these in a terminal (quote the path if it has spaces):
 
-```
-/plugin marketplace add /absolute/path/to/claude-whetstone
-/plugin install whetstone@whetstone
+```bash
+claude plugin marketplace add "/absolute/path/to/claude-whetstone"
+claude plugin install whetstone@whetstone
 ```
 
-A directory-source marketplace runs **in place** (it is not cloned), so repo edits are live.
-Installing exposes the **`/whet`** command — a guided launcher that collects the goal,
-artifact, scorer, target, and a required cost bound, shows the assembled command plus a
-worst-case cost estimate, and runs the driver only after you confirm; `/whet resume` continues
-a stopped run. Going public later is just pushing this repo to `develku/claude-whetstone` and
-registering the marketplace by `owner/repo` instead of by path.
+> For a path with spaces, use the terminal form above. The interactive
+> `/plugin marketplace add "<path>"` slash form keeps the literal quotes in its argument and
+> then mistakes the path for a GitHub repo (the clone fails).
+
+Install **snapshots** the plugin into `~/.claude/plugins/cache/` — it is a copy, not the live
+repo, so after editing whetstone's own code run `claude plugin update whetstone@whetstone` (and
+restart the session) to pick the changes up. The command surfaces as **`/whetstone:whet`** — a
+guided launcher that collects the goal, artifact, scorer, target, and a required cost bound,
+shows the assembled command plus a worst-case cost estimate, and runs the driver only after you
+confirm; `/whetstone:whet resume` continues a stopped run. Going public later is just pushing
+this repo to `develku/claude-whetstone` and registering the marketplace by `owner/repo` instead
+of by path.
 
 ## Layout
 
