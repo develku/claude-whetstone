@@ -1,0 +1,20 @@
+{
+  "name": "whetstone",
+  "version": "0.0.1",
+  "description": "Deterministic loop-engineering driver: code owns the gate, the model owns diagnosis + edits — raises one artifact toward a measured score threshold.",
+  "author": {
+    "name": "develku",
+    "url": "https://github.com/develku"
+  },
+  "homepage": "https://github.com/develku/claude-whetstone",
+  "repository": "https://github.com/develku/claude-whetstone",
+  "license": "MIT",
+  "keywords": [
+    "loop-engineering",
+    "automation",
+    "claude-code",
+    "cli",
+    "evaluation",
+    "self-improvement"
+  ]
+}

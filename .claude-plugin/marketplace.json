@@ -1,0 +1,15 @@
+{
+  "name": "whetstone",
+  "owner": {
+    "name": "develku",
+    "url": "https://github.com/develku"
+  },
+  "description": "Single-plugin marketplace for whetstone — a deterministic loop-engineering driver for Claude Code.",
+  "plugins": [
+    {
+      "name": "whetstone",
+      "source": "./",
+      "description": "Deterministic loop-engineering driver — raises one artifact toward a measured score threshold (code-owned gate, model-owned edits)."
+    }
+  ]
+}

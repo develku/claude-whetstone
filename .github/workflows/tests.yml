@@ -1,0 +1,28 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: node --test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Run both legs even if one fails, so a macOS-only or Linux-only regression
+      # is visible in the same run instead of being masked by the other.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # No dependencies (package.json has none) — the suite is pure node:test with
+      # stubbed act + deterministic scorers, so it spends nothing and needs no install.
+      - name: Run test suite
+        run: node --test test/*.test.mjs

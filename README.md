@@ -93,16 +93,20 @@ Directly measured on this machine (2026-06-22), **not** hand-waved:
   **$0.22 on Opus / ~$0.05 on Haiku**, burning **~44K tokens** of context tax (system
   prompt + slash commands + tool defs) *even with no CLAUDE.md and no MCP loaded*. So
   **use `--model haiku` (or sonnet) for the act step** — Opus at `--cap 10` is ~$2.2+
-  per loop in overhead alone. The code-owned `--budget` ceiling halts the run.
+  per loop in overhead alone. The code-owned `--budget` ceiling halts the run (checked
+  after each pass, so it can overshoot by one pass's cost — pair it with `--cap`).
 - `--mcp-config empty-mcp.json --strict-mcp-config` **works** (`mcp_servers` → `[]`) —
   a real cost lever. An empty config is bundled at `empty-mcp.json`.
 - `--bare` (which would zero the tax) **does not work for OAuth/subscription (Max/Pro)
   auth** — it returns "Not logged in"; it needs `ANTHROPIC_API_KEY`. Use `--mcp-config`
   + a clean cwd instead.
-- The act step runs the nested `claude -p` **in the artifact's own directory**, so the
-  edit inherits *that* project's config. Keep the artifact in a repo *without* a
-  restrictive `settings.json`/CLAUDE.md deny layer — otherwise the nested edit is blocked
-  and the no-op guard halts a pass that "succeeded" but changed nothing.
+- The act step runs the nested `claude -p` **in the artifact's own directory** with
+  `acceptEdits`, so the unattended edit inherits *that* project's config and permissions.
+  The artifact's project must *permit* the edit — a restrictive `settings.json`/CLAUDE.md deny
+  layer blocks it and the no-op guard halts a pass that changed nothing. But do **not** point
+  the loop at a repo with *broad* write/exec grants either: it will auto-accept edits there
+  every pass with no human in the loop. Scope the artifact's project so the edit is allowed and
+  the blast radius is just that artifact.
 
 Validated end-to-end 2026-06-22: `TODO` → `DONE` converged at pass 1 on Haiku for
 **$0.05** (gate owned the stop, the model owned the edit, the scorer owned the number).
@@ -134,9 +138,29 @@ tokens), don't point it at a whole-repo refactor (it raises *one* artifact), and
 don't hand-craft a rigid static harness — the scorer is the pluggable seam exactly
 so you don't have to. Most tasks don't need a feedback controller.
 
+## Install as a Claude Code plugin (private)
+
+whetstone ships as a single-plugin Claude Code marketplace (`.claude-plugin/`). To use it
+privately — no GitHub repo, nothing published — register *this directory* as a local
+marketplace and install from it (run these in Claude Code):
+
+```
+/plugin marketplace add /absolute/path/to/claude-whetstone
+/plugin install whetstone@whetstone
+```
+
+A directory-source marketplace runs **in place** (it is not cloned), so repo edits are live.
+Installing exposes the **`/whet`** command — a guided launcher that collects the goal,
+artifact, scorer, target, and a required cost bound, shows the assembled command plus a
+worst-case cost estimate, and runs the driver only after you confirm; `/whet resume` continues
+a stopped run. Going public later is just pushing this repo to `develku/claude-whetstone` and
+registering the marketplace by `owner/repo` instead of by path.
+
 ## Layout
 
 ```
+.claude-plugin/     plugin.json + marketplace.json    (Claude Code plugin manifest)
+commands/whet.md    the /whet guided launcher         (slash-only, confirm-before-run)
 src/gate.mjs        code-owned gate (pure)            test/gate.test.mjs
 src/state.mjs       state.json + snapshots/reviews    (covered via loop/driver)
 src/loop.mjs        control flow (deps injected)      test/loop.test.mjs
@@ -146,7 +170,7 @@ src/driver.mjs      CLI + real wiring                 test/driver.test.mjs, test
 scorers/test-pass-rate.mjs   reference scorer          test/scorer.test.mjs
 ```
 
-`npm test` runs the suite (76 tests, no spend — `act` and the scorer are stubbed
+`npm test` runs the suite (78 tests, no spend — `act` and the scorer are stubbed
 or deterministic). See `SPEC.md` for the file/scorer/gate contracts.
 
 ## Prior art & inspiration
