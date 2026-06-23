@@ -18,6 +18,7 @@ import {
 import { runLoop } from './loop.mjs'
 import { makeClaudeAct } from './act-claude.mjs'
 import { validateConfig } from './validate.mjs'
+import { formatReport } from './summary.mjs'
 
 const shq = (s) => `'${String(s).replace(/'/g, "'\\''")}'`
 
@@ -110,9 +111,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(2)
   }
   const { state, verdict } = await runFromConfig(cfg)
-  process.stdout.write(`\n${verdict.status.toUpperCase()}: ${verdict.reason}\n`)
-  process.stdout.write(
-    `best score ${state.best_score} at pass ${state.best_pass} · ${state.history.length} passes · spent $${state.spent_usd.toFixed(4)}${state.escalated ? ` · escalated at pass ${state.escalated_at_pass}` : ''}\n`,
-  )
+  process.stdout.write(`\n${verdict.reason}\n${formatReport(state)}\n`)
   process.exit(verdict.status === 'done' ? 0 : 1)
 }
