@@ -17,6 +17,7 @@ import {
 } from './state.mjs'
 import { runLoop } from './loop.mjs'
 import { makeClaudeAct } from './act-claude.mjs'
+import { validateConfig } from './validate.mjs'
 
 const shq = (s) => `'${String(s).replace(/'/g, "'\\''")}'`
 
@@ -58,6 +59,8 @@ export async function runFromConfig(cfg, deps = {}) {
   const loopDir = cfg.loopDir
   ensureLoopDir(loopDir)
   const state = initState(cfg)
+  const errors = validateConfig(state)
+  if (errors.length) throw new Error(errors.join('; '))
   saveState(loopDir, state)
 
   const { evaluate, persist } = buildContext(loopDir)
