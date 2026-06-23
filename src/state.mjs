@@ -2,7 +2,7 @@
 // recordPass is a PURE immutable update (operator coding-style: new objects, no
 // mutation); the file I/O helpers are the only side-effecting functions here.
 import { readFileSync, writeFileSync, renameSync, mkdirSync, copyFileSync, existsSync } from 'node:fs'
-import { join, extname } from 'node:path'
+import { join, extname, resolve, sep } from 'node:path'
 import { redactSecrets } from './redact.mjs'
 
 export const isoNow = () => new Date().toISOString()
@@ -60,17 +60,35 @@ export function setStatus(state, status, reason) {
 
 export function ensureLoopDir(loopDir) {
   for (const sub of ['', 'snapshots', 'reviews']) mkdirSync(join(loopDir, sub), { recursive: true })
+  // Self-ignoring: the run dir holds state.json/reviews that may carry secrets, and whet.md tells
+  // operators to pass an absolute/custom --loop-dir the repo .gitignore won't match. Drop a
+  // local .gitignore so the run dir is never accidentally committed wherever it lands.
+  writeFileSync(join(loopDir, '.gitignore'), '*\n')
 }
 
 export const statePath = (loopDir) => join(loopDir, 'state.json')
 export const loadState = (loopDir) => JSON.parse(readFileSync(statePath(loopDir), 'utf8'))
 // Crash-safe write: state.json is --resume's only durable input, so write to a temp file and
 // rename over it (atomic on the same filesystem). A kill mid-write leaves the prior state.json
-// intact instead of a torn/truncated file that resume would reject as corrupt.
+// intact instead of a torn/truncated file that resume would reject as corrupt. Redacted too, so
+// the redaction boundary is the whole run dir (reviews/ AND state.json), not one file within it.
 export const saveState = (loopDir, state) => {
   const tmp = statePath(loopDir) + '.tmp'
-  writeFileSync(tmp, JSON.stringify(state, null, 2))
+  writeFileSync(tmp, redactSecrets(JSON.stringify(state, null, 2)))
   renameSync(tmp, statePath(loopDir))
+}
+
+// A snapshot ref restored over the live artifact is internal on a fresh run, but on --resume it
+// comes from state.json (which may be tampered/shared). Refuse any ref that resolves outside the
+// run dir (absolute or `..` traversal) so a poisoned ref can't read an arbitrary file into the
+// artifact. resolve() treats an absolute `snap` as absolute, so both escape shapes are caught.
+export function safeSnapshotPath(loopDir, snap) {
+  const base = resolve(loopDir)
+  const full = resolve(base, snap)
+  if (full !== base && !full.startsWith(base + sep)) {
+    throw new Error(`snapshot ref escapes the run dir: ${snap}`)
+  }
+  return full
 }
 
 export function snapshotArtifact(loopDir, artifactPath, pass) {

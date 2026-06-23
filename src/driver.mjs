@@ -4,7 +4,6 @@
 // injectable `act` so the whole pipeline is testable without spending money.
 import { spawnSync } from 'node:child_process'
 import { copyFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   initState,
@@ -12,6 +11,7 @@ import {
   ensureLoopDir,
   loadState,
   saveState,
+  safeSnapshotPath,
   snapshotArtifact,
   writeReview,
   zeroPad,
@@ -82,8 +82,9 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
     deps.actEscalated ??
     (escalateModel ? makeClaudeAct({ artifactPath: state.artifact_path, model: escalateModel, mcpConfig: cfg.mcpConfig }) : null)
 
-  // keep-best: restore a prior snapshot back over the live artifact when a pass regressed
-  const restore = deps.restore ?? ((snap) => copyFileSync(join(loopDir, snap), state.artifact_path))
+  // keep-best: restore a prior snapshot back over the live artifact when a pass regressed.
+  // safeSnapshotPath refuses a ref that escapes the run dir (a poisoned snapshot ref on resume).
+  const restore = deps.restore ?? ((snap) => copyFileSync(safeSnapshotPath(loopDir, snap), state.artifact_path))
 
   const { state: final, verdict } = await runLoop({
     state,

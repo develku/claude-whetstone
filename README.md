@@ -107,6 +107,10 @@ Directly measured on this machine (2026-06-22), **not** hand-waved:
   the loop at a repo with *broad* write/exec grants either: it will auto-accept edits there
   every pass with no human in the loop. Scope the artifact's project so the edit is allowed and
   the blast radius is just that artifact.
+- The scorer's critique is fed back into the editor prompt each pass. It is **untrusted data**
+  (a model judge or custom scorer can echo artifact/observed content), so the prompt fences it
+  and tells the editor to ignore instructions inside it — a *soft* mitigation. The real control
+  is the permission scope above: prompt rules are advisory, the project's allow/deny layer is not.
 
 Validated end-to-end 2026-06-22: `TODO` → `DONE` converged at pass 1 on Haiku for
 **$0.05** (gate owned the stop, the model owned the edit, the scorer owned the number).
