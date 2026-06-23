@@ -3,6 +3,7 @@
 // mutation); the file I/O helpers are the only side-effecting functions here.
 import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync } from 'node:fs'
 import { join, extname } from 'node:path'
+import { redactSecrets } from './redact.mjs'
 
 export const isoNow = () => new Date().toISOString()
 export const zeroPad = (n, width = 3) => String(n).padStart(width, '0')
@@ -73,7 +74,7 @@ export function snapshotArtifact(loopDir, artifactPath, pass) {
 
 export function writeReview(loopDir, pass, review) {
   const rel = join('reviews', `review_${zeroPad(pass)}.json`)
-  writeFileSync(join(loopDir, rel), JSON.stringify(review, null, 2))
+  writeFileSync(join(loopDir, rel), redactSecrets(JSON.stringify(review, null, 2)))
   return rel
 }
 
