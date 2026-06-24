@@ -25,15 +25,22 @@ lives in `gate.mjs`, not in a prompt.
 
 ## Loop
 
-```
-baseline: observe → score the initial artifact (iter_000)
-repeat:
-  ACT      model makes the single highest-impact edit using the last critique
-  (no-op guard: artifact unchanged → halt; likely a permission block or max-turns starvation)
-  OBSERVE  produce the REAL output (run tests / render / call endpoint)
-  SCORE    external scorer → { score 0..100, critique }   (review_NNN.json)
-  PERSIST  snapshot the artifact (iter_NNN) + update state.json
-  GATE     code decides: done | capped | plateau | error | running
+```mermaid
+flowchart TD
+    baseline([baseline\nscore iter_000]) --> ACT
+
+    ACT[ACT\nmodel makes one edit\nusing last critique] --> OBSERVE
+    OBSERVE[OBSERVE\nproduce real output\nrun tests / render / call endpoint] --> SCORE
+    SCORE[SCORE\nexternal scorer\n0–100 + critique] --> PERSIST
+    PERSIST[PERSIST\nsnapshot iter_NNN\nupdate state.json] --> GATE
+
+    GATE{GATE\ngateVerdict}
+
+    GATE -->|running| ACT
+    GATE -->|done\nscore ≥ target| done([done])
+    GATE -->|capped\npass ≥ hard_cap or over budget| capped([capped])
+    GATE -->|plateau\nbest score stalled| plateau([plateau])
+    GATE -->|error\nmalformed score| error([error])
 ```
 
 Stop conditions, all decided in code (`gateVerdict`): `score >= target` → **done**;
