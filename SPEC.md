@@ -19,6 +19,15 @@ Pure function. Reads only numbers the scorer produced. Precedence is deliberate:
 Two further code-owned guards live in the loop, not the gate: a **no-op** pass
 (artifact byte-identical after ACT) → `error`; **spend over `budget_usd`** → `capped`.
 
+**Done-branch confirmation (optional, `confirm_scorer_cmd`).** When the gate would declare
+`done`, an INDEPENDENT confirm scorer re-scores the same output — but ONLY on the done edge, so
+normal passes stay cheap and the skepticism is paid only at the finish line. If the confirm score
+is below target, the `done` is VETOED (the editor likely gamed the primary signal): the loop keeps
+running, steered by the confirm critique, still bounded by the cap/budget. This is the second layer
+of verifier robustness above `composite` (multi-signal) — it catches a reward-hacked finish that a
+single primary scorer would wave through. Same scorer contract; deterministic iff the confirm
+scorer is. Wire it with `--confirm-scorer "<cmd>"` (e.g. a held-out test set or an independent judge).
+
 **Escalation.** On the first `plateau`, if a stronger editor (`actEscalated`, default
 `--model-escalate opus`) is available, the loop switches to it for one fresh window
 (`escalationGrace`, default `plateau_window` passes) before plateau is re-judged. It
@@ -55,7 +64,11 @@ iff every sub-scorer is.
 ## 3. The act step (`act(state) -> { changed, costUsd }`)
 
 The model edits **only** `artifact_path`, one coherent change, steered by
-`state.last_critique`. `changed` is computed by the driver via a sha256 of the
+`state.last_critique` plus a code-owned **iteration ledger** (`buildLedger`: the recent score
+trajectory, the best-so-far bar, and whether the last edit improved/regressed) so the editor does
+not repeat a failed edit — the bounded middle between amnesia (last critique only) and the harmful
+full-history context that degrades long refinement loops. The ledger is numbers-only, so it stays
+trusted and outside the critique fence. `changed` is computed by the driver via a sha256 of the
 artifact before/after (the no-op guard). `costUsd` is parsed from the headless
 `claude -p --output-format json` result (`total_cost_usd`). Isolated in
 `act-claude.mjs` because it is the costly, environment-sensitive part — everything
@@ -64,7 +77,7 @@ else is testable with a stub.
 ## state.json (code is the only writer)
 
 ```
-goal, artifact_path, observe_cmd, scorer_cmd,
+goal, artifact_path, observe_cmd, scorer_cmd, confirm_scorer_cmd,
 target_score(90), min_delta(1), plateau_window(3), hard_cap(10), budget_usd(null), model,
 pass, last_critique, current_score, best_score, best_pass, spent_usd,
 escalated, escalated_at_pass,   # set when a plateau triggered the stronger editor
@@ -88,5 +101,4 @@ regression recovery, best-pass restore, and convergence study.
 - Cost control: wire `--mcp-config <empty>` by default? detect OAuth vs API-key auth?
 - Regression policy: restore best snapshot when a pass regresses (keep-best) vs let
   the next critique recover (keep-latest)? Currently neither is enforced.
-- Re-score confirmation on the `done` branch for nondeterministic scorers.
 - Multi-file artifacts (a `git stash`/commit snapshot unit) vs strict single-file.

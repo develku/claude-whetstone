@@ -61,7 +61,14 @@ export function buildContext(loopDir) {
     saveState(loopDir, next)
     return next
   }
-  return { evaluate, persist }
+  // done-branch confirmation: re-score the same output with an INDEPENDENT scorer, run by the loop
+  // only when the gate would declare done. Mirrors evaluate's output resolution (observe or artifact).
+  const confirm = async (s) => {
+    const output = s.observe_cmd ? runObserve(s.observe_cmd, loopDir) : s.artifact_path
+    const review = runScorer(s.confirm_scorer_cmd, { output, loopDir, pass: s.history.length })
+    return { score: review.score, critique: review.critique }
+  }
+  return { evaluate, persist, confirm }
 }
 
 const defaultLog = (e) =>
@@ -77,7 +84,7 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
   const loopDir = cfg.loopDir
   saveState(loopDir, state)
 
-  const { evaluate, persist } = buildContext(loopDir)
+  const { evaluate, persist, confirm } = buildContext(loopDir)
   // Cheap editor every pass; stronger editor only after a plateau (escalation).
   const act = deps.act ?? makeClaudeAct({ artifactPath: state.artifact_path, model: state.model, mcpConfig: cfg.mcpConfig })
   const escalateModel = cfg.noEscalate ? null : cfg.escalateModel ?? 'opus'
@@ -96,6 +103,7 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
     actEscalated,
     persist,
     restore,
+    confirm: deps.confirm ?? (state.confirm_scorer_cmd ? confirm : null),
     skipBaseline,
     log: deps.log ?? defaultLog,
   })
@@ -142,6 +150,7 @@ export function parseCli(argv) {
     goal: positional ?? get('--goal'),
     artifactPath: get('--artifact'),
     scorerCmd: get('--scorer'),
+    confirmScorerCmd: get('--confirm-scorer', null),
     observeCmd: get('--observe', null),
     targetScore: get('--target') ? Number(get('--target')) : undefined,
     hardCap: get('--cap') ? Number(get('--cap')) : undefined,
@@ -206,7 +215,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
   const cfg = parseCli(argv)
   if (!cfg.goal || !cfg.artifactPath || !cfg.scorerCmd) {
-    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--model sonnet] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--target T] [--model M]\n')
+    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--model sonnet] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--target T] [--model M]\n')
     process.exit(2)
   }
   const { state, verdict } = await runFromConfig(cfg)

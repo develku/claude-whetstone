@@ -110,6 +110,40 @@ test('parseCli reads a positional goal and an explicit --goal', () => {
   assert.equal(parseCli(['node', 'driver.mjs', '--goal', 'explicit', '--artifact', 'x']).goal, 'explicit')
 })
 
+test('parseCli reads --confirm-scorer (null when absent)', () => {
+  assert.equal(parseCli(['node', 'driver.mjs', 'g', '--artifact', 'x', '--scorer', 's']).confirmScorerCmd, null)
+  assert.equal(
+    parseCli(['node', 'driver.mjs', 'g', '--artifact', 'x', '--scorer', 's', '--confirm-scorer', 'node c.mjs']).confirmScorerCmd,
+    'node c.mjs',
+  )
+})
+
+test('a confirm scorer vetoes a gamed done: the loop continues instead of finishing', async () => {
+  // primary (contains DONE) hits target 100, but the independent confirm scorer (contains a needle
+  // the artifact lacks) returns 0 every pass -> the done is vetoed and the run caps, never "done".
+  const dir = mkdtempSync(join(tmpdir(), 'whetstone-'))
+  const artifact = join(dir, 'art.txt')
+  writeFileSync(artifact, 'DONE v0')
+  let n = 0
+  const confirmScorer = `node ${JSON.stringify(join(here, '..', 'scorers', 'contains.mjs'))} --needle NEVERPRESENT`
+  const { verdict, state } = await runFromConfig(
+    {
+      goal: 'g',
+      artifactPath: artifact,
+      scorerCmd: containsScorer,
+      confirmScorerCmd: confirmScorer,
+      targetScore: 100,
+      hardCap: 2,
+      loopDir: join(dir, '.loop'),
+      noEscalate: true,
+    },
+    { act: async () => { writeFileSync(artifact, `DONE v${++n}`); return { changed: true, costUsd: 0 } }, log: () => {} },
+  )
+  assert.equal(verdict.status, 'capped') // primary reached 100 but confirmation vetoed every time
+  assert.match(verdict.reason, /confirm/i)
+  assert.match(state.last_critique, /NEVERPRESENT/) // the confirm critique steered the (futile) edits
+})
+
 test('halts with error on a no-op pass (the model changed nothing)', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'whetstone-'))
   const artifact = join(dir, 'artifact.txt')

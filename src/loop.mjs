@@ -21,13 +21,30 @@ const overBudgetVerdict = (s) =>
 //   persist(state, { score, critique, costUsd }) -> newState   snapshot + review + recordPass + save
 //   escalationGrace                              passes the escalated editor gets before plateau is re-judged (default = plateau_window)
 //   log(event)                                   progress sink
-export async function runLoop({ state, evaluate, act, persist, log = () => {}, actEscalated = null, escalationGrace = null, restore = null, noopThreshold = 2, skipBaseline = false }) {
+export async function runLoop({ state, evaluate, act, persist, log = () => {}, actEscalated = null, escalationGrace = null, restore = null, confirm = null, noopThreshold = 2, skipBaseline = false }) {
   let currentAct = act
   let escalated = false
   let graceUntilPass = -1 // while pass < this, a plateau is ignored (give the escalated editor a fresh window)
   let consecutiveNoops = 0
   let s
   let v
+
+  // done-branch confirmation: an independent confirm scorer re-scores ONLY when the gate would
+  // declare done — cheap normal passes, expensive skepticism at the finish line. A confirm score
+  // below target means the editor gamed the primary signal, so reject the done, keep going, and
+  // steer the next edit with the confirm critique. The cap is RE-CHECKED here because the gate
+  // hides it behind `done` while the primary stays >= target (else a vetoed done loops forever).
+  async function confirmDone(st, vd) {
+    if (vd.status !== 'done' || !confirm) return { s: st, v: vd }
+    const c = await confirm(st)
+    if (c.score >= st.target_score) return { s: st, v: vd } // confirmed — done stands
+    const ns = { ...st, last_critique: c.critique }
+    const v2 =
+      ns.pass >= ns.hard_cap
+        ? { status: 'capped', reason: `cap ${ns.hard_cap} hit; primary met target but confirmation vetoed (score ${c.score} < ${ns.target_score})` }
+        : { status: 'running', reason: `done vetoed by confirmation (score ${c.score} < target ${ns.target_score})` }
+    return { s: ns, v: v2 }
+  }
 
   // A side effect (scorer crash, editor spawn failure/timeout, maxBuffer overflow, disk error)
   // throws out of evaluate/act/persist. Convert it to a terminal status=error verdict so the run
@@ -38,7 +55,7 @@ export async function runLoop({ state, evaluate, act, persist, log = () => {}, a
     // already carries a scored history and the live artifact is the best snapshot, so skip the
     // baseline and continue straight into the edit loop from the loaded state.
     s = skipBaseline ? state : persist(state, await evaluate(state))
-    v = gateVerdict(s)
+    ;({ s, v } = await confirmDone(s, gateVerdict(s)))
     log({ pass: s.pass, score: s.current_score, best: s.best_score, ...v })
 
     while (v.status === 'running') {
@@ -78,7 +95,7 @@ export async function runLoop({ state, evaluate, act, persist, log = () => {}, a
       const target = restoreTarget(s)
       if (target != null && restore != null) await restore(target)
 
-      v = gateVerdict(s)
+      ;({ s, v } = await confirmDone(s, gateVerdict(s)))
 
       // Budget cap AFTER the gate, so precedence holds (error > done > capped): a pass that meets
       // the target (done) or returns an invalid score (error) is NOT overridden by the budget cap.

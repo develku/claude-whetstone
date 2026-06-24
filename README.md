@@ -41,6 +41,12 @@ Stop conditions, all decided in code (`gateVerdict`): `score >= target` → **do
 `plateau_window` passes → **plateau**; malformed score or spend over budget →
 **error/capped**. Precedence: `error > done > capped > plateau > running`.
 
+**Done-branch confirmation (optional).** `--confirm-scorer "<cmd>"` adds an independent scorer that
+re-checks the artifact **only when the gate says done** — cheap normal passes, skepticism paid only
+at the finish line. If the confirm score is below target, the `done` is vetoed (the editor gamed the
+primary signal) and the loop keeps going, steered by the confirm critique. Point it at a held-out
+test set or an independent judge. This is whetstone's anti-reward-hacking layer above `composite`.
+
 ## Quickstart
 
 ```bash

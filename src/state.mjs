@@ -15,6 +15,7 @@ export function initState(cfg) {
     artifact_path: cfg.artifactPath,
     observe_cmd: cfg.observeCmd ?? null,
     scorer_cmd: cfg.scorerCmd ?? null,
+    confirm_scorer_cmd: cfg.confirmScorerCmd ?? null,
     target_score: cfg.targetScore ?? 90,
     min_delta: cfg.minDelta ?? 1,
     plateau_window: cfg.plateauWindow ?? 3,

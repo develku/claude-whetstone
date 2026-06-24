@@ -135,6 +135,34 @@ test('the final status is written onto the returned state', async () => {
   assert.equal(state.status, 'done')
 })
 
+test('a confirmation below target VETOES done: the loop keeps going (cap-bound) and the next edit is steered by the confirmation critique', async () => {
+  // done-branch confirmation: when the primary scorer says done, an independent confirm
+  // scorer re-scores. A confirm score below target means the editor gamed the primary — the
+  // done is rejected, the loop continues, and the confirm critique steers the next edit.
+  // Cap must still bind (the gate hides cap behind done while primary stays >= target).
+  const h = harness({ scores: [95, 95, 95] }) // primary always meets target 90
+  const { state, verdict } = await runLoop({
+    state: cfg({ targetScore: 90, hardCap: 2 }),
+    ...h,
+    confirm: async () => ({ score: 50, critique: 'confirm gap' }),
+    log: () => {},
+  })
+  assert.equal(verdict.status, 'capped') // NOT done — confirmation kept vetoing
+  assert.match(verdict.reason, /confirm/i)
+  assert.equal(state.last_critique, 'confirm gap') // the gap steers the next edit
+})
+
+test('a confirmation that clears target lets done stand', async () => {
+  const h = harness({ scores: [95] })
+  const { verdict } = await runLoop({
+    state: cfg({ targetScore: 90 }),
+    ...h,
+    confirm: async () => ({ score: 95, critique: '' }),
+    log: () => {},
+  })
+  assert.equal(verdict.status, 'done')
+})
+
 test('skipBaseline resumes from the given state without re-scoring a baseline', async () => {
   // A state that already carries history (as if loaded from a capped run): pass 1, two
   // scored passes. With skipBaseline the loop must NOT re-evaluate a baseline first — the
