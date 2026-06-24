@@ -202,6 +202,35 @@ node src/driver.mjs --resume --loop-dir .loop/longrun-01 --cap 120 --budget-toke
 > passes`; the editor auto-accepts edits unattended for hours, so scope the artifact's project
 > permissions tightly; and a run still raises **one** artifact — not a whole-repo refactor.
 
+## Scaling to a whole repo (experimental)
+
+The `whetstone-scope` loop (`src/scope-cli.mjs`, design in
+[`docs/orchestrator-design.md`](docs/orchestrator-design.md)) points the *same* code-owned loop at a whole
+repo instead of one file: the model edits across a `--scope` directory, an external scorer measures the
+whole project (build + tests), and **git** is the keep-best snapshot — each pass is a commit, and a
+regressing pass is rolled back with `git reset --hard`.
+
+```bash
+node src/scope-cli.mjs "make the suite pass" \
+  --scope /path/to/repo \
+  --scorer 'node scorers/test-pass-rate.mjs --cmd "npm test"' \
+  --confirm-scorer 'node scorers/test-pass-rate.mjs --cmd "npm run test:held-out"' \
+  --read-only test/,scripts/ --target 100 --cap 20 --budget-tokens 3000000 \
+  --mcp-config empty-mcp.json
+```
+
+Two code-owned safety guards — enforced, not prompt-only:
+
+- **The editor can't edit its own gate.** Anything under `--read-only` (your tests / scorer config) is
+  hard-reverted after each pass, so a pass can't raise the score by weakening the test.
+- **It won't run on a dirty tree.** Because the loop commits and `git reset --hard`s the scope, it refuses
+  to start unless the repo is clean — an unattended rollback can't clobber your uncommitted work. Run it
+  on a clean checkout or a dedicated branch.
+
+The done-edge `--confirm-scorer` re-runs a **held-out** suite from a *clean checkout* of the committed
+pass, so a model that games the visible score still can't reach done. It raises a fixed, measured bar —
+it is not (yet) an open-ended planner; that's the v2 tier in the design doc.
+
 ## ⚠️ Cost, auth & budgets (read before the first live run)
 
 Directly measured on this machine (2026-06-22), **not** hand-waved:

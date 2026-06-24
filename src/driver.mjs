@@ -104,7 +104,9 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
   const loopDir = cfg.loopDir
   saveState(loopDir, state)
 
-  const { evaluate, persist, confirm } = buildContext(loopDir)
+  // The context (evaluate/persist/confirm) is injectable so a different artifact KIND can swap it:
+  // the scope (repo) loop passes a git-backed buildContext while reusing all the wiring below.
+  const { evaluate, persist, confirm } = (deps.buildContext ?? buildContext)(loopDir)
   // Cheap editor every pass; stronger editor only after a plateau (escalation).
   // make is the editor factory (injectable so a test can observe the effort/model each editor is
   // built with — the real makeClaudeAct's effort is otherwise unobservable behind a claude spawn).
