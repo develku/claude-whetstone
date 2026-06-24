@@ -43,6 +43,15 @@ its nondeterminism), and honors the range + exit codes. The driver reads **only*
 score for the gate — it never re-derives it. `scorers/test-pass-rate.mjs` is the
 reference (deterministic, zero extra deps).
 
+**Composition (`scorers/composite.mjs`).** Scorers compose: `composite` runs N sub-scorers
+(one raw command per line in a `--scorers-file` manifest, forwarding `--output/--loop-dir/--pass`
+to each) and combines their scores by **min**, so the gate reaches `done` only when the
+*weakest* dimension clears target. This hardens the gate — a green test suite no longer ships
+if a paired security/robustness judge is still low. The critique steers the next edit at the
+binding (min) dimension. A non-zero exit / non-JSON / out-of-range score from *any* sub-scorer
+halts the composite with exit 2 (a broken dimension is never silently dropped). Deterministic
+iff every sub-scorer is.
+
 ## 3. The act step (`act(state) -> { changed, costUsd }`)
 
 The model edits **only** `artifact_path`, one coherent change, steered by

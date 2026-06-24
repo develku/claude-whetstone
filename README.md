@@ -181,6 +181,21 @@ src/resume.mjs      --resume gate pre-check (pure)     test/resume.test.mjs
 src/act-claude.mjs  the headless claude -p edit step  (live-validated, not unit-tested)
 src/driver.mjs      CLI + real wiring                 test/driver.test.mjs, test/resume-driver.test.mjs
 scorers/test-pass-rate.mjs   reference scorer          test/scorer.test.mjs
+scorers/composite.mjs        min-combine N sub-scorers  test/composite.test.mjs
+```
+
+**Composing scorers.** `composite.mjs` gates on several dimensions at once — list one
+sub-scorer command per line in a manifest and combine by `min`, so the loop can't call it
+`done` until *every* dimension clears target (a green test suite won't ship while a paired
+security/robustness judge is still low):
+
+```bash
+# gate.txt
+node scorers/test-pass-rate.mjs --cmd "node --test"
+node scorers/llm-judge.mjs --goal "secure & robust" --rubric @sec-rubric.md --model opus
+```
+```bash
+--scorer 'node scorers/composite.mjs --scorers-file gate.txt'
 ```
 
 `npm test` runs the full suite with no spend — the loop/driver tests inject a stub
