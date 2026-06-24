@@ -27,3 +27,32 @@ export function readLatestFindings(parentLoopDir, state) {
     return []
   }
 }
+
+// POSIX single-quote: every finding-supplied arg is wrapped so a metacharacter can never reach the
+// shell unquoted. Inlined (like scope-context) to keep decompose off the driver/CLI import graph.
+const shq = (s) => `'${String(s).replace(/'/g, "'\\''")}'`
+
+// Build a child sub-gate from a finding, or null when it is not SAFELY decomposable. The scorer id is
+// resolved against an operator-owned allowlist (never executed as a raw string) and every arg is
+// shq-quoted [CR#4]; an optional scope must stay inside the repo [CR#5]. This is the whole injection
+// fence — a finding can only ever name a known scorer and pass quoted args to it.
+export function resolveSubGate(finding, { repoDir, allowlist }) {
+  const sg = finding?.scorer
+  if (!sg || typeof sg.id !== 'string' || !Array.isArray(sg.args)) return null
+  const scriptPath = allowlist.get(sg.id)
+  if (!scriptPath) return null
+  let editScope = null
+  if (finding.scope != null) {
+    const base = resolve(repoDir)
+    const full = resolve(base, finding.scope)
+    if (full !== base && !full.startsWith(base + sep)) return null // escapes the repo -> refuse
+    editScope = String(finding.scope)
+  }
+  const scorerCmd = `node ${shq(scriptPath)} ${sg.args.map(shq).join(' ')}`.trim()
+  return { editScope, scorerCmd }
+}
+
+// The findings worth fanning out: resolvable to a sub-gate AND not already decomposed this run.
+export function decomposable(findings, seen, ctx) {
+  return findings.filter((f) => !seen.has(key(f)) && resolveSubGate(f, ctx) != null)
+}
