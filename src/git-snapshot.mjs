@@ -39,3 +39,20 @@ export function gitVerifyAt(scopeDir, ref, fn) {
     rmSync(wt, { recursive: true, force: true })
   }
 }
+
+// The current HEAD sha — the snapshot/restore anchor a fan-out captures before running children.
+export function gitHead(dir) {
+  return git(dir, ['rev-parse', 'HEAD'])
+}
+
+// True iff the tree CONTENT differs between fromSha and HEAD. Children commit --allow-empty baselines
+// so HEAD always moves; the fan-out's "changed" signal must compare trees, not commit ids, so an
+// all-empty-commit fan-out reads as an honest no-op. `git diff --quiet` exits 1 when a diff exists.
+export function gitTreeChanged(dir, fromSha) {
+  try {
+    execFileSync('git', ['diff', '--quiet', fromSha, 'HEAD'], { cwd: dir })
+    return false
+  } catch {
+    return true
+  }
+}

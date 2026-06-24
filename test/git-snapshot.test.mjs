@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { gitSnapshot, gitRestore, gitVerifyAt } from '../src/git-snapshot.mjs'
+import { gitSnapshot, gitRestore, gitVerifyAt, gitHead, gitTreeChanged } from '../src/git-snapshot.mjs'
 
 const git = (dir, ...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim()
 
@@ -57,6 +57,31 @@ test('gitVerifyAt runs in a clean checkout of the ref, isolated from the dirty w
     const seen = gitVerifyAt(dir, sha, (wt) => readFileSync(join(wt, 'f.txt'), 'utf8'))
     assert.equal(seen, 'committed') // verified the COMMITTED state, not the dirty working tree
     assert.equal(readFileSync(join(dir, 'f.txt'), 'utf8'), 'DIRTY working tree') // working tree untouched
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('gitHead returns the current HEAD sha', () => {
+  const dir = tempRepo()
+  try {
+    assert.equal(gitHead(dir), git(dir, 'rev-parse', 'HEAD'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('gitTreeChanged: empty commits read as unchanged, real edits as changed', () => {
+  const dir = tempRepo()
+  try {
+    const base = gitHead(dir)
+    // an empty commit (what a no-op child baseline looks like) -> tree identical
+    git(dir, 'commit', '--allow-empty', '-q', '-m', 'empty')
+    assert.equal(gitTreeChanged(dir, base), false)
+    // a real edit -> tree differs
+    writeFileSync(join(dir, 'x.txt'), 'content')
+    gitSnapshot(dir, 'real')
+    assert.equal(gitTreeChanged(dir, base), true)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
