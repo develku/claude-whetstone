@@ -3,9 +3,10 @@
 // state.json, the Claude act step) into the pure loop. buildContext takes an
 // injectable `act` so the whole pipeline is testable without spending money.
 import { spawnSync } from 'node:child_process'
-import { copyFileSync } from 'node:fs'
+import { copyFileSync, readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { resolve } from 'node:path'
+import { resolve, join } from 'node:path'
+import { homedir } from 'node:os'
 import {
   initState,
   recordPass,
@@ -160,7 +161,34 @@ export async function resumeFromConfig(cfg, deps = {}) {
   return runPrepared(cfg, state, deps, { skipBaseline: true })
 }
 
-export function parseCli(argv) {
+// Persistent defaults: read ~/.config/whetstone/config.json (personal) then ./whetstone.config.json
+// (project, wins). Supplies the cost/model knobs the operator would otherwise retype every run —
+// especially --budget-tokens, which is awkward to size by hand because each pass burns ~100-150K
+// tokens. CLI flags still override (parseCli's `defaults` arg). cwd/home are injectable for test.
+// Malformed JSON throws a clear error rather than silently running with surprise defaults; a MISSING
+// file is fine. Recognized keys (camelCase): budgetTokens, budgetUsd, hardCap, targetScore, model,
+// effort, escalateModel, mcpConfig.
+export function loadConfig(cwd = process.cwd(), home = homedir()) {
+  let merged = {}
+  for (const p of [join(home, '.config', 'whetstone', 'config.json'), join(cwd, 'whetstone.config.json')]) {
+    let text
+    try {
+      text = readFileSync(p, 'utf8')
+    } catch (e) {
+      if (e.code === 'ENOENT') continue // a missing config is the normal case
+      throw new Error(`cannot read whetstone config at ${p}: ${e.message}`)
+    }
+    try {
+      merged = { ...merged, ...JSON.parse(text) }
+    } catch (e) {
+      throw new Error(`malformed whetstone config at ${p}: ${e.message}`)
+    }
+  }
+  return merged
+}
+
+// defaults: persistent config-file values (loadConfig). Precedence is CLI flag > config > built-in.
+export function parseCli(argv, defaults = {}) {
   const get = (name, def) => {
     const i = argv.indexOf(name)
     return i >= 0 ? argv[i + 1] : def
@@ -175,15 +203,15 @@ export function parseCli(argv) {
     scorerCmd: get('--scorer'),
     confirmScorerCmd: get('--confirm-scorer', null),
     observeCmd: get('--observe', null),
-    targetScore: get('--target') ? Number(get('--target')) : undefined,
-    hardCap: get('--cap') ? Number(get('--cap')) : undefined,
-    budgetUsd: get('--budget') ? Number(get('--budget')) : undefined,
-    budgetTokens: get('--budget-tokens') ? Number(get('--budget-tokens')) : undefined,
-    model: get('--model', 'sonnet'),
-    effort: get('--effort', 'medium'),
-    escalateModel: get('--model-escalate', 'opus'),
+    targetScore: get('--target') ? Number(get('--target')) : defaults.targetScore,
+    hardCap: get('--cap') ? Number(get('--cap')) : defaults.hardCap,
+    budgetUsd: get('--budget') ? Number(get('--budget')) : defaults.budgetUsd,
+    budgetTokens: get('--budget-tokens') ? Number(get('--budget-tokens')) : defaults.budgetTokens,
+    model: get('--model', defaults.model ?? 'sonnet'),
+    effort: get('--effort', defaults.effort ?? 'medium'),
+    escalateModel: get('--model-escalate', defaults.escalateModel ?? 'opus'),
     noEscalate: argv.includes('--no-escalate'),
-    mcpConfig: get('--mcp-config', null),
+    mcpConfig: get('--mcp-config', defaults.mcpConfig ?? null),
     loopDir: get('--loop-dir', `.loop/run_${new Date().toISOString().replace(/[:.]/g, '').slice(0, 15)}`),
   }
 }
@@ -240,7 +268,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     }
   }
 
-  const cfg = parseCli(argv)
+  const cfg = parseCli(argv, loadConfig())
   if (!cfg.goal || !cfg.artifactPath || !cfg.scorerCmd) {
     process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--budget-tokens N] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--target T] [--model M]\n')
     process.exit(2)

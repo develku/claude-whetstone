@@ -38,7 +38,12 @@ Collect these (use AskUserQuestion; treat any other inline `$ARGUMENTS` text as 
    `--budget` (USD ceiling), or `--budget-tokens` (total-token ceiling). **Do not proceed without
    an explicit bound.** On a **subscription (Max/Pro) plan, prefer `--budget-tokens`** — the
    `--budget` USD figure is only a notional API-equivalent price there, while tokens are what the
-   rate limit actually counts.
+   rate limit actually counts. When the user wants a token ceiling but no number, **suggest
+   `--budget-tokens ≈ cap × 150000`** — each pass burns ~100–150K tokens (mostly the recurring ~44K
+   system-prompt tax plus cache), so a small number caps after a single pass. Persistent defaults for
+   these knobs (`budgetTokens`, `budgetUsd`, `hardCap`, `model`, `effort`) can live in
+   `~/.config/whetstone/config.json` or `./whetstone.config.json` (the driver loads them; CLI flags
+   override) — values the config already supplies don't need to be re-asked.
 6. **model** — default `sonnet`; suggest `haiku` for mechanical artifacts; warn that `opus`
    is ~$0.22+/call.
 

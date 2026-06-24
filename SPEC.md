@@ -114,6 +114,18 @@ reviews/review_NNN.json    the scorer's {score, critique, findings} for pass NNN
 `zip(snapshots, reviews)` over `history` is the full score trajectory — for
 regression recovery, best-pass restore, and convergence study.
 
+## Configuration (persistent defaults)
+
+The cost/model knobs an operator repeats every run can live in a JSON config so they aren't retyped.
+`loadConfig` reads `~/.config/whetstone/config.json` (personal) then `./whetstone.config.json`
+(project — wins on conflict) and hands the merged object to `parseCli` as its defaults. Precedence:
+**CLI flag > config file > built-in default**. Recognized keys (camelCase): `budgetTokens`,
+`budgetUsd`, `hardCap`, `targetScore`, `model`, `effort`, `escalateModel`, `mcpConfig`. A missing
+config is the normal case; malformed JSON throws a clear error rather than running with surprise
+defaults. This is the answer to "`--budget-tokens` is awkward to size by hand" — set it once (each
+pass burns ~100–150K tokens, so a per-run budget is roughly `cap × 150000`). Example:
+`examples/whetstone.config.json`.
+
 ## Open questions for the dogfooding phase
 
 - Cost control: wire `--mcp-config <empty>` by default? detect OAuth vs API-key auth?

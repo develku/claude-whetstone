@@ -1,0 +1,7 @@
+{
+  "model": "sonnet",
+  "effort": "medium",
+  "hardCap": 12,
+  "budgetTokens": 2000000,
+  "mcpConfig": "/absolute/path/to/whetstone/empty-mcp.json"
+}

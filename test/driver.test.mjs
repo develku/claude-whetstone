@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { runFromConfig, parseCli, shq, editorEffort } from '../src/driver.mjs'
+import { runFromConfig, parseCli, shq, editorEffort, loadConfig } from '../src/driver.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const scriptedScorer = join(here, 'fixtures', 'scripted-scorer.mjs')
@@ -111,6 +111,39 @@ test('a RELATIVE observe output is resolved against loopDir before the scorer re
     { act: async () => ({ changed: true, costUsd: 0 }), log: () => {} },
   )
   assert.equal(verdict.status, 'done') // resolved correctly -> scorer read loopDir/observed.txt (has DONE)
+})
+
+// Config-file defaults: a persistent settings file supplies the cost/model knobs the operator
+// would otherwise retype every run (esp. --budget-tokens, which is awkward to size by hand because
+// each pass burns ~100-150K tokens). Precedence: CLI flag > config file > built-in default.
+test('parseCli uses config-file defaults, and a CLI flag still overrides them', () => {
+  const base = ['node', 'driver.mjs', 'g', '--artifact', 'x', '--scorer', 's']
+  const withCfg = parseCli(base, { model: 'haiku', budgetTokens: 2000000, hardCap: 20 })
+  assert.equal(withCfg.model, 'haiku')
+  assert.equal(withCfg.budgetTokens, 2000000)
+  assert.equal(withCfg.hardCap, 20)
+  const override = parseCli([...base, '--model', 'opus', '--budget-tokens', '500'], { model: 'haiku', budgetTokens: 2000000 })
+  assert.equal(override.model, 'opus') // CLI wins
+  assert.equal(override.budgetTokens, 500)
+  assert.equal(parseCli(base).model, 'sonnet') // no config, no CLI -> builtin
+  assert.equal(parseCli(base).budgetTokens, undefined)
+})
+
+test('loadConfig merges home + cwd configs (cwd wins), ENOENT -> {}', () => {
+  const home = mkdtempSync(join(tmpdir(), 'whet-home-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'whet-cwd-'))
+  assert.deepEqual(loadConfig(cwd, home), {}) // neither exists
+  mkdirSync(join(home, '.config', 'whetstone'), { recursive: true })
+  writeFileSync(join(home, '.config', 'whetstone', 'config.json'), JSON.stringify({ model: 'haiku', budgetTokens: 1000 }))
+  assert.deepEqual(loadConfig(cwd, home), { model: 'haiku', budgetTokens: 1000 })
+  writeFileSync(join(cwd, 'whetstone.config.json'), JSON.stringify({ model: 'opus', hardCap: 5 }))
+  assert.deepEqual(loadConfig(cwd, home), { model: 'opus', budgetTokens: 1000, hardCap: 5 }) // cwd overrides model, keeps home's budgetTokens
+})
+
+test('loadConfig throws a clear error on a malformed config (never silently ignored)', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'whet-cwd-'))
+  writeFileSync(join(cwd, 'whetstone.config.json'), '{ not valid json')
+  assert.throws(() => loadConfig(cwd, join(cwd, 'no-home')), /whetstone config/i)
 })
 
 test('parseCli takes the goal from a true positional only, not a later flag value', () => {
