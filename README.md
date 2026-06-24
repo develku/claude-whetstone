@@ -72,7 +72,67 @@ after editing whetstone's own code, **bump `version` in `.claude-plugin/plugin.j
 `claude plugin marketplace update whetstone` and `claude plugin update whetstone@whetstone` and restart
 the session (the update is version-gated — an unchanged version is a no-op).
 
+## How to use it — the guided `/whetstone:whet` launcher
+
+You don't need to memorise the CLI. Inside Claude Code the plugin adds a slash command that builds and
+runs the loop *for* you, pausing for your confirmation before anything spends money.
+
+**1 · Start it with your goal:**
+
+```
+/whetstone:whet make the parser handle empty input without crashing
+```
+
+**2 · Claude asks you five things** — and won't run until each is answered:
+
+| Claude asks | What you give | Example |
+|---|---|---|
+| **Goal** | what "better" means (fed into every edit) | "handle empty input" |
+| **Artifact** | the *one* file the loop may edit | `src/parser.mjs` |
+| **Scorer** | how each pass is graded 0–100 | `test-pass-rate` over `node --test` |
+| **Target** | the score that counts as done | `100` |
+| **Cost bound** | a hard limit so it can't run away | `--cap 8` + `--budget-tokens 1200000` |
+
+**3 · Claude shows the exact command and a worst-case cost** (cap × per-call), then waits. Nothing runs
+until you say go — every confirmed pass auto-accepts file edits and spends real money, so this gate is
+the whole point.
+
+**4 · It runs, prints the score after each pass, and stops itself** at done / capped / plateau / error.
+
+### Controlling spend — Claude enforces it for you
+
+The launcher **refuses to start without at least one ceiling**, so you can't accidentally kick off an
+unbounded paid loop:
+
+- **`--cap N`** — the hard stop: at most N passes. Always set this; it is the real ceiling.
+- **`--budget <USD>`** — stop once spend crosses a dollar figure.
+- **`--budget-tokens <N>`** — stop once total tokens cross N. **On a Max/Pro plan, prefer this** — there
+  the dollar number is only a *notional* API-equivalent price, while tokens are what your rate limit
+  actually counts. A rough budget is `cap × 150000` (so `--cap 8` ≈ `--budget-tokens 1200000`).
+
+The two `--budget*` dials are checked *after* each pass (so they can overshoot by one pass) — that is why
+you pair them with `--cap`. Claude prints the worst-case total before you confirm, and you can set your
+usual limits once in `whetstone.config.json` so you never retype them (see **⚠️ Cost, auth & budgets**
+below).
+
+### Resuming a stopped run
+
+Say **`/whetstone:whet resume`** (or run the CLI) to continue a run that stopped under target — history,
+best score, snapshots, and spend all carry forward instead of starting over:
+
+```bash
+node src/driver.mjs --resume --loop-dir .loop/<run> --cap 16   # raise the limit, keep going
+```
+
+You **must** relax the binding limit (`--cap` / `--budget` / `--budget-tokens`), or the gate that stopped
+the run stops it again immediately and resume refuses with an actionable message. Resume restarts the
+editor ladder from the cheap model (re-escalating only on another plateau) and skips re-scoring a
+baseline; override `--target` / `--model` too if you like — anything you don't pass keeps its saved value.
+
 ## Command examples
+
+Prefer the guided `/whetstone:whet` launcher above for everyday use — these are the raw commands it
+builds, handy for scripting, cron, or power users.
 
 Raise a source file until its test suite passes (deterministic scorer, no model in the loop but the editor):
 
@@ -100,25 +160,6 @@ Run state lands in `.loop/<run>/` (gitignored): `state.json`, `snapshots/iter_NN
 `reviews/review_NNN.json`. Each pass writes a full verbatim copy of the artifact, so disk use scales
 with `artifact_size × total passes`; there's no automatic snapshot pruning. `npm test` runs the full
 suite with no spend — the loop/driver tests inject a stub `act` and the scorers are deterministic.
-
-## How to use it
-
-The plugin surfaces a guided launcher, **`/whetstone:whet`** — it collects the goal, artifact, scorer,
-target, and a required cost bound, shows the assembled command plus a worst-case cost estimate, and
-runs the driver only after you confirm. `/whetstone:whet resume` continues a stopped run.
-
-**Resuming a capped run.** A run that hit its cap or budget below target continues from `state.json`
-instead of starting over — history, best score, snapshots, and spend all carry forward:
-
-```bash
-node src/driver.mjs --resume --loop-dir .loop/<run> --cap 16   # raise the limit, keep going
-```
-
-You **must** relax the binding limit (`--cap`/`--budget`/`--budget-tokens`) — otherwise the gate that
-stopped the run stops it again immediately, and resume refuses with an actionable message. Resume
-restarts the editor ladder from the cheap model (re-escalating only if it plateaus again) and skips
-re-scoring a baseline. Optionally override `--target`/`--model` too; anything you don't pass keeps its
-saved value.
 
 ## Long, unattended runs
 
