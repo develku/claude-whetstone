@@ -31,6 +31,11 @@ export const shq = (s) => `'${String(s).replace(/'/g, "'\\''")}'`
 // never-returning render/server step) can't wedge an unattended loop forever.
 const CHILD_TIMEOUT_MS = 5 * 60 * 1000
 
+// The rescue (escalated) editor runs at a higher effort than the cheap forward passes — strength
+// goes up on BOTH dials (model + effort) in one decisive jump, only when the loop proves it's stuck.
+// 'high', not 'max': editing is the easy half, so reserve max for the judge / a deep-stall override.
+const RESCUE_EFFORT = 'high'
+
 function runScorer(scorerCmd, { output, loopDir, pass }) {
   const full = `${scorerCmd} --output ${shq(output)} --loop-dir ${shq(loopDir)} --pass ${zeroPad(pass)}`
   const res = spawnSync(full, { shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: CHILD_TIMEOUT_MS, killSignal: 'SIGKILL' })
@@ -86,11 +91,11 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
 
   const { evaluate, persist, confirm } = buildContext(loopDir)
   // Cheap editor every pass; stronger editor only after a plateau (escalation).
-  const act = deps.act ?? makeClaudeAct({ artifactPath: state.artifact_path, model: state.model, mcpConfig: cfg.mcpConfig })
+  const act = deps.act ?? makeClaudeAct({ artifactPath: state.artifact_path, model: state.model, mcpConfig: cfg.mcpConfig, effort: state.effort })
   const escalateModel = cfg.noEscalate ? null : cfg.escalateModel ?? 'opus'
   const actEscalated =
     deps.actEscalated ??
-    (escalateModel ? makeClaudeAct({ artifactPath: state.artifact_path, model: escalateModel, mcpConfig: cfg.mcpConfig }) : null)
+    (escalateModel ? makeClaudeAct({ artifactPath: state.artifact_path, model: escalateModel, mcpConfig: cfg.mcpConfig, effort: RESCUE_EFFORT }) : null)
 
   // keep-best: restore a prior snapshot back over the live artifact when a pass regressed.
   // safeSnapshotPath refuses a ref that escapes the run dir (a poisoned snapshot ref on resume).
@@ -156,6 +161,7 @@ export function parseCli(argv) {
     hardCap: get('--cap') ? Number(get('--cap')) : undefined,
     budgetUsd: get('--budget') ? Number(get('--budget')) : undefined,
     model: get('--model', 'sonnet'),
+    effort: get('--effort', 'medium'),
     escalateModel: get('--model-escalate', 'opus'),
     noEscalate: argv.includes('--no-escalate'),
     mcpConfig: get('--mcp-config', null),
@@ -215,7 +221,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
   const cfg = parseCli(argv)
   if (!cfg.goal || !cfg.artifactPath || !cfg.scorerCmd) {
-    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--model sonnet] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--target T] [--model M]\n')
+    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--target T] [--model M]\n')
     process.exit(2)
   }
   const { state, verdict } = await runFromConfig(cfg)

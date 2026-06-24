@@ -4,6 +4,8 @@
 // plateau math. COUNTED values (hard_cap, plateau_window — compared against the integer
 // pass index / array length) must be integers; THRESHOLDS (target_score, min_delta,
 // budget_usd — only compared) may be fractional.
+export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
+
 export function validateConfig(state) {
   const errors = []
   if (!Number.isFinite(state.target_score) || state.target_score < 0 || state.target_score > 100) {
@@ -25,6 +27,10 @@ export function validateConfig(state) {
   }
   if (!state.scorer_cmd) {
     errors.push('scorer_cmd is required')
+  }
+  // effort is optional (a string flag, not a number); validate membership only when set.
+  if (state.effort != null && !EFFORT_LEVELS.includes(state.effort)) {
+    errors.push(`effort must be one of ${EFFORT_LEVELS.join('|')}`)
   }
   return errors
 }

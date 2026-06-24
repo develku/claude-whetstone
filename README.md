@@ -94,6 +94,16 @@ cheap model does it well, and `--cap 10` of Opus edits is wasteful. *Evaluation*
 the gradient, so put strength there (or in code). You pay Opus-as-editor only when the
 loop **proves** you need it (a plateau), never up front.
 
+On escalation the strong editor runs in **rescue mode**: it is told a cheaper model already
+plateaued here and to make a *bolder, different-strategy* edit, not a pricier version of the same
+local tweak. One decisive jump — never a cheap→mid→opus retry ladder, since a plateau is already
+evidence the cheaper config is exhausted (paying for the low-odds rungs is false economy).
+
+Strength rises on **both dials** in that jump: the rescue editor also steps reasoning effort up to
+`high`, while forward passes run at `--effort` (default **medium**). Editing is the *easy half*
+("apply this critique"), so the editor stays cheap on both dials — reserve `max` effort for a judge
+scorer (evaluation is the hard half) or a deep-stall override, never a uniform `max` every pass.
+
 ## ⚠️ Cost & auth (read before the first live run)
 
 Directly measured on this machine (2026-06-22), **not** hand-waved:

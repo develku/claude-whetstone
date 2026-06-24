@@ -22,6 +22,7 @@ export function initState(cfg) {
     hard_cap: cfg.hardCap ?? 10,
     budget_usd: cfg.budgetUsd ?? null,
     model: cfg.model ?? null,
+    effort: cfg.effort ?? 'medium',
     pass: 0,
     last_critique: null,
     current_score: null,

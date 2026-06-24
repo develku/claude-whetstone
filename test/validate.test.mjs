@@ -116,3 +116,17 @@ test('flags a non-numeric plateau_window (NaN)', () => {
   assert.equal(errs.length, 1)
   assert.match(errs[0], /plateau_window/)
 })
+
+// effort is a CLI string, not a number — validate membership so a typo (--effort hgih) fails fast
+// with a clear message instead of the nested `claude -p` rejecting the flag mid-run.
+test('flags an unknown effort level', () => {
+  const errs = validateConfig({ ...valid(), effort: 'hgih' })
+  assert.equal(errs.length, 1)
+  assert.match(errs[0], /effort/)
+})
+
+test('allows every valid effort level', () => {
+  for (const e of ['low', 'medium', 'high', 'xhigh', 'max']) {
+    assert.deepEqual(validateConfig({ ...valid(), effort: e }), [])
+  }
+})

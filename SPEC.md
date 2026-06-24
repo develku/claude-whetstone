@@ -33,6 +33,16 @@ scorer is. Wire it with `--confirm-scorer "<cmd>"` (e.g. a held-out test set or 
 (`escalationGrace`, default `plateau_window` passes) before plateau is re-judged. It
 escalates at most once; the hard cap still bounds total passes. This is how a cheap
 editor stays the default while Opus is paid for only when the loop *proves* it's stuck.
+The escalated pass also runs in **rescue mode**: `buildEditorPrompt` reads `state.escalated`
+and tells the strong editor a cheaper model plateaued here, so it makes a *bolder,
+different-strategy* edit (still one file) rather than a pricier version of the same local tweak —
+strength must change the edit STRATEGY, not just the model name. No retry ladder: one decisive
+jump, because a plateau is evidence the cheaper config is already exhausted at this point.
+Strength rises on BOTH dials in that one jump: the rescue editor also steps **effort** up to `high`
+(`RESCUE_EFFORT`), while forward passes run at `--effort` (default `medium`, validated against
+`low|medium|high|xhigh|max`). Editing is the easy half, so the editor stays cheap and `max` is
+reserved for a judge scorer or a deliberate deep-stall override — never a fixed `max` every pass
+(the frontier anti-pattern: uniform max budget wastes compute on the easy inputs).
 `scorers/llm-judge.mjs` is the subjective-quality scorer (Opus-as-judge by default).
 
 ## 2. The scorer (a CLI the user supplies per task)
@@ -78,7 +88,7 @@ else is testable with a stub.
 
 ```
 goal, artifact_path, observe_cmd, scorer_cmd, confirm_scorer_cmd,
-target_score(90), min_delta(1), plateau_window(3), hard_cap(10), budget_usd(null), model,
+target_score(90), min_delta(1), plateau_window(3), hard_cap(10), budget_usd(null), model, effort(medium),
 pass, last_critique, current_score, best_score, best_pass, spent_usd,
 escalated, escalated_at_pass,   # set when a plateau triggered the stronger editor
 status(running|done|capped|plateau|error), status_reason, started_at, updated_at,

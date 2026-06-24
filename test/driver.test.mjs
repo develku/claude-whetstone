@@ -110,6 +110,11 @@ test('parseCli reads a positional goal and an explicit --goal', () => {
   assert.equal(parseCli(['node', 'driver.mjs', '--goal', 'explicit', '--artifact', 'x']).goal, 'explicit')
 })
 
+test('parseCli defaults --effort to medium (cheap on both dials) and reads an explicit level', () => {
+  assert.equal(parseCli(['node', 'driver.mjs', 'g', '--artifact', 'x', '--scorer', 's']).effort, 'medium')
+  assert.equal(parseCli(['node', 'driver.mjs', 'g', '--artifact', 'x', '--scorer', 's', '--effort', 'low']).effort, 'low')
+})
+
 test('parseCli reads --confirm-scorer (null when absent)', () => {
   assert.equal(parseCli(['node', 'driver.mjs', 'g', '--artifact', 'x', '--scorer', 's']).confirmScorerCmd, null)
   assert.equal(
