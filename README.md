@@ -99,21 +99,23 @@ the whole point.
 
 **4 · It runs, prints the score after each pass, and stops itself** at done / capped / plateau / error.
 
-### Controlling spend — Claude enforces it for you
+### Controlling spend — just say how far it can go
 
-The launcher **refuses to start without at least one ceiling**, so you can't accidentally kick off an
-unbounded paid loop:
+You never type a flag. Tell the launcher your limit in plain words and it sets it for you — and it
+**won't start without one**, so you can't accidentally kick off an unbounded paid loop:
 
-- **`--cap N`** — the hard stop: at most N passes. Always set this; it is the real ceiling.
-- **`--budget <USD>`** — stop once spend crosses a dollar figure.
-- **`--budget-tokens <N>`** — stop once total tokens cross N. **On a Max/Pro plan, prefer this** — there
-  the dollar number is only a *notional* API-equivalent price, while tokens are what your rate limit
-  actually counts. A rough budget is `cap × 150000` (so `--cap 8` ≈ `--budget-tokens 1200000`).
+| You say… | Claude sets |
+|---|---|
+| "stop after 8 tries" | a **pass cap** — the hard ceiling; always have one |
+| "don't spend over $2" | a **dollar budget** |
+| "keep it under ~1.2M tokens" | a **token budget** — best on a Max/Pro plan, where the dollar figure is only notional and tokens are what your rate limit counts (≈ `cap × 150000`) |
 
-The two `--budget*` dials are checked *after* each pass (so they can overshoot by one pass) — that is why
-you pair them with `--cap`. Claude prints the worst-case total before you confirm, and you can set your
-usual limits once in `whetstone.config.json` so you never retype them (see **⚠️ Cost, auth & budgets**
-below).
+Claude shows the worst-case total and waits for your OK before spending anything, and the limit is
+re-checked after every pass. Set your usual ceiling once in `whetstone.config.json` and it stops asking.
+
+> *Power users:* these are the `--cap` / `--budget` / `--budget-tokens` flags — `--cap` is the true hard
+> stop (the budgets are checked *after* a pass, so they can overshoot by one). See **⚠️ Cost, auth &
+> budgets** below.
 
 ### Resuming a stopped run
 
@@ -163,41 +165,42 @@ suite with no spend — the loop/driver tests inject a stub `act` and the scorer
 
 ## Long, unattended runs
 
-whetstone is built for the detached, hours-long case — a real scorer gives every pass a gradient, and
-code (not you) holds the wheel:
+Want it to grind for hours on its own? Just ask the launcher in plain words — for example:
 
-1. **Pick a deterministic scorer** so each pass gets a real signal — `test-pass-rate`, or `composite`
-   (tests + a judge). A long run only pays off when the gradient is real.
-2. **Set a high cap and a token budget as the true ceiling.** On a Max/Pro plan, tokens — not USD — are
-   what the rate limit counts; a token budget is roughly `cap × 150000`:
-   ```bash
-   node src/driver.mjs "<goal>" --artifact src/thing.mjs \
-     --scorer 'node scorers/composite.mjs --scorers-file gate.txt' \
-     --target 95 --cap 60 --budget-tokens 8000000 \
-     --model sonnet --loop-dir .loop/longrun-01 --mcp-config empty-mcp.json
-   ```
-3. **Detach it** so it survives the terminal closing — this is whetstone's reason to exist (no live
-   session, no Workflow-tool entitlement needed):
-   ```bash
-   nohup node src/driver.mjs "<goal>" --artifact src/thing.mjs --scorer '<scorer>' \
-     --cap 60 --budget-tokens 8000000 --loop-dir .loop/longrun-01 \
-     --mcp-config empty-mcp.json > .loop/longrun-01/run.log 2>&1 &
-   ```
-   (or a cron / launchd job for scheduled runs.)
-4. **It manages the long haul itself:** on a plateau it tries one bold Opus rescue, then gives up rather
-   than burning Opus every pass; keep-best rolls back a regressing edit so the run can't drift backward;
-   and `--confirm-scorer` re-checks `done` against an independent signal, vetoing a gamed finish — which
-   matters more the longer the run goes.
-5. **Watch without attaching:** `tail -f .loop/longrun-01/run.log`, or read `best_score` / `pass` /
-   `spent_tokens` in `state.json`.
-6. **Capped below target and want more?** Resume with a raised limit:
-   ```bash
-   node src/driver.mjs --resume --loop-dir .loop/longrun-01 --cap 120 --budget-tokens 16000000
-   ```
+> **`/whetstone:whet`** raise `src/parser.mjs` to a 95% test score, run it unattended for up to 60
+> passes on a ~8M-token budget.
 
-> Long-run caveats: every pass writes a full artifact snapshot with no pruning, so disk ≈ `artifact_size ×
-> passes`; the editor auto-accepts edits unattended for hours, so scope the artifact's project permissions
-> tightly; and a run still raises **one** artifact — not a whole-repo refactor.
+Claude picks a deterministic scorer (so every pass gets a real signal), sets the cap and token budget,
+and can launch it **detached** so it keeps going after you close the terminal — this is whetstone's
+reason to exist: no live session and no Workflow-tool entitlement, so it can even run from `cron`. Then
+it manages the long haul itself:
+
+- **plateau →** one bold Opus rescue, then it gives up rather than burning Opus every pass;
+- **keep-best →** a regressing edit is rolled back, so the run can't drift backward;
+- **confirmation →** an independent finish-line check (`--confirm-scorer`) vetoes a gamed "done" — which
+  matters more the longer it runs.
+
+Check in any time without attaching — `tail` the log, or read `best_score` / `pass` / `spent_tokens` in
+`state.json` — and if it stops under target, just ask Claude to resume with a higher limit.
+
+<details>
+<summary><b>Power users / cron — the raw commands</b></summary>
+
+```bash
+# launch detached, survives the terminal closing
+nohup node src/driver.mjs "<goal>" --artifact src/thing.mjs \
+  --scorer 'node scorers/composite.mjs --scorers-file gate.txt' \
+  --target 95 --cap 60 --budget-tokens 8000000 \
+  --loop-dir .loop/longrun-01 --mcp-config empty-mcp.json > .loop/longrun-01/run.log 2>&1 &
+
+# capped below target? resume with a raised limit
+node src/driver.mjs --resume --loop-dir .loop/longrun-01 --cap 120 --budget-tokens 16000000
+```
+</details>
+
+> Caveats: every pass writes a full artifact snapshot with no pruning, so disk ≈ `artifact_size ×
+> passes`; the editor auto-accepts edits unattended for hours, so scope the artifact's project
+> permissions tightly; and a run still raises **one** artifact — not a whole-repo refactor.
 
 ## ⚠️ Cost, auth & budgets (read before the first live run)
 
@@ -270,8 +273,10 @@ If you're already *in* an interactive session with the Workflow tool, you don't 
 that — a short Workflow script with a `while (score < target)` gate does the same code-owned loop
 in-session, and cheaper (warm subagents skip the per-spawn context-reload tax the CLI pays on each
 act). Pick by quadrant: **Workflow for attended/interactive, whetstone for detached/unattended/cron.**
-The `act` step is just an injectable function returning `{ changed, costUsd, tokens }`, so a
-Workflow-backed `act` would be a drop-in if anyone ever wants it — a future option, not a dependency.
+The `act` step is just an injectable function returning `{ changed, costUsd, tokens }`, so the *editor*
+itself is swappable — not only Claude. A **Codex-backed editor** for the writing step (shelling out to
+`codex exec`) or a Workflow-backed `act` would each be a drop-in: same contract, different engine. Both
+are future options, not dependencies — today the shipped, guaranteed editor is `claude -p`.
 
 ## When to use (and not)
 
