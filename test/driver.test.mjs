@@ -97,6 +97,22 @@ test('observe_cmd output is scored instead of the artifact', async () => {
   assert.equal(verdict.status, 'done') // scored the observed output (has DONE), not the artifact (lacks it)
 })
 
+test('a RELATIVE observe output is resolved against loopDir before the scorer reads it', async () => {
+  // observe runs in cwd=loopDir; the scorer runs in the driver cwd. If observe emits a RELATIVE path,
+  // the scorer's readFileSync(output) resolves it against the WRONG dir -> ENOENT -> error. The fix
+  // resolves the observe output against loopDir, so the scorer reads the file observe actually wrote.
+  const dir = mkdtempSync(join(tmpdir(), 'whetstone-'))
+  const artifact = join(dir, 'art.txt')
+  writeFileSync(artifact, 'the artifact lacks the needle')
+  const loopDir = join(dir, '.loop')
+  const observeCmd = `printf DONE > observed.txt; echo observed.txt` // writes into loopDir, echoes a RELATIVE path
+  const { verdict } = await runFromConfig(
+    { goal: 'g', artifactPath: artifact, scorerCmd: containsScorer, observeCmd, targetScore: 100, hardCap: 3, loopDir, noEscalate: true },
+    { act: async () => ({ changed: true, costUsd: 0 }), log: () => {} },
+  )
+  assert.equal(verdict.status, 'done') // resolved correctly -> scorer read loopDir/observed.txt (has DONE)
+})
+
 test('parseCli takes the goal from a true positional only, not a later flag value', () => {
   // flag-only (no positional goal): the value of --artifact must NOT be mistaken for the goal,
   // so the usage guard can fire instead of running with a garbage goal in every edit prompt.
@@ -146,6 +162,11 @@ test('editorEffort: forward uses the operator effort; rescue is a FLOOR that nev
 test('parseCli defaults --effort to medium (cheap on both dials) and reads an explicit level', () => {
   assert.equal(parseCli(['node', 'driver.mjs', 'g', '--artifact', 'x', '--scorer', 's']).effort, 'medium')
   assert.equal(parseCli(['node', 'driver.mjs', 'g', '--artifact', 'x', '--scorer', 's', '--effort', 'low']).effort, 'low')
+})
+
+test('parseCli reads --budget-tokens as a number (the subscription-plan cost dial) and is undefined when absent', () => {
+  assert.equal(parseCli(['node', 'driver.mjs', 'g', '--artifact', 'x', '--scorer', 's', '--budget-tokens', '500000']).budgetTokens, 500000)
+  assert.equal(parseCli(['node', 'driver.mjs', 'g', '--artifact', 'x', '--scorer', 's']).budgetTokens, undefined)
 })
 
 test('parseCli reads --confirm-scorer (null when absent)', () => {

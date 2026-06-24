@@ -71,6 +71,26 @@ test('allows an unset budget (null)', () => {
   assert.deepEqual(validateConfig({ ...valid(), budget_usd: null }), [])
 })
 
+// budget_tokens is a COUNTED value (summed integer token counts), so it must be a positive integer —
+// unlike budget_usd (a fractional threshold). A NaN/float here would silently disable the token stop.
+test('flags a non-integer budget_tokens', () => {
+  const errs = validateConfig({ ...valid(), budget_tokens: 1.5 })
+  assert.equal(errs.length, 1)
+  assert.match(errs[0], /budget_tokens/)
+})
+
+test('flags a non-numeric budget_tokens (NaN)', () => {
+  assert.match(validateConfig({ ...valid(), budget_tokens: NaN })[0], /budget_tokens/)
+})
+
+test('allows a valid positive budget_tokens', () => {
+  assert.deepEqual(validateConfig({ ...valid(), budget_tokens: 500000 }), [])
+})
+
+test('allows an unset budget_tokens (null)', () => {
+  assert.deepEqual(validateConfig({ ...valid(), budget_tokens: null }), [])
+})
+
 // hard_cap is COUNTED (gate: `pass >= hard_cap`, pass is integer), so a fractional cap
 // silently rounds up the effective ceiling (--cap 1.5 stops at pass 2). The typed cap must
 // mean what it says.

@@ -25,6 +25,11 @@ export function validateConfig(state) {
   if (state.budget_usd != null && (!Number.isFinite(state.budget_usd) || state.budget_usd <= 0)) {
     errors.push('budget_usd must be a positive number when set')
   }
+  // budget_tokens is a COUNTED value (summed integer token counts), so — like hard_cap — it must be a
+  // positive integer, where budget_usd (a compared threshold) may be fractional.
+  if (state.budget_tokens != null && (!Number.isInteger(state.budget_tokens) || state.budget_tokens <= 0)) {
+    errors.push('budget_tokens must be a positive integer when set')
+  }
   if (!state.scorer_cmd) {
     errors.push('scorer_cmd is required')
   }

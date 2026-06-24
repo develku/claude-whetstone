@@ -8,11 +8,16 @@ import { restoreTarget } from './regression.mjs'
 const noopReason = 'pass produced no artifact change (permission block? max-turns starvation?)'
 
 // Budget is enforced in the loop, not the gate (the gate sees only scores). Every paid path —
-// including a no-op that changed nothing — must check spend, so this lives in one helper.
-const overBudgetVerdict = (s) =>
-  s.budget_usd != null && s.spent_usd > s.budget_usd
-    ? { status: 'capped', reason: `budget $${s.budget_usd} exceeded (spent $${s.spent_usd.toFixed(2)})` }
-    : null
+// including a no-op that changed nothing — must check spend, so this lives in one helper. Two
+// parallel dials: --budget (USD, the real charge on API-key auth) and --budget-tokens (the real
+// constraint on a subscription/Max plan, where USD is only notional). Either one tripping caps the run.
+const overBudgetVerdict = (s) => {
+  if (s.budget_usd != null && s.spent_usd > s.budget_usd)
+    return { status: 'capped', reason: `budget $${s.budget_usd} exceeded (spent $${s.spent_usd.toFixed(2)})` }
+  if (s.budget_tokens != null && (s.spent_tokens ?? 0) > s.budget_tokens)
+    return { status: 'capped', reason: `token budget ${s.budget_tokens} exceeded (spent ${s.spent_tokens})` }
+  return null
+}
 
 // deps:
 //   evaluate(state) -> { score, critique }       observe the real output + score it
@@ -72,9 +77,9 @@ export async function runLoop({ state, evaluate, act, persist, save = null, log 
     while (v.status === 'running') {
       const a = await currentAct(s)
       if (!a.changed) {
-        // A no-op still spent (the editor ran, returned cost, changed nothing). Charge it so a
-        // sequence of paid no-ops can still trip --budget — otherwise the spend silently vanishes.
-        s = { ...s, spent_usd: s.spent_usd + (a.costUsd ?? 0) }
+        // A no-op still spent (the editor ran, returned cost, changed nothing). Charge BOTH dials so a
+        // sequence of paid no-ops can still trip --budget / --budget-tokens — otherwise spend vanishes.
+        s = { ...s, spent_usd: s.spent_usd + (a.costUsd ?? 0), spent_tokens: (s.spent_tokens ?? 0) + (a.tokens ?? 0) }
         const overBudget = overBudgetVerdict(s)
         if (overBudget) {
           v = overBudget
@@ -101,7 +106,7 @@ export async function runLoop({ state, evaluate, act, persist, save = null, log 
         break
       }
       consecutiveNoops = 0
-      s = persist(s, { ...(await evaluate(s)), costUsd: a.costUsd ?? 0 })
+      s = persist(s, { ...(await evaluate(s)), costUsd: a.costUsd ?? 0, tokens: a.tokens ?? 0 })
 
       const target = restoreTarget(s)
       if (target != null && restore != null) await restore(target)

@@ -6,7 +6,7 @@
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { dirname } from 'node:path'
+import { dirname, resolve, isAbsolute } from 'node:path'
 import { buildLedger } from './ledger.mjs'
 
 const hashFile = (p) => {
@@ -29,6 +29,33 @@ export function extractCost(stdout) {
   } catch {
     return 0
   }
+}
+
+// Parse the per-call TOKEN usage from the same `result.usage` object — the sum of input, output, and
+// both cache token counts (the real tokens the call touched, a rate-limit proxy). This feeds
+// spent_tokens, the input to the optional token budget. On a SUBSCRIPTION (Max/Pro) plan total_cost_usd
+// is only a notional API-equivalent price; tokens are the real constraint, so tokens get their own dial.
+// Best-effort ->0 on unparseable/usage-less output, mirroring extractCost (--cap is the backstop).
+export function extractTokens(stdout) {
+  try {
+    const parsed = JSON.parse(stdout)
+    const result = Array.isArray(parsed) ? parsed.find((e) => e?.type === 'result') : parsed
+    const u = result?.usage
+    if (!u) return 0
+    return (Number(u.input_tokens) || 0) + (Number(u.output_tokens) || 0) + (Number(u.cache_creation_input_tokens) || 0) + (Number(u.cache_read_input_tokens) || 0)
+  } catch {
+    return 0
+  }
+}
+
+// The editor runs in the artifact's OWN directory (so the nested edit inherits that project's
+// config), but --mcp-config is given relative to the DRIVER's cwd. Resolve it to absolute up front:
+// left relative, the child looks for it in the artifact dir, doesn't find it, and exits without
+// editing — a silent $0 no-op (and the common case, since the artifact usually lives outside this
+// repo). Pure + exported for test.
+export function resolveMcpConfig(mcpConfig, baseDir = process.cwd()) {
+  if (!mcpConfig) return null
+  return isAbsolute(mcpConfig) ? mcpConfig : resolve(baseDir, mcpConfig)
 }
 
 // Build the editor prompt from state alone (pure + exported so it is unit-testable without a spawn).
@@ -86,7 +113,8 @@ export function makeClaudeAct({ artifactPath, maxTurns = 12, model = null, claud
     const before = hashFile(artifactPath)
     const prompt = buildEditorPrompt(state, artifactPath)
 
-    const args = buildClaudeArgs({ prompt, maxTurns, model, mcpConfig, effort })
+    // Resolve --mcp-config against the driver's cwd NOW, because the child runs in a different cwd.
+    const args = buildClaudeArgs({ prompt, maxTurns, model, mcpConfig: resolveMcpConfig(mcpConfig), effort })
 
     // Run in the artifact's own directory so the nested edit inherits THAT project's
     // config — not whatever cwd the driver was launched from. (A driver launched inside
@@ -96,8 +124,12 @@ export function makeClaudeAct({ artifactPath, maxTurns = 12, model = null, claud
     // res.error is set on spawn failure, timeout (ETIMEDOUT), or maxBuffer overflow. Surface the
     // code so the loop's error handler records an actionable reason instead of a silent hang.
     if (res.error) throw new Error(`editor ${claudeBin} failed (${res.error.code || res.error.message})`)
+    // A NON-ZERO EXIT (rate limit, unreadable --mcp-config, auth failure) is a real failure too — and
+    // res.error is null for it. Without this, a failed call slips through as a {changed:false, $0}
+    // no-op and the loop misreports it as "no artifact change". Surface it like the scorer path does.
+    if (res.status !== 0) throw new Error(`editor ${claudeBin} exited ${res.status}: ${String(res.stderr || res.stdout || '').slice(0, 300)}`)
 
     const after = hashFile(artifactPath)
-    return { changed: before !== after, costUsd: extractCost(res.stdout) }
+    return { changed: before !== after, costUsd: extractCost(res.stdout), tokens: extractTokens(res.stdout) }
   }
 }

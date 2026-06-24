@@ -73,6 +73,25 @@ test('resumes a budget-exhausted run once the budget is raised', () => {
   assert.equal(state.status, 'running')
 })
 
+// The token budget cap also lives in the LOOP, not the gate — so resume must guard it too, the same
+// way as the dollar budget, or it would spend one paid pass before re-capping.
+test('refuses to resume a token-budget-exhausted run when the token budget is not raised', () => {
+  let s = { ...buildState({ scores: [40, 60], hardCap: 10, budgetTokens: 100000 }), status: 'capped' }
+  s = { ...s, spent_tokens: 120000 } // already over the token budget
+  const { state, error } = prepareResume(s, {}) // no --budget-tokens raise
+  assert.equal(state, undefined)
+  assert.match(error, /token budget/i)
+})
+
+test('resumes a token-budget-exhausted run once the token budget is raised', () => {
+  let s = { ...buildState({ scores: [40, 60], hardCap: 10, budgetTokens: 100000 }), status: 'capped' }
+  s = { ...s, spent_tokens: 120000 }
+  const { state, error } = prepareResume(s, { budget_tokens: 500000 })
+  assert.equal(error, undefined)
+  assert.equal(state.budget_tokens, 500000)
+  assert.equal(state.status, 'running')
+})
+
 test('resumes a confirm-vetoed last pass (primary met target, confirm rejected it) instead of refusing it as done', () => {
   // a kill mid-rescue leaves disk state whose primary >= target; without veto-awareness the gate
   // would call it done and refuse resume — the opposite of why --confirm-scorer was added.

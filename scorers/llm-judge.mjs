@@ -40,6 +40,25 @@ export function parseJudgeResponse(text) {
   }
 }
 
+// Turn a `claude -p --output-format json` spawn result into a validated review, or throw with a
+// reason. Pure + exported so the failure paths are unit-testable without spawning a model. A
+// NON-ZERO exit is surfaced even when stdout carries a valid-looking result — claude can emit a score
+// JSON and then trip a non-zero exit (e.g. error_max_turns), which would otherwise launder a real
+// failure into a clean score that drives the whole loop's accept decision. (Was: res.error only.)
+export function reviewFromSpawn(res) {
+  if (res.error) throw new Error(`failed to spawn claude: ${res.error.message}`)
+  if (res.status !== 0) throw new Error(`claude exited ${res.status}: ${String(res.stderr || res.stdout || '').slice(0, 300)}`)
+  let resultText
+  try {
+    const parsed = JSON.parse(res.stdout)
+    const r = Array.isArray(parsed) ? parsed.find((e) => e?.type === 'result') : parsed
+    resultText = r?.result ?? ''
+  } catch {
+    throw new Error(`could not parse claude output: ${(res.stdout || res.stderr || '').slice(0, 300)}`)
+  }
+  return parseJudgeResponse(resultText)
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const output = arg('--output')
   const goal = arg('--goal', 'meet the rubric')
@@ -79,22 +98,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (mcp) args.push('--mcp-config', mcp, '--strict-mcp-config')
 
   const res = spawnSync('claude', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
-  if (res.error) die(`failed to spawn claude: ${res.error.message}`)
-
-  let resultText
-  try {
-    const parsed = JSON.parse(res.stdout)
-    const r = Array.isArray(parsed) ? parsed.find((e) => e?.type === 'result') : parsed
-    resultText = r?.result ?? ''
-  } catch {
-    die(`could not parse claude output: ${(res.stdout || res.stderr || '').slice(0, 300)}`)
-  }
-
   let review
   try {
-    review = parseJudgeResponse(resultText)
+    review = reviewFromSpawn(res)
   } catch (e) {
-    die(`judge did not return a valid score: ${e.message} :: ${String(resultText).slice(0, 300)}`)
+    die(e.message)
   }
   process.stdout.write(JSON.stringify(review))
 }

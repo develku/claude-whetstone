@@ -1,6 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildEditorPrompt, buildClaudeArgs } from '../src/act-claude.mjs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { buildEditorPrompt, buildClaudeArgs, resolveMcpConfig, makeClaudeAct } from '../src/act-claude.mjs'
 
 // The editor prompt is built purely from state so it can be unit-tested without spawning claude.
 // It must carry: the goal, the critique FENCED as untrusted data, and — once there is a trajectory
@@ -51,4 +54,24 @@ test('an escalated pass switches to a bolder RESCUE briefing (strategy, not just
   assert.match(rescue, /rescue|plateaued|bolder|different approach/i)
   assert.match(rescue, /BEGIN CRITIQUE/) // still fences the untrusted critique
   assert.match(rescue, /edit ONLY/i) // still scoped to the one artifact (blast radius preserved)
+})
+
+// Bug found by live-testing --budget-tokens: the editor runs in the artifact's OWN directory, but
+// --mcp-config is given relative to the DRIVER's cwd. Left relative, the child looks for it in the
+// artifact dir, doesn't find it, and exits without editing — a silent $0 no-op. Resolve it up front.
+test('resolveMcpConfig makes a relative --mcp-config absolute against the driver cwd', () => {
+  assert.equal(resolveMcpConfig('empty-mcp.json', '/repo'), '/repo/empty-mcp.json')
+  assert.equal(resolveMcpConfig('/abs/x.json', '/repo'), '/abs/x.json') // already absolute → unchanged
+  assert.equal(resolveMcpConfig(null, '/repo'), null) // nothing to resolve
+})
+
+// Companion bug: a failed editor call (rate limit, unreadable --mcp-config, etc.) exits non-zero.
+// makeClaudeAct only checked res.error (spawn/timeout), so a non-zero EXIT slipped through as a
+// {changed:false, costUsd:0} no-op — masking the failure as "no artifact change". Surface it.
+test('makeClaudeAct throws on a non-zero editor exit instead of a silent $0 no-op', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'whet-act-'))
+  const art = join(dir, 'a.txt')
+  writeFileSync(art, 'x')
+  const act = makeClaudeAct({ artifactPath: art, claudeBin: 'false' }) // `false` exits 1, no output
+  await assert.rejects(act({ goal: 'g', last_critique: null, history: [] }), /editor|exit/i)
 })

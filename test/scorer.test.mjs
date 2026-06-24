@@ -54,6 +54,20 @@ test('exits 2 (scorer error) when counts cannot be parsed', () => {
   assert.equal(r.status, 2)
 })
 
+test('exits 2 when the test command exits non-zero but reports no failures (a masked crash)', () => {
+  // a crash / SIGKILL-137 / coverage-or-lint gate that still printed all-pass counts must NOT score
+  // 100 — that would let the loop declare victory on a broken run. exit≠0 with fail===0 is the tell.
+  const r = run(`echo 'ℹ pass 5'; echo 'ℹ fail 0'; exit 99`)
+  assert.equal(r.status, 2)
+})
+
+test('still scores normally when tests FAIL (non-zero exit WITH failures is the normal case)', () => {
+  // failing tests legitimately exit non-zero; only the contradiction (exit≠0 AND fail===0) is the bug.
+  const r = run(`echo 'ℹ pass 2'; echo 'ℹ fail 1'; exit 1`)
+  assert.equal(r.status, 0)
+  assert.equal(JSON.parse(r.stdout).score, 66.67)
+})
+
 test('extracts failing test names into the findings array (the gate-facing JSON)', () => {
   const r = run(`node -e "console.log('✖ test alpha (1ms)'); console.log('✖ test beta (1ms)'); console.log('ℹ pass 1'); console.log('ℹ fail 2')"`)
   const j = JSON.parse(r.stdout)

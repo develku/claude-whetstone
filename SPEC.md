@@ -17,7 +17,9 @@ Pure function. Reads only numbers the scorer produced. Precedence is deliberate:
 5. **running** — otherwise.
 
 Two further code-owned guards live in the loop, not the gate: a **no-op** pass
-(artifact byte-identical after ACT) → `error`; **spend over `budget_usd`** → `capped`.
+(artifact byte-identical after ACT) → `error`; **spend over `budget_usd` OR `budget_tokens`**
+→ `capped` (two parallel cost dials — USD for API-key auth, tokens for a subscription/Max plan
+where the USD figure is only a notional API-equivalent price).
 
 **Done-branch confirmation (optional, `confirm_scorer_cmd`).** When the gate would declare
 `done`, an INDEPENDENT confirm scorer re-scores the same output — but ONLY on the done edge, so
@@ -76,7 +78,7 @@ halts the composite with exit 2 (a broken dimension is never silently dropped). 
 gets its own wall-clock cap (5 min, `WHET_SUB_TIMEOUT_MS`) so one hung dimension can't wedge the
 composite or leak as an orphan. Deterministic iff every sub-scorer is.
 
-## 3. The act step (`act(state) -> { changed, costUsd }`)
+## 3. The act step (`act(state) -> { changed, costUsd, tokens }`)
 
 The model edits **only** `artifact_path`, one coherent change, steered by
 `state.last_critique` plus a code-owned **iteration ledger** (`buildLedger`: the recent score
@@ -84,8 +86,9 @@ trajectory, the best-so-far bar, and whether the last edit improved/regressed) s
 not repeat a failed edit — the bounded middle between amnesia (last critique only) and the harmful
 full-history context that degrades long refinement loops. The ledger is numbers-only, so it stays
 trusted and outside the critique fence. `changed` is computed by the driver via a sha256 of the
-artifact before/after (the no-op guard). `costUsd` is parsed from the headless
-`claude -p --output-format json` result (`total_cost_usd`). Isolated in
+artifact before/after (the no-op guard). `costUsd` and `tokens` are parsed from the headless
+`claude -p --output-format json` result — `total_cost_usd` and the summed `usage` token counts
+(input + output + both cache counts), feeding `spent_usd` and `spent_tokens` respectively. Isolated in
 `act-claude.mjs` because it is the costly, environment-sensitive part — everything
 else is testable with a stub.
 
@@ -93,8 +96,8 @@ else is testable with a stub.
 
 ```
 goal, artifact_path, observe_cmd, scorer_cmd, confirm_scorer_cmd,
-target_score(90), min_delta(1), plateau_window(3), hard_cap(10), budget_usd(null), model, effort(medium),
-pass, last_critique, current_score, best_score, best_pass, confirm_vetoed_at_pass, spent_usd,
+target_score(90), min_delta(1), plateau_window(3), hard_cap(10), budget_usd(null), budget_tokens(null), model, effort(medium),
+pass, last_critique, current_score, best_score, best_pass, confirm_vetoed_at_pass, spent_usd, spent_tokens,
 escalated, escalated_at_pass,   # set when a plateau triggered the stronger editor
 status(running|done|capped|plateau|error), status_reason, started_at, updated_at,
 history: [{ pass, score, critique_ref, snapshot, ts }]

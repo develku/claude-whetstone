@@ -5,6 +5,7 @@
 import { spawnSync } from 'node:child_process'
 import { copyFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
+import { resolve } from 'node:path'
 import {
   initState,
   recordPass,
@@ -63,7 +64,9 @@ function runObserve(observeCmd, loopDir) {
 export function buildContext(loopDir) {
   const evaluate = async (s) => {
     const pass = s.history.length
-    const output = s.observe_cmd ? runObserve(s.observe_cmd, loopDir) : s.artifact_path
+    // observe runs in cwd=loopDir but the scorer runs in the driver cwd, so resolve a relative
+    // observe-emitted path against loopDir — else the scorer reads it against the wrong dir (ENOENT).
+    const output = s.observe_cmd ? resolve(loopDir, runObserve(s.observe_cmd, loopDir)) : s.artifact_path
     const review = runScorer(s.scorer_cmd, { output, loopDir, pass })
     return { score: review.score, critique: review.critique, review }
   }
@@ -71,14 +74,16 @@ export function buildContext(loopDir) {
     const pass = s.history.length
     const snapshot = snapshotArtifact(loopDir, s.artifact_path, pass)
     const reviewRef = writeReview(loopDir, pass, ev.review ?? { score: ev.score, critique: ev.critique })
-    const next = recordPass(s, { score: ev.score, critique: ev.critique, snapshot, reviewRef, costUsd: ev.costUsd ?? 0 })
+    const next = recordPass(s, { score: ev.score, critique: ev.critique, snapshot, reviewRef, costUsd: ev.costUsd ?? 0, tokens: ev.tokens ?? 0 })
     saveState(loopDir, next)
     return next
   }
   // done-branch confirmation: re-score the same output with an INDEPENDENT scorer, run by the loop
   // only when the gate would declare done. Mirrors evaluate's output resolution (observe or artifact).
   const confirm = async (s) => {
-    const output = s.observe_cmd ? runObserve(s.observe_cmd, loopDir) : s.artifact_path
+    // observe runs in cwd=loopDir but the scorer runs in the driver cwd, so resolve a relative
+    // observe-emitted path against loopDir — else the scorer reads it against the wrong dir (ENOENT).
+    const output = s.observe_cmd ? resolve(loopDir, runObserve(s.observe_cmd, loopDir)) : s.artifact_path
     const review = runScorer(s.confirm_scorer_cmd, { output, loopDir, pass: s.history.length })
     return { score: review.score, critique: review.critique }
   }
@@ -173,6 +178,7 @@ export function parseCli(argv) {
     targetScore: get('--target') ? Number(get('--target')) : undefined,
     hardCap: get('--cap') ? Number(get('--cap')) : undefined,
     budgetUsd: get('--budget') ? Number(get('--budget')) : undefined,
+    budgetTokens: get('--budget-tokens') ? Number(get('--budget-tokens')) : undefined,
     model: get('--model', 'sonnet'),
     effort: get('--effort', 'medium'),
     escalateModel: get('--model-escalate', 'opus'),
@@ -192,10 +198,12 @@ function parseResumeOverrides(argv) {
   const o = {}
   const cap = get('--cap')
   const budget = get('--budget')
+  const budgetTokens = get('--budget-tokens')
   const target = get('--target')
   const model = get('--model')
   if (cap !== undefined) o.hard_cap = Number(cap)
   if (budget !== undefined) o.budget_usd = Number(budget)
+  if (budgetTokens !== undefined) o.budget_tokens = Number(budgetTokens)
   if (target !== undefined) o.target_score = Number(target)
   if (model !== undefined) o.model = model
   return o
@@ -213,7 +221,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (argv.includes('--resume')) {
     const loopDir = flag('--loop-dir')
     if (!loopDir) {
-      process.stderr.write('usage: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--target T] [--model M] [--model-escalate opus | --no-escalate] [--mcp-config <path>]\n')
+      process.stderr.write('usage: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--target T] [--model M] [--model-escalate opus | --no-escalate] [--mcp-config <path>]\n')
       process.exit(2)
     }
     try {
@@ -234,7 +242,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
   const cfg = parseCli(argv)
   if (!cfg.goal || !cfg.artifactPath || !cfg.scorerCmd) {
-    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--target T] [--model M]\n')
+    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--budget-tokens N] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--target T] [--model M]\n')
     process.exit(2)
   }
   const { state, verdict } = await runFromConfig(cfg)

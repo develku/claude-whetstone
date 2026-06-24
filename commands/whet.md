@@ -34,8 +34,11 @@ Collect these (use AskUserQuestion; treat any other inline `$ARGUMENTS` text as 
    - or a **custom** shell command — warn the user it is exec'd with their full privileges
      (arbitrary code execution; no sandbox).
 4. **target** — score that means done (default `90`).
-5. **cost ceiling** — REQUIRE at least one of `--cap` (max passes, default `10`) and
-   `--budget` (USD ceiling). **Do not proceed without an explicit bound.**
+5. **cost ceiling** — REQUIRE at least one of `--cap` (max passes, default `10`),
+   `--budget` (USD ceiling), or `--budget-tokens` (total-token ceiling). **Do not proceed without
+   an explicit bound.** On a **subscription (Max/Pro) plan, prefer `--budget-tokens`** — the
+   `--budget` USD figure is only a notional API-equivalent price there, while tokens are what the
+   rate limit actually counts.
 6. **model** — default `sonnet`; suggest `haiku` for mechanical artifacts; warn that `opus`
    is ~$0.22+/call.
 

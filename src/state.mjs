@@ -12,7 +12,10 @@ export function initState(cfg) {
   const ts = isoNow()
   return {
     goal: cfg.goal,
-    artifact_path: cfg.artifactPath,
+    // Resolve to absolute up front: the editor runs in dirname(artifact_path) and snapshot/restore/
+    // evaluate copy it, so a relative path would resolve against whatever cwd a later --resume runs
+    // from — reading/writing the wrong file. Resolved once here, the whole run is cwd-stable.
+    artifact_path: cfg.artifactPath ? resolve(cfg.artifactPath) : cfg.artifactPath,
     observe_cmd: cfg.observeCmd ?? null,
     scorer_cmd: cfg.scorerCmd ?? null,
     confirm_scorer_cmd: cfg.confirmScorerCmd ?? null,
@@ -21,6 +24,7 @@ export function initState(cfg) {
     plateau_window: cfg.plateauWindow ?? 3,
     hard_cap: cfg.hardCap ?? 10,
     budget_usd: cfg.budgetUsd ?? null,
+    budget_tokens: cfg.budgetTokens ?? null,
     model: cfg.model ?? null,
     effort: cfg.effort ?? 'medium',
     pass: 0,
@@ -30,6 +34,7 @@ export function initState(cfg) {
     best_pass: null,
     confirm_vetoed_at_pass: null,
     spent_usd: 0,
+    spent_tokens: 0,
     status: 'running',
     status_reason: null,
     started_at: ts,
@@ -39,7 +44,7 @@ export function initState(cfg) {
 }
 
 // Append one scored pass. pass index = current history length (0 = baseline).
-export function recordPass(state, { score, critique = null, snapshot = null, reviewRef = null, costUsd = 0 }) {
+export function recordPass(state, { score, critique = null, snapshot = null, reviewRef = null, costUsd = 0, tokens = 0 }) {
   const pass = state.history.length
   const isBest = state.best_score == null || score > state.best_score
   return {
@@ -50,6 +55,8 @@ export function recordPass(state, { score, critique = null, snapshot = null, rev
     best_score: isBest ? score : state.best_score,
     best_pass: isBest ? pass : state.best_pass,
     spent_usd: state.spent_usd + costUsd,
+    // ?? 0: a state.json written before token budgeting has no spent_tokens — read it as 0, not NaN.
+    spent_tokens: (state.spent_tokens ?? 0) + tokens,
     updated_at: isoNow(),
     history: [...state.history, { pass, score, critique_ref: reviewRef, snapshot, ts: isoNow() }],
   }

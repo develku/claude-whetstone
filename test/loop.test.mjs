@@ -1,22 +1,28 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { runLoop } from '../src/loop.mjs'
-import { initState, recordPass } from '../src/state.mjs'
+import { buildContext } from '../src/driver.mjs'
+import { initState, recordPass, ensureLoopDir } from '../src/state.mjs'
 
 // Drive the whole control flow with deterministic stubs — no Claude spawn, no
 // scorer process, zero spend. This is the clean-machine smoke test of the gate
 // wired into the loop: it proves done / capped / plateau / no-op / budget / error
 // all terminate correctly in CODE.
 
-function harness({ scores, changes, costs } = {}) {
+function harness({ scores, changes, costs, tokens } = {}) {
   const scoreQ = [...scores]
   const changeQ = changes ? [...changes] : null
   const costQ = costs ? [...costs] : null
+  const tokenQ = tokens ? [...tokens] : null
   return {
     evaluate: async () => ({ score: scoreQ.shift(), critique: 'do better' }),
     act: async () => ({
       changed: changeQ ? changeQ.shift() : true,
       costUsd: costQ ? costQ.shift() : 0,
+      tokens: tokenQ ? tokenQ.shift() : 0,
     }),
     // pure persist: recordPass only, no file I/O
     persist: (state, ev) => recordPass(state, ev),
@@ -75,6 +81,47 @@ test('halts when the scorer returns an invalid score', async () => {
   const h = harness({ scores: [50, null] })
   const { verdict } = await runLoop({ state: cfg(), ...h })
   assert.equal(verdict.status, 'error')
+})
+
+// --budget-tokens is a SECOND cost dial parallel to --budget (the real constraint on a
+// subscription/Max plan, where USD is only notional). It must cap, charge a no-op, and respect the
+// same error > done > capped precedence as the dollar budget.
+test('halts when the per-run token budget is exceeded', async () => {
+  const h = harness({ scores: [50, 60, 70, 80], tokens: [40000, 40000, 40000] })
+  const { state, verdict } = await runLoop({ state: cfg({ budgetTokens: 50000, hardCap: 20 }), ...h, log: () => {} })
+  assert.equal(verdict.status, 'capped')
+  assert.match(verdict.reason, /token budget/)
+  assert.ok(state.spent_tokens > 50000)
+})
+
+test('a paid no-op pass charges spent_tokens and can trip the token budget', async () => {
+  const h = harness({ scores: [50], changes: [false], tokens: [60000] })
+  const { state, verdict } = await runLoop({ state: cfg({ budgetTokens: 50000, hardCap: 20 }), ...h, log: () => {} })
+  assert.equal(verdict.status, 'capped')
+  assert.match(verdict.reason, /token budget/)
+  assert.ok(state.spent_tokens >= 60000, `no-op tokens must be charged (spent_tokens=${state.spent_tokens})`)
+})
+
+test('reaching the target on the pass that tips over the token budget reports done, not capped', async () => {
+  const h = harness({ scores: [50, 95], tokens: [60000] })
+  const { verdict } = await runLoop({ state: cfg({ targetScore: 90, budgetTokens: 50000, hardCap: 20 }), ...h, log: () => {} })
+  assert.equal(verdict.status, 'done')
+})
+
+// The REAL persist (buildContext, with file I/O) — not the pass-through stub the other tests use.
+// It rebuilds the recordPass arg field-by-field, so it must forward `tokens` as well as `costUsd`,
+// or spent_tokens never accumulates on a CHANGED pass and the token budget is dead in practice.
+// (A live run caught exactly this: spent_usd grew but spent_tokens stayed 0.)
+test('buildContext.persist forwards BOTH costUsd and tokens into the recorded spend', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'whet-persist-'))
+  ensureLoopDir(dir)
+  const artifact = join(dir, 'art.txt')
+  writeFileSync(artifact, 'hello')
+  const { persist } = buildContext(dir)
+  const s0 = initState({ goal: 'g', artifactPath: artifact, scorerCmd: 's' })
+  const s1 = persist(s0, { score: 50, critique: 'c', costUsd: 0.2, tokens: 1234 })
+  assert.equal(s1.spent_usd, 0.2)
+  assert.equal(s1.spent_tokens, 1234)
 })
 
 test('a paid no-op pass charges spent_usd and can trip the budget', async () => {

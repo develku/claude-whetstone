@@ -120,7 +120,10 @@ Directly measured on this machine (2026-06-22), **not** hand-waved:
   prompt + slash commands + tool defs) *even with no CLAUDE.md and no MCP loaded*. So
   **use `--model haiku` (or sonnet) for the act step** — Opus at `--cap 10` is ~$2.2+
   per loop in overhead alone. The code-owned `--budget` ceiling halts the run (checked
-  after each pass, so it can overshoot by one pass's cost — pair it with `--cap`).
+  after each pass, so it can overshoot by one pass's cost — pair it with `--cap`). On a
+  subscription (Max/Pro) plan that USD figure is only a *notional* API-equivalent price — bound
+  the run with **`--budget-tokens <N>`** instead (the total tokens the rate limit actually counts);
+  it is checked after each pass the same way, so pair either budget with `--cap`.
 - `--mcp-config empty-mcp.json --strict-mcp-config` **works** (`mcp_servers` → `[]`) —
   a real cost lever. An empty config is bundled at `empty-mcp.json`.
 - `--bare` (which would zero the tax) **does not work for OAuth/subscription (Max/Pro)

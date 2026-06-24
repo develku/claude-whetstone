@@ -49,6 +49,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const fail = failM ? Number(failM[1]) : 0
   const total = pass + fail
   if (total === 0) die('test command reported zero tests')
+  // A non-zero exit with ZERO reported failures is a contradiction: the run died for a reason the
+  // counts don't reflect (a crash, a SIGKILL/timeout that printed partial all-pass output, a
+  // coverage/lint gate, a collection abort). Scoring that 100 would let the loop declare victory on a
+  // broken run. A non-zero exit WITH failures is normal (failing tests), so only this case errors.
+  if (res.status !== 0 && fail === 0) {
+    die(`test command exited ${res.status} but reported no failures — exit code contradicts the all-pass output: ${out.slice(-300)}`)
+  }
 
   const score = Math.round((100 * pass) / total * 100) / 100
   const mainBody = out.split(/^\s*✖ failing tests:/m)[0]

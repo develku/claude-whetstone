@@ -9,7 +9,7 @@ import { isoNow } from './state.mjs'
 
 // Only these keys may be overridden on resume; everything else (history, best_score,
 // spent_usd, snapshots) is carried forward untouched.
-const OVERRIDABLE = ['hard_cap', 'budget_usd', 'target_score', 'model']
+const OVERRIDABLE = ['hard_cap', 'budget_usd', 'budget_tokens', 'target_score', 'model']
 
 const HINTS = {
   done: 'the run already reached its target',
@@ -54,6 +54,13 @@ export function prepareResume(loadedState, overrides = {}) {
     const spent = next.spent_usd.toFixed(2)
     return {
       error: `cannot resume (capped): budget $${next.budget_usd} already spent ($${spent}) — raise --budget above ${spent}`,
+    }
+  }
+  // Same guard for the token budget — also loop-enforced, also invisible to the gate.
+  if (next.budget_tokens != null && (next.spent_tokens ?? 0) > next.budget_tokens) {
+    const spent = next.spent_tokens ?? 0
+    return {
+      error: `cannot resume (capped): token budget ${next.budget_tokens} already spent (${spent}) — raise --budget-tokens above ${spent}`,
     }
   }
   return { state: next }
