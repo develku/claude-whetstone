@@ -4,9 +4,9 @@ A deterministic **loop-engineering** driver for Claude Code: raise *one* artifac
 toward a measured score threshold, where **code owns the gate** and the **model
 owns only diagnosis + edits**.
 
-> Status: **spike / private.** Built to be matured by running it on itself
-> (dogfooding). Public release is deferred until the cost, auth, and security
-> model are proven, not speculative.
+> Status: **early spike, public.** Built to be matured by running it on itself
+> (dogfooding); the cost, auth, and security model are exercised end-to-end, not
+> speculative. Expect rough edges.
 
 ## The one idea
 
@@ -161,29 +161,27 @@ tokens), don't point it at a whole-repo refactor (it raises *one* artifact), and
 don't hand-craft a rigid static harness — the scorer is the pluggable seam exactly
 so you don't have to. Most tasks don't need a feedback controller.
 
-## Install as a Claude Code plugin (private)
+## Install as a Claude Code plugin
 
-whetstone ships as a single-plugin Claude Code marketplace (`.claude-plugin/`). To use it
-privately — no GitHub repo, nothing published — register *this directory* as a local
-marketplace and install from it. Run these in a terminal (quote the path if it has spaces):
+whetstone ships as a single-plugin Claude Code marketplace (`.claude-plugin/`). Register it by
+`owner/repo` and install — the repo *is* the marketplace, so `source: "./"` resolves to its root:
 
 ```bash
-claude plugin marketplace add "/absolute/path/to/claude-whetstone"
+claude plugin marketplace add develku/claude-whetstone
 claude plugin install whetstone@whetstone
 ```
 
-> For a path with spaces, use the terminal form above. The interactive
-> `/plugin marketplace add "<path>"` slash form keeps the literal quotes in its argument and
-> then mistakes the path for a GitHub repo (the clone fails).
+> Developing whetstone itself? Register your local checkout instead:
+> `claude plugin marketplace add "/absolute/path/to/claude-whetstone"` (quote a path with spaces —
+> the interactive `/plugin marketplace add` slash form mistakes a quoted path for a GitHub repo and
+> the clone fails).
 
 Install **snapshots** the plugin into `~/.claude/plugins/cache/` — it is a copy, not the live
 repo, so after editing whetstone's own code run `claude plugin update whetstone@whetstone` (and
 restart the session) to pick the changes up. The command surfaces as **`/whetstone:whet`** — a
 guided launcher that collects the goal, artifact, scorer, target, and a required cost bound,
 shows the assembled command plus a worst-case cost estimate, and runs the driver only after you
-confirm; `/whetstone:whet resume` continues a stopped run. Going public later is just pushing
-this repo to `develku/claude-whetstone` and registering the marketplace by `owner/repo` instead
-of by path.
+confirm; `/whetstone:whet resume` continues a stopped run.
 
 ## Layout
 
