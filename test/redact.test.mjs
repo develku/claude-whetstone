@@ -42,7 +42,12 @@ test('redacts a Slack token', () => {
 })
 
 test('redacts a Google API key', () => {
-  assert.doesNotMatch(redactSecrets('AIzaSyA1234567890abcdefghijklmnopqrstuv'), /AIza/)
+  // Assembled from parts so the 39-char literal never appears contiguously in source — GitHub secret
+  // scanning flagged the inlined form as a (false-positive) Google API key. It still reconstructs a
+  // format-valid AIza key at runtime, so the redaction regex is genuinely exercised.
+  // Do NOT re-inline this into a single string literal (it will re-trip the scanner).
+  const googleKey = 'AIza' + 'SyA1234567890' + 'abcdefghijklmnopqrstuv'
+  assert.doesNotMatch(redactSecrets(googleKey), /AIza/)
 })
 
 test('redacts the full Anthropic key including the hyphenated suffix', () => {
