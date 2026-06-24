@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { coarseSignalPlateau, readLatestFindings, resolveSubGate, decomposable } from '../src/decompose.mjs'
+import { coarseSignalPlateau, readLatestFindings, resolveSubGate, decomposable, splitBudget, buildChildCfg } from '../src/decompose.mjs'
 
 // A state the gate reads as `plateau` (best-score flat over plateau_window+1 passes), below target.
 function plateauState(over = {}) {
@@ -68,4 +68,27 @@ test('decomposable: keeps resolvable, unseen findings only', () => {
   const seen = new Set(['A'])                                  // already decomposed -> dropped
   assert.deepEqual(decomposable(findings, seen, ctx).map((f) => f.area), [])
   assert.deepEqual(decomposable(findings, new Set(), ctx).map((f) => f.area), ['A'])
+})
+
+test('splitBudget: divides only the dials that are set', () => {
+  assert.deepEqual(splitBudget({ usd: 6, tokens: 300000 }, 3), { budgetUsd: 2, budgetTokens: 100000 })
+  assert.deepEqual(splitBudget({ usd: null, tokens: null }, 4), { budgetUsd: null, budgetTokens: null })
+})
+
+test('buildChildCfg: child repo is the PARENT scope, never finding.scope; no recursion [CR#5]', () => {
+  const parentCfg = { scope: '/repo', readOnly: ['test/'], model: 'sonnet', effort: 'medium', escalateModel: 'opus', noEscalate: false, mcpConfig: null }
+  const state = { goal: 'make tests pass', target_score: 90 }
+  const finding = { area: 'auth login', suggestion: 'fix auth', scope: 'src/auth' }
+  const subgate = { editScope: 'src/auth', scorerCmd: "node '/abs/test-pass-rate.mjs' '--only' 'auth login'" }
+  const cfg = buildChildCfg(parentCfg, state, finding, subgate, { budgetUsd: 2, budgetTokens: 100000 }, 3, '/parent/loop')
+  assert.equal(cfg.scope, '/repo')              // git cwd is the parent repo, NOT finding.scope
+  assert.equal(cfg.artifactPath, '/repo')
+  assert.equal(cfg.editScope, 'src/auth')        // finding.scope only steers the editor prompt
+  assert.equal(cfg.scorerCmd, subgate.scorerCmd)
+  assert.equal(cfg.confirmScorerCmd, null)       // the PARENT confirm is the moat; children don't carry it
+  assert.equal(cfg.hardCap, 3)
+  assert.equal(cfg.budgetUsd, 2)
+  assert.equal(cfg.decompose, false)             // depth cap 1
+  assert.match(cfg.goal, /specifically: fix auth/)
+  assert.equal(cfg.loopDir, '/parent/loop/children/auth-login')
 })

@@ -56,3 +56,41 @@ export function resolveSubGate(finding, { repoDir, allowlist }) {
 export function decomposable(findings, seen, ctx) {
   return findings.filter((f) => !seen.has(key(f)) && resolveSubGate(f, ctx) != null)
 }
+
+// Per-child budget share: divide each SET dial by the children still to launch; a null dial stays null
+// (cap-only bounding). Recomputed before each child by the closure so spend can't outrun the budget. [CR#6]
+export function splitBudget(remaining, n) {
+  return {
+    budgetUsd: remaining.usd == null ? null : remaining.usd / n,
+    budgetTokens: remaining.tokens == null ? null : remaining.tokens / n,
+  }
+}
+
+const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'finding'
+
+// A child is a normal whetstone-scope run, narrowed: same repo (NEVER finding.scope as cwd [CR#5]),
+// a focused goal, the scorer-emitted sub-gate, a small cap, its budget share, and decompose:false so
+// it cannot recurse (depth cap 1). Its loop dir nests under the parent's (which is gitignored/outside).
+export function buildChildCfg(parentCfg, state, finding, subgate, share, childCap, parentLoopDir) {
+  return {
+    goal: `${state.goal} — specifically: ${finding.suggestion ?? finding.area}`,
+    scope: parentCfg.scope,
+    artifactPath: parentCfg.scope,
+    editScope: subgate.editScope,
+    scorerCmd: subgate.scorerCmd,
+    confirmScorerCmd: null,
+    observeCmd: null,
+    readOnly: parentCfg.readOnly,
+    targetScore: state.target_score,
+    hardCap: childCap,
+    budgetUsd: share.budgetUsd,
+    budgetTokens: share.budgetTokens,
+    model: parentCfg.model,
+    effort: parentCfg.effort,
+    escalateModel: parentCfg.escalateModel,
+    noEscalate: parentCfg.noEscalate,
+    mcpConfig: parentCfg.mcpConfig,
+    decompose: false,
+    loopDir: join(parentLoopDir, 'children', slug(finding.area)),
+  }
+}
