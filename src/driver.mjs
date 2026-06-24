@@ -100,11 +100,14 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
 
   const { evaluate, persist, confirm } = buildContext(loopDir)
   // Cheap editor every pass; stronger editor only after a plateau (escalation).
-  const act = deps.act ?? makeClaudeAct({ artifactPath: state.artifact_path, model: state.model, mcpConfig: cfg.mcpConfig, effort: editorEffort(state, false) })
+  // make is the editor factory (injectable so a test can observe the effort/model each editor is
+  // built with — the real makeClaudeAct's effort is otherwise unobservable behind a claude spawn).
+  const make = deps.makeAct ?? makeClaudeAct
+  const act = deps.act ?? make({ artifactPath: state.artifact_path, model: state.model, mcpConfig: cfg.mcpConfig, effort: editorEffort(state, false) })
   const escalateModel = cfg.noEscalate ? null : cfg.escalateModel ?? 'opus'
   const actEscalated =
     deps.actEscalated ??
-    (escalateModel ? makeClaudeAct({ artifactPath: state.artifact_path, model: escalateModel, mcpConfig: cfg.mcpConfig, effort: editorEffort(state, true) }) : null)
+    (escalateModel ? make({ artifactPath: state.artifact_path, model: escalateModel, mcpConfig: cfg.mcpConfig, effort: editorEffort(state, true) }) : null)
 
   // keep-best: restore a prior snapshot back over the live artifact when a pass regressed.
   // safeSnapshotPath refuses a ref that escapes the run dir (a poisoned snapshot ref on resume).

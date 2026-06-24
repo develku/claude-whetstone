@@ -181,6 +181,20 @@ test('a confirm veto records confirm_vetoed_at_pass so a kill mid-rescue is not 
   assert.equal(state.confirm_vetoed_at_pass, state.pass) // marker stamped on the vetoed pass
 })
 
+test('a confirm veto PERSISTS the marker via save() — durable on disk, not just on the returned state', async () => {
+  // the durable save is the load-bearing half of the fix: without it, a kill during the post-veto
+  // edit leaves a done-looking state.json and resume refuses. Assert save fires with the marker.
+  const saved = []
+  await runLoop({
+    state: cfg({ targetScore: 90, hardCap: 1 }),
+    ...harness({ scores: [95, 95] }),
+    confirm: async () => ({ score: 50, critique: 'gap' }),
+    save: (st) => saved.push(st),
+    log: () => {},
+  })
+  assert.ok(saved.some((st) => st.confirm_vetoed_at_pass === st.pass), 'save() must persist the veto marker, not only return it')
+})
+
 test('a confirmation that clears target lets done stand', async () => {
   const h = harness({ scores: [95] })
   const { verdict } = await runLoop({

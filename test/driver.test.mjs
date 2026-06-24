@@ -110,6 +110,30 @@ test('parseCli reads a positional goal and an explicit --goal', () => {
   assert.equal(parseCli(['node', 'driver.mjs', '--goal', 'explicit', '--artifact', 'x']).goal, 'explicit')
 })
 
+test('the forward editor is built at the operator effort and the rescue editor at the floored effort (wiring, not just the helper)', async () => {
+  // closes the gap where editorEffort is unit-tested but its wiring to the two editors is not:
+  // a makeAct spy observes the effort each editor is actually constructed with.
+  const dir = mkdtempSync(join(tmpdir(), 'whetstone-'))
+  const artifact = join(dir, 'a.txt')
+  writeFileSync(artifact, 'v0')
+  const opts = []
+  let n = 0
+  const make = (o) => {
+    opts.push(o)
+    return async () => {
+      writeFileSync(artifact, `v${++n}`)
+      return { changed: true, costUsd: 0 }
+    }
+  }
+  await runFromConfig(
+    { goal: 'g', artifactPath: artifact, scorerCmd, targetScore: 90, hardCap: 5, effort: 'medium', loopDir: join(dir, '.loop') },
+    { makeAct: make, log: () => {} },
+  )
+  const efforts = opts.map((o) => o.effort)
+  assert.ok(efforts.includes('medium'), `forward editor (operator effort) missing: ${efforts}`)
+  assert.ok(efforts.includes('high'), `rescue editor (floored effort) missing: ${efforts}`)
+})
+
 test('editorEffort: forward uses the operator effort; rescue is a FLOOR that never downgrades it', () => {
   // the rescue editor must raise (or hold) effort, never lower it — escalation goes UP on both dials.
   assert.equal(editorEffort({ effort: 'medium' }, false), 'medium') // forward pass: as configured

@@ -108,6 +108,18 @@ test('composite (e2e) takes the min across sub-scorers and exits 0', () => {
   assert.match(j.critique, /#0=100 #1=60/)
 })
 
+test('composite (e2e) forwards --pass to each sub-scorer (the result changes with the pass index)', () => {
+  // the min e2e uses --pass 0, where seq-scorer returns scores[0] regardless of forwarding — so it
+  // can't catch a dropped --pass. Use --pass 1 with two-element scores so the min is 60 only if --pass
+  // arrives (pass 1 -> min(60,100)); a dropped --pass defaults each sub to pass 0 -> min(99,99)=99.
+  const dir = mkdtempSync(join(tmpdir(), 'whet-composite-'))
+  const file = join(dir, 'gate.txt')
+  writeFileSync(file, [`node ${JSON.stringify(seq)} --scores 99,60`, `node ${JSON.stringify(seq)} --scores 99,100`].join('\n'))
+  const r = spawnSync('node', [composite, '--scorers-file', file, '--output', 'x', '--loop-dir', '.', '--pass', '1'], { encoding: 'utf8' })
+  assert.equal(r.status, 0)
+  assert.equal(JSON.parse(r.stdout).score, 60)
+})
+
 test('composite (e2e) exits 2 when any sub-scorer fails (no silent drop)', () => {
   const r = runComposite([`node ${JSON.stringify(seq)} --scores 100`, `node -e "process.exit(2)"`])
   assert.equal(r.status, 2)
