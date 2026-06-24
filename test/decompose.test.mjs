@@ -49,6 +49,7 @@ test('resolveSubGate: builds a shq-quoted command from an allowlisted id', () =>
 test('resolveSubGate: rejects an unknown scorer id (injection/allowlist) [CR#4]', () => {
   assert.equal(resolveSubGate({ area: 'a', scorer: { id: 'rm -rf /', args: [] } }, ctx), null)
   assert.equal(resolveSubGate({ area: 'a' }, ctx), null) // no scorer field -> not decomposable
+  assert.equal(resolveSubGate({ area: 'a', scorer: { id: 'test-pass-rate', args: 'not-an-array' } }, ctx), null)
 })
 
 test('resolveSubGate: rejects a scope that escapes the repo [CR#5]', () => {

@@ -48,7 +48,7 @@ export function resolveSubGate(finding, { repoDir, allowlist }) {
     if (full !== base && !full.startsWith(base + sep)) return null // escapes the repo -> refuse
     editScope = String(finding.scope)
   }
-  const scorerCmd = `node ${shq(scriptPath)} ${sg.args.map(shq).join(' ')}`.trim()
+  const scorerCmd = ['node', shq(scriptPath), ...sg.args.map(shq)].join(' ')
   return { editScope, scorerCmd }
 }
 
