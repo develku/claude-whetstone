@@ -129,6 +129,7 @@ pass burns ~100–150K tokens, so a per-run budget is roughly `cap × 150000`). 
 ## Open questions for the dogfooding phase
 
 - Cost control: wire `--mcp-config <empty>` by default? detect OAuth vs API-key auth?
-- Regression policy: restore best snapshot when a pass regresses (keep-best) vs let
-  the next critique recover (keep-latest)? Currently neither is enforced.
+- Regression policy: **decided — keep-best is the enforced default.** `restoreTarget`
+  (`src/regression.mjs`) rolls the best snapshot back over the artifact whenever a pass scores below
+  the best so far; set `regression_policy: keep-latest` to opt out. (Resolved during dogfooding.)
 - Multi-file artifacts (a `git stash`/commit snapshot unit) vs strict single-file.
