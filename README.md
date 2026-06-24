@@ -273,10 +273,8 @@ If you're already *in* an interactive session with the Workflow tool, you don't 
 that — a short Workflow script with a `while (score < target)` gate does the same code-owned loop
 in-session, and cheaper (warm subagents skip the per-spawn context-reload tax the CLI pays on each
 act). Pick by quadrant: **Workflow for attended/interactive, whetstone for detached/unattended/cron.**
-The `act` step is just an injectable function returning `{ changed, costUsd, tokens }`, so the *editor*
-itself is swappable — not only Claude. A **Codex-backed editor** for the writing step (shelling out to
-`codex exec`) or a Workflow-backed `act` would each be a drop-in: same contract, different engine. Both
-are future options, not dependencies — today the shipped, guaranteed editor is `claude -p`.
+The `act` step is just an injectable function returning `{ changed, costUsd, tokens }`, so a
+Workflow-backed `act` would be a drop-in if anyone ever wants it — a future option, not a dependency.
 
 ## When to use (and not)
 
