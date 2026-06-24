@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { gitSnapshot, gitRestore } from '../src/git-snapshot.mjs'
+import { gitSnapshot, gitRestore, gitVerifyAt } from '../src/git-snapshot.mjs'
 
 const git = (dir, ...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim()
 
@@ -43,6 +43,20 @@ test('gitRestore rolls the tree back to a snapshot: edits revert and new files v
     gitRestore(dir, best)
     assert.equal(readFileSync(join(dir, 'a.txt'), 'utf8'), 'good')
     assert.equal(existsSync(join(dir, 'junk.txt')), false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('gitVerifyAt runs in a clean checkout of the ref, isolated from the dirty working tree', () => {
+  const dir = tempRepo()
+  try {
+    writeFileSync(join(dir, 'f.txt'), 'committed')
+    const sha = gitSnapshot(dir, 's')
+    writeFileSync(join(dir, 'f.txt'), 'DIRTY working tree') // an uncommitted change the editor left behind
+    const seen = gitVerifyAt(dir, sha, (wt) => readFileSync(join(wt, 'f.txt'), 'utf8'))
+    assert.equal(seen, 'committed') // verified the COMMITTED state, not the dirty working tree
+    assert.equal(readFileSync(join(dir, 'f.txt'), 'utf8'), 'DIRTY working tree') // working tree untouched
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

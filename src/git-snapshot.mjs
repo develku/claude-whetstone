@@ -3,6 +3,9 @@
 // commit SHA doubles as state.history[].snapshot AND gives a self-commit + audit trail for free.
 // execFileSync throws on a non-zero git exit, so failures propagate (no silent corruption).
 import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const git = (dir, args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim()
 
@@ -20,4 +23,19 @@ export function gitSnapshot(scopeDir, label) {
 export function gitRestore(scopeDir, sha) {
   git(scopeDir, ['reset', '--hard', sha])
   git(scopeDir, ['clean', '-fdq'])
+}
+
+// The Forge graft (v1): run `fn` against a PRISTINE checkout of `ref` in a throwaway worktree, isolated
+// from the live (possibly dirty) working tree. Used for the done-edge confirm — the held-out gate is
+// scored on exactly the COMMITTED state, never the editor's uncommitted leftovers, so a pass can't game
+// the finish with stray working-tree state. The worktree is always removed.
+export function gitVerifyAt(scopeDir, ref, fn) {
+  const wt = mkdtempSync(join(tmpdir(), 'whet-verify-'))
+  try {
+    git(scopeDir, ['worktree', 'add', '--detach', '-q', wt, ref])
+    return fn(wt)
+  } finally {
+    try { git(scopeDir, ['worktree', 'remove', '--force', wt]) } catch { /* fall through to rm */ }
+    rmSync(wt, { recursive: true, force: true })
+  }
 }

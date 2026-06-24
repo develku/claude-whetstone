@@ -6,7 +6,7 @@
 // (the "artifact" is the directory); everything else — escalation, confirm-veto, budget — is reused.
 import { spawnSync } from 'node:child_process'
 import { writeReview, recordPass, saveState, zeroPad } from './state.mjs'
-import { gitSnapshot } from './git-snapshot.mjs'
+import { gitSnapshot, gitVerifyAt } from './git-snapshot.mjs'
 
 const CHILD_TIMEOUT_MS = 5 * 60 * 1000
 
@@ -37,8 +37,13 @@ export function scopeBuildContext(loopDir) {
     saveState(loopDir, next)
     return next
   }
+  // Done-edge confirm (v1 Forge graft): run the held-out scorer against a PRISTINE checkout of the pass
+  // just committed, not the live working tree — so the finish is verified on exactly the committed state
+  // the editor can't have left stray cruft in. Falls back to in-place only before the first snapshot.
   const confirm = async (s) => {
-    const review = runScopeScorer(s.confirm_scorer_cmd, { scopeDir: s.artifact_path, loopDir, pass: s.history.length })
+    const ref = s.history[s.history.length - 1]?.snapshot
+    const score = (dir) => runScopeScorer(s.confirm_scorer_cmd, { scopeDir: dir, loopDir, pass: s.history.length })
+    const review = ref ? gitVerifyAt(s.artifact_path, ref, score) : score(s.artifact_path)
     return { score: review.score, critique: review.critique }
   }
   return { evaluate, persist, confirm }

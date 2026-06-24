@@ -103,3 +103,28 @@ test('scope loop rolls a regressing pass back to the best snapshot via git (keep
     rmSync(scopeDir, { recursive: true, force: true }); rmSync(loopDir, { recursive: true, force: true }); rmSync(scorer.dir, { recursive: true, force: true })
   }
 })
+
+// CAPSTONE 3 (v1) — a gamed primary cannot reach done: an independent held-out scorer, run from a CLEAN
+// checkout (the editor never touches it), vetoes the finish. This is the anti-reward-hacking heart.
+test('held-out confirm vetoes a gamed primary, verified from a clean tree (v1)', async () => {
+  const scopeDir = tempRepo()
+  const loopDir = mkdtempSync(join(tmpdir(), 'whet-veto-'))
+  const sdir = mkdtempSync(join(tmpdir(), 'whet-vsc-'))
+  const primary = join(sdir, 'primary.mjs')
+  try {
+    writeFileSync(primary, "import { readFileSync } from 'node:fs'\nconst n = Number(readFileSync('progress.txt', 'utf8').split('\\n')[0].trim())\nprocess.stdout.write(JSON.stringify({ score: n, critique: 'raise it' }))\n")
+    writeFileSync(join(scopeDir, 'progress.txt'), '95') // primary already reads "done"
+    writeFileSync(join(scopeDir, 'held.json'), '{"score":20,"critique":"held-out fails"}') // but the held-out gate fails
+    git(scopeDir, 'add', '-A'); git(scopeDir, 'commit', '-q', '-m', 'seed')
+    let c = 0
+    const stubAct = async () => { c++; writeFileSync(join(scopeDir, 'progress.txt'), `95\n# pass ${c}`); return { changed: true, costUsd: 0, tokens: 0 } }
+    const { state, verdict } = await runFromConfig(
+      { goal: 'g', artifactPath: scopeDir, scorerCmd: `node ${primary}`, confirmScorerCmd: 'cat held.json #', targetScore: 90, hardCap: 3, noEscalate: true, loopDir },
+      { buildContext: scopeBuildContext, act: stubAct, restore: (sha) => gitRestore(scopeDir, sha), log: () => {} }
+    )
+    assert.notEqual(verdict.status, 'done') // the gamed primary did NOT win
+    assert.equal(typeof state.confirm_vetoed_at_pass, 'number') // the held-out veto fired
+  } finally {
+    rmSync(scopeDir, { recursive: true, force: true }); rmSync(loopDir, { recursive: true, force: true }); rmSync(sdir, { recursive: true, force: true })
+  }
+})

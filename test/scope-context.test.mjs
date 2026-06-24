@@ -50,3 +50,20 @@ test('scope evaluate runs the scorer in cwd=scopeDir and returns its score', asy
     rmSync(scopeDir, { recursive: true, force: true }); rmSync(loopDir, { recursive: true, force: true })
   }
 })
+
+test('scope confirm scores the committed snapshot from a clean checkout, not the dirty tree (v1 Forge graft)', async () => {
+  const scopeDir = tempRepo()
+  const loopDir = mkdtempSync(join(tmpdir(), 'whet-loop-'))
+  try {
+    ensureLoopDir(loopDir)
+    const ctx = scopeBuildContext(loopDir)
+    writeFileSync(join(scopeDir, 'held.json'), '{"score":90,"critique":"held"}')
+    let s = stateFor(scopeDir, { confirm_scorer_cmd: 'cat held.json #' })
+    s = ctx.persist(s, { score: 90, critique: 'c', review: { score: 90, critique: 'c' }, costUsd: 0, tokens: 0 }) // commits held.json=90
+    writeFileSync(join(scopeDir, 'held.json'), '{"score":100,"critique":"gamed"}') // editor games the dirty tree
+    const r = await ctx.confirm(s)
+    assert.equal(r.score, 90) // verified the COMMITTED snapshot (90), not the gamed working tree (100)
+  } finally {
+    rmSync(scopeDir, { recursive: true, force: true }); rmSync(loopDir, { recursive: true, force: true })
+  }
+})
