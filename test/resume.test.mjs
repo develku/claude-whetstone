@@ -73,6 +73,23 @@ test('resumes a budget-exhausted run once the budget is raised', () => {
   assert.equal(state.status, 'running')
 })
 
+test('resumes a confirm-vetoed last pass (primary met target, confirm rejected it) instead of refusing it as done', () => {
+  // a kill mid-rescue leaves disk state whose primary >= target; without veto-awareness the gate
+  // would call it done and refuse resume — the opposite of why --confirm-scorer was added.
+  const s = { ...buildState({ scores: [40, 95], hardCap: 10 }), confirm_vetoed_at_pass: 1 } // pass 1, primary 95 >= 90
+  const { state, error } = prepareResume(s, {})
+  assert.equal(error, undefined)
+  assert.equal(state.status, 'running')
+})
+
+test('a confirm-vetoed last pass still refuses to resume when the cap is already hit', () => {
+  // veto-awareness must not bypass the cap (the gate hides cap behind done when primary >= target).
+  const s = { ...buildState({ scores: [40, 95], hardCap: 1 }), confirm_vetoed_at_pass: 1 } // pass 1 >= cap 1
+  const { state, error } = prepareResume(s, {}) // no cap raise
+  assert.equal(state, undefined)
+  assert.match(error, /cap/i)
+})
+
 test('overrides only the provided keys and preserves history', () => {
   const s = { ...buildState({ scores: [40, 75], hardCap: 1, targetScore: 90 }), status: 'capped' }
   const { state } = prepareResume(s, { hard_cap: 5 })

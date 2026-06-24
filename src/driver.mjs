@@ -18,7 +18,7 @@ import {
 } from './state.mjs'
 import { runLoop } from './loop.mjs'
 import { makeClaudeAct } from './act-claude.mjs'
-import { validateConfig } from './validate.mjs'
+import { validateConfig, EFFORT_LEVELS } from './validate.mjs'
 import { prepareResume } from './resume.mjs'
 import { formatReport } from './summary.mjs'
 
@@ -35,6 +35,15 @@ const CHILD_TIMEOUT_MS = 5 * 60 * 1000
 // goes up on BOTH dials (model + effort) in one decisive jump, only when the loop proves it's stuck.
 // 'high', not 'max': editing is the easy half, so reserve max for the judge / a deep-stall override.
 const RESCUE_EFFORT = 'high'
+
+// Resolve the editor's effort: forward passes use the operator's --effort; the rescue editor uses
+// RESCUE_EFFORT as a FLOOR — never a downgrade. If the operator already runs --effort high|xhigh|max,
+// the rescue keeps theirs, so escalation always raises (or holds) effort, never lowers it.
+export function editorEffort(state, escalated) {
+  if (!escalated) return state.effort
+  const i = Math.max(EFFORT_LEVELS.indexOf(state.effort), EFFORT_LEVELS.indexOf(RESCUE_EFFORT))
+  return EFFORT_LEVELS[i] ?? RESCUE_EFFORT
+}
 
 function runScorer(scorerCmd, { output, loopDir, pass }) {
   const full = `${scorerCmd} --output ${shq(output)} --loop-dir ${shq(loopDir)} --pass ${zeroPad(pass)}`
@@ -91,11 +100,11 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
 
   const { evaluate, persist, confirm } = buildContext(loopDir)
   // Cheap editor every pass; stronger editor only after a plateau (escalation).
-  const act = deps.act ?? makeClaudeAct({ artifactPath: state.artifact_path, model: state.model, mcpConfig: cfg.mcpConfig, effort: state.effort })
+  const act = deps.act ?? makeClaudeAct({ artifactPath: state.artifact_path, model: state.model, mcpConfig: cfg.mcpConfig, effort: editorEffort(state, false) })
   const escalateModel = cfg.noEscalate ? null : cfg.escalateModel ?? 'opus'
   const actEscalated =
     deps.actEscalated ??
-    (escalateModel ? makeClaudeAct({ artifactPath: state.artifact_path, model: escalateModel, mcpConfig: cfg.mcpConfig, effort: RESCUE_EFFORT }) : null)
+    (escalateModel ? makeClaudeAct({ artifactPath: state.artifact_path, model: escalateModel, mcpConfig: cfg.mcpConfig, effort: editorEffort(state, true) }) : null)
 
   // keep-best: restore a prior snapshot back over the live artifact when a pass regressed.
   // safeSnapshotPath refuses a ref that escapes the run dir (a poisoned snapshot ref on resume).
@@ -109,6 +118,7 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
     persist,
     restore,
     confirm: deps.confirm ?? (state.confirm_scorer_cmd ? confirm : null),
+    save: deps.save ?? ((st) => saveState(loopDir, st)), // durable confirm-veto marker (see confirmDone)
     skipBaseline,
     log: deps.log ?? defaultLog,
   })

@@ -23,7 +23,10 @@ Two further code-owned guards live in the loop, not the gate: a **no-op** pass
 `done`, an INDEPENDENT confirm scorer re-scores the same output — but ONLY on the done edge, so
 normal passes stay cheap and the skepticism is paid only at the finish line. If the confirm score
 is below target, the `done` is VETOED (the editor likely gamed the primary signal): the loop keeps
-running, steered by the confirm critique, still bounded by the cap/budget. This is the second layer
+running, steered by the confirm critique, still bounded by the cap/budget. An invalid confirm score
+(outside 0..100, or missing) halts with `error`, the same invariant the gate holds the primary score
+to. The veto is persisted (`confirm_vetoed_at_pass`) so a kill during the post-veto edit resumes as
+`running`, not a false `done`. This is the second layer
 of verifier robustness above `composite` (multi-signal) — it catches a reward-hacked finish that a
 single primary scorer would wave through. Same scorer contract; deterministic iff the confirm
 scorer is. Wire it with `--confirm-scorer "<cmd>"` (e.g. a held-out test set or an independent judge).
@@ -38,8 +41,9 @@ and tells the strong editor a cheaper model plateaued here, so it makes a *bolde
 different-strategy* edit (still one file) rather than a pricier version of the same local tweak —
 strength must change the edit STRATEGY, not just the model name. No retry ladder: one decisive
 jump, because a plateau is evidence the cheaper config is already exhausted at this point.
-Strength rises on BOTH dials in that one jump: the rescue editor also steps **effort** up to `high`
-(`RESCUE_EFFORT`), while forward passes run at `--effort` (default `medium`, validated against
+Strength rises on BOTH dials in that one jump: the rescue editor steps **effort** up to a `high`
+**floor** (`RESCUE_EFFORT` via `editorEffort` — never *below* the operator's `--effort`, so escalation
+only ever raises or holds effort), while forward passes run at `--effort` (default `medium`, validated against
 `low|medium|high|xhigh|max`). Editing is the easy half, so the editor stays cheap and `max` is
 reserved for a judge scorer or a deliberate deep-stall override — never a fixed `max` every pass
 (the frontier anti-pattern: uniform max budget wastes compute on the easy inputs).
@@ -68,8 +72,9 @@ to each) and combines their scores by **min**, so the gate reaches `done` only w
 *weakest* dimension clears target. This hardens the gate — a green test suite no longer ships
 if a paired security/robustness judge is still low. The critique steers the next edit at the
 binding (min) dimension. A non-zero exit / non-JSON / out-of-range score from *any* sub-scorer
-halts the composite with exit 2 (a broken dimension is never silently dropped). Deterministic
-iff every sub-scorer is.
+halts the composite with exit 2 (a broken dimension is never silently dropped). Each sub-scorer also
+gets its own wall-clock cap (5 min, `WHET_SUB_TIMEOUT_MS`) so one hung dimension can't wedge the
+composite or leak as an orphan. Deterministic iff every sub-scorer is.
 
 ## 3. The act step (`act(state) -> { changed, costUsd }`)
 
@@ -89,7 +94,7 @@ else is testable with a stub.
 ```
 goal, artifact_path, observe_cmd, scorer_cmd, confirm_scorer_cmd,
 target_score(90), min_delta(1), plateau_window(3), hard_cap(10), budget_usd(null), model, effort(medium),
-pass, last_critique, current_score, best_score, best_pass, spent_usd,
+pass, last_critique, current_score, best_score, best_pass, confirm_vetoed_at_pass, spent_usd,
 escalated, escalated_at_pass,   # set when a plateau triggered the stronger editor
 status(running|done|capped|plateau|error), status_reason, started_at, updated_at,
 history: [{ pass, score, critique_ref, snapshot, ts }]

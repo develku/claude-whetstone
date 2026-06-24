@@ -3,7 +3,11 @@
 // refinement loops (the "context ceiling"). Pure, derived ONLY from scores (numbers) — it carries
 // no untrusted scorer free-text, so it is trusted context, unlike the fenced critique.
 export function buildLedger(state) {
-  const valid = state.history.filter((e) => typeof e.score === 'number' && Number.isFinite(e.score))
+  // Numbers-only is a SECURITY contract, not just a style: this string lands in the UNFENCED
+  // (trusted) region of the editor prompt, so every interpolated value — score, pass, AND
+  // best_score — must be a finite number, or a tampered/shared resumed state.json could smuggle
+  // text past the critique fence. Coerce, don't trust.
+  const valid = state.history.filter((e) => Number.isFinite(e.score) && Number.isFinite(e.pass))
   if (valid.length < 2) return null
   const recent = valid.slice(-4).map((e) => `#${e.pass}=${e.score}`).join(' ')
   const delta = valid.at(-1).score - valid.at(-2).score
@@ -13,5 +17,6 @@ export function buildLedger(state) {
       : delta < 0
         ? `last edit: ${delta} (REGRESSED — try a different approach, do not repeat it)`
         : `last edit: no change (the gradient did not move — try a different approach)`
-  return `Score trajectory: ${recent}. Best so far: ${state.best_score}. ${effect}.`
+  const best = Number.isFinite(state.best_score) ? state.best_score : '?'
+  return `Score trajectory: ${recent}. Best so far: ${best}. ${effect}.`
 }

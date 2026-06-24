@@ -28,6 +28,7 @@ export function initState(cfg) {
     current_score: null,
     best_score: null,
     best_pass: null,
+    confirm_vetoed_at_pass: null,
     spent_usd: 0,
     status: 'running',
     status_reason: null,

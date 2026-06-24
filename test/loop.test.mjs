@@ -152,6 +152,35 @@ test('a confirmation below target VETOES done: the loop keeps going (cap-bound) 
   assert.equal(state.last_critique, 'confirm gap') // the gap steers the next edit
 })
 
+test('an invalid confirmation score halts with error — never confirms a gamed done or silent-vetoes to the cap', async () => {
+  // the confirm leg has no gate behind it, so it must validate the score like the gate does.
+  // out-of-range (150) must NOT confirm a (gamed) done; missing/NaN must NOT silently veto to the cap.
+  const oor = await runLoop({
+    state: cfg({ targetScore: 90, hardCap: 2 }),
+    ...harness({ scores: [95, 95, 95] }),
+    confirm: async () => ({ score: 150, critique: '' }),
+    log: () => {},
+  })
+  assert.equal(oor.verdict.status, 'error')
+  const missing = await runLoop({
+    state: cfg({ targetScore: 90, hardCap: 2 }),
+    ...harness({ scores: [95, 95, 95] }),
+    confirm: async () => ({ critique: 'no score field' }),
+    log: () => {},
+  })
+  assert.equal(missing.verdict.status, 'error')
+})
+
+test('a confirm veto records confirm_vetoed_at_pass so a kill mid-rescue is not mistaken for done on resume', async () => {
+  const { state } = await runLoop({
+    state: cfg({ targetScore: 90, hardCap: 1 }),
+    ...harness({ scores: [95, 95] }),
+    confirm: async () => ({ score: 50, critique: 'gap' }),
+    log: () => {},
+  })
+  assert.equal(state.confirm_vetoed_at_pass, state.pass) // marker stamped on the vetoed pass
+})
+
 test('a confirmation that clears target lets done stand', async () => {
   const h = harness({ scores: [95] })
   const { verdict } = await runLoop({

@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { runFromConfig, parseCli, shq } from '../src/driver.mjs'
+import { runFromConfig, parseCli, shq, editorEffort } from '../src/driver.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const scriptedScorer = join(here, 'fixtures', 'scripted-scorer.mjs')
@@ -108,6 +108,15 @@ test('parseCli takes the goal from a true positional only, not a later flag valu
 test('parseCli reads a positional goal and an explicit --goal', () => {
   assert.equal(parseCli(['node', 'driver.mjs', 'raise the score', '--artifact', 'x']).goal, 'raise the score')
   assert.equal(parseCli(['node', 'driver.mjs', '--goal', 'explicit', '--artifact', 'x']).goal, 'explicit')
+})
+
+test('editorEffort: forward uses the operator effort; rescue is a FLOOR that never downgrades it', () => {
+  // the rescue editor must raise (or hold) effort, never lower it — escalation goes UP on both dials.
+  assert.equal(editorEffort({ effort: 'medium' }, false), 'medium') // forward pass: as configured
+  assert.equal(editorEffort({ effort: 'medium' }, true), 'high') // rescue: bumped to the floor
+  assert.equal(editorEffort({ effort: 'low' }, true), 'high') // raised to the floor
+  assert.equal(editorEffort({ effort: 'max' }, true), 'max') // already above the floor -> NOT downgraded to 'high'
+  assert.equal(editorEffort({ effort: 'xhigh' }, true), 'xhigh') // ditto
 })
 
 test('parseCli defaults --effort to medium (cheap on both dials) and reads an explicit level', () => {

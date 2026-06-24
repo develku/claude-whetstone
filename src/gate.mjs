@@ -2,7 +2,9 @@
 // scorer produced and decides continue/stop in code, so the loop cannot vote
 // itself done. Pure function, no I/O — that is what makes it testable and trusted.
 
-function validScore(s) {
+// Exported so the confirm leg (loop.mjs) can hold its score to the same 0..100 invariant the gate
+// enforces on the primary score — a confirm scorer's output never passes through the gate itself.
+export function validScore(s) {
   return typeof s === 'number' && Number.isFinite(s) && s >= 0 && s <= 100
 }
 

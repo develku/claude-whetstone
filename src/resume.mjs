@@ -33,8 +33,17 @@ export function prepareResume(loadedState, overrides = {}) {
     updated_at: isoNow(),
   }
 
+  // A confirm-vetoed last pass scored >= target on the PRIMARY signal but the confirm scorer rejected
+  // it, so the gate's `done` is not the truth — let it resume. The marker is pass-indexed, so it only
+  // applies to the actual last pass (a stale marker from an earlier pass no longer matches).
+  const vetoed = next.confirm_vetoed_at_pass != null && next.confirm_vetoed_at_pass === next.pass
   const v = gateVerdict(next)
-  if (v.status !== 'running') {
+  if (vetoed && v.status === 'done') {
+    // The gate hides the cap behind `done` while primary >= target, so check it explicitly here.
+    if (next.pass >= next.hard_cap) {
+      return { error: `cannot resume (capped): hard cap of ${next.hard_cap} reached — raise --cap` }
+    }
+  } else if (v.status !== 'running') {
     const hint = HINTS[v.status]
     return { error: `cannot resume (${v.status}): ${v.reason}${hint ? ` — ${hint}` : ''}` }
   }

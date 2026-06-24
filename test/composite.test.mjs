@@ -117,3 +117,21 @@ test('composite (e2e) exits 2 when --scorers-file is missing', () => {
   const r = spawnSync('node', [composite, '--output', 'x', '--loop-dir', '.', '--pass', '0'], { encoding: 'utf8' })
   assert.equal(r.status, 2)
 })
+
+test('composite (e2e) times out a hung sub-scorer instead of hanging forever', () => {
+  // a sub-scorer that never returns must not wedge the composite (or, under the driver, leak as an
+  // orphan and starve the shared wall). Each sub gets its own bounded wall-clock cap.
+  const dir = mkdtempSync(join(tmpdir(), 'whet-composite-'))
+  const file = join(dir, 'gate.txt')
+  const hang = join(here, 'fixtures', 'hang-scorer.mjs')
+  writeFileSync(file, `node ${JSON.stringify(hang)}`) // sleeps 4s, never scores (ignores argv)
+  const t0 = Date.now()
+  const r = spawnSync('node', [composite, '--scorers-file', file, '--output', 'x', '--loop-dir', '.', '--pass', '0'], {
+    encoding: 'utf8',
+    env: { ...process.env, WHET_SUB_TIMEOUT_MS: '300' },
+  })
+  const elapsed = Date.now() - t0
+  assert.equal(r.status, 2) // killed -> res.error (ETIMEDOUT) -> die(2)
+  // the point is the TIMING: with the cap it returns ~300ms; without it, it waits the full 5s sleep.
+  assert.ok(elapsed < 2500, `composite should time out fast, took ${elapsed}ms`)
+})

@@ -2,7 +2,7 @@
 // edits (via `act`) and the scorer only supplies a number (via `evaluate`).
 // Side effects (spawning Claude, running the scorer, writing files) are injected
 // so this orchestrator stays pure-ish and unit-testable with stubs — no spend.
-import { gateVerdict } from './gate.mjs'
+import { gateVerdict, validScore } from './gate.mjs'
 import { restoreTarget } from './regression.mjs'
 
 const noopReason = 'pass produced no artifact change (permission block? max-turns starvation?)'
@@ -21,7 +21,7 @@ const overBudgetVerdict = (s) =>
 //   persist(state, { score, critique, costUsd }) -> newState   snapshot + review + recordPass + save
 //   escalationGrace                              passes the escalated editor gets before plateau is re-judged (default = plateau_window)
 //   log(event)                                   progress sink
-export async function runLoop({ state, evaluate, act, persist, log = () => {}, actEscalated = null, escalationGrace = null, restore = null, confirm = null, noopThreshold = 2, skipBaseline = false }) {
+export async function runLoop({ state, evaluate, act, persist, save = null, log = () => {}, actEscalated = null, escalationGrace = null, restore = null, confirm = null, noopThreshold = 2, skipBaseline = false }) {
   let currentAct = act
   let escalated = false
   let graceUntilPass = -1 // while pass < this, a plateau is ignored (give the escalated editor a fresh window)
@@ -37,8 +37,19 @@ export async function runLoop({ state, evaluate, act, persist, log = () => {}, a
   async function confirmDone(st, vd) {
     if (vd.status !== 'done' || !confirm) return { s: st, v: vd }
     const c = await confirm(st)
+    // The confirm score never flows through the gate, so guard it here to the same 0..100 invariant:
+    // an out-of-range score must not confirm a gamed done, and a missing/NaN one must not silently
+    // veto every pass to the cap. Either is a broken confirm scorer → halt with a clear error.
+    if (!validScore(c.score)) {
+      const reason = `confirm scorer returned an invalid score: ${String(c.score)} (need a number in 0..100)`
+      return { s: { ...st, status: 'error', status_reason: reason }, v: { status: 'error', reason } }
+    }
     if (c.score >= st.target_score) return { s: st, v: vd } // confirmed — done stands
-    const ns = { ...st, last_critique: c.critique }
+    // Stamp the veto on the pass and persist it NOW: the on-disk state from the prior `persist` has a
+    // primary score >= target, so a kill during the next (post-veto) editor spawn would otherwise make
+    // --resume see `done` and refuse. The marker (== this pass) tells prepareResume it is still running.
+    const ns = { ...st, last_critique: c.critique, confirm_vetoed_at_pass: st.pass }
+    if (save) save(ns)
     const v2 =
       ns.pass >= ns.hard_cap
         ? { status: 'capped', reason: `cap ${ns.hard_cap} hit; primary met target but confirmation vetoed (score ${c.score} < ${ns.target_score})` }

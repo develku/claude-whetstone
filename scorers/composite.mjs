@@ -21,6 +21,10 @@ const die = (m) => {
   process.stderr.write(`composite: ${m}\n`)
   process.exit(2)
 }
+// Per-sub wall-clock cap so a hung sub-scorer (flaky endpoint, a never-returning judge) can't wedge
+// the composite — mirrors the driver's CHILD_TIMEOUT_MS. On a timeout spawnSync sets res.error
+// (ETIMEDOUT) and the existing `if (res.error) die(...)` exits 2. Env-tunable (and test-tunable).
+const SUB_TIMEOUT_MS = Number(process.env.WHET_SUB_TIMEOUT_MS) || 5 * 60 * 1000
 // POSIX single-quote so a passthrough value with spaces (e.g. the run dir path) survives
 // the shell that runs each sub-scorer command.
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`
@@ -93,7 +97,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     .join(' ')
 
   const results = list.map((cmd) => {
-    const res = spawnSync(`${cmd} ${tail}`, { shell: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    const res = spawnSync(`${cmd} ${tail}`, { shell: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: SUB_TIMEOUT_MS, killSignal: 'SIGKILL' })
     if (res.error) die(`sub-scorer failed to spawn (${cmd}): ${res.error.message}`)
     try {
       return parseSubResult(cmd, res)
