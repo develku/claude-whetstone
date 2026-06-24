@@ -22,12 +22,15 @@ const die = (m) => {
 
 // Pure + exported so it can be unit-tested without spawning a model.
 export function parseJudgeResponse(text) {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/)
-  const body = fenced ? fenced[1] : text
-  const start = body.indexOf('{')
-  const end = body.lastIndexOf('}')
+  // Key off the JSON's outermost braces, NOT a ``` code fence. The critique can legitimately
+  // contain a ```mermaid span (the rubric asks the judge to cite one), and a fence regex
+  // mis-keys on those inner backticks and truncates the object before its closing brace.
+  // First-`{` to last-`}` is fence-agnostic and tolerates backticks inside the JSON string;
+  // it still strips a surrounding ```json fence or prose (their braces, if any, sit outside).
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
   if (start < 0 || end <= start) throw new Error('no JSON object in judge response')
-  const obj = JSON.parse(body.slice(start, end + 1))
+  const obj = JSON.parse(text.slice(start, end + 1))
   const score = Number(obj.score)
   if (!Number.isFinite(score) || score < 0 || score > 100) throw new Error(`score not in 0..100: ${obj.score}`)
   return {

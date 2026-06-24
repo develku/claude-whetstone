@@ -33,3 +33,14 @@ test('rejects an out-of-range score', () => {
 test('rejects a response with no JSON object', () => {
   assert.throws(() => parseJudgeResponse('honestly it looks pretty good'))
 })
+
+// Regression (found by dogfooding the README run): the rubric asks the judge to cite a
+// ```mermaid fence in its critique, so the critique value legitimately contains triple
+// backticks. A ```-fence extractor mis-keys on those inner backticks and truncates the
+// object before its closing brace. The parse must key off the JSON braces, not the fence.
+test('tolerates triple-backticks inside the critique value', () => {
+  const raw = '{"score": 84, "critique": "Add an inline ```mermaid flowchart: `flowchart TD` baseline->ACT, only `running` loops back to ACT```", "findings": []}'
+  const r = parseJudgeResponse(raw)
+  assert.equal(r.score, 84)
+  assert.match(r.critique, /```mermaid/)
+})
