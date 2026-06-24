@@ -1,0 +1,92 @@
+<svg viewBox="0 0 1000 720" width="1000" height="720" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>whetstone loop — every decision</title>
+<desc>The whetstone control loop with the model used at each step. A code-owned pipeline: baseline score (code), then each pass the model makes one edit (ACT, haiku or sonnet), a scorer observes and scores the real output 0 to 100 (code or an opus judge), the best result is kept (code), and a code-owned GATE decides the verdict: running (loop back to ACT), done, capped, plateau (one opus rescue), or error. Two budget dials cap spend.</desc>
+<defs>
+  <marker id="aF" markerWidth="10" markerHeight="10" refX="6.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3 L0,6 Z" fill="#88C0D0"/></marker>
+  <marker id="aA" markerWidth="10" markerHeight="10" refX="6.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3 L0,6 Z" fill="#D08770"/></marker>
+</defs>
+<rect x="6" y="6" width="988" height="708" rx="22" fill="#2E3440" stroke="#434C5E" stroke-width="1.5"/>
+<g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <text x="36" y="50" font-size="25" font-weight="700" fill="#ECEFF4">whetstone — one loop, every decision</text>
+  <text x="36" y="75" font-size="14" fill="#9AA5B8">code owns the gate · model owns the edit · scorer owns the number</text>
+
+  <rect x="650" y="36" width="13" height="13" rx="3" fill="#81A1C1"/><text x="668" y="47" font-size="12.5" fill="#D8DEE9">CODE</text>
+  <rect x="724" y="36" width="13" height="13" rx="3" fill="#EBCB8B"/><text x="742" y="47" font-size="12.5" fill="#D8DEE9">MODEL</text>
+  <rect x="812" y="36" width="13" height="13" rx="3" fill="#A3BE8C"/><text x="830" y="47" font-size="12.5" fill="#D8DEE9">SCORER</text>
+
+  <path d="M60,535 C14,520 14,380 14,300 C14,240 30,196 72,196" fill="none" stroke="#81A1C1" stroke-width="1.6" marker-end="url(#aF)"/>
+  <text transform="rotate(-90 34 332)" x="34" y="332" text-anchor="middle" font-size="11" fill="#88C0D0">running · score &lt; target</text>
+
+  <path d="M144,290 C104,294 72,286 68,256 C65,232 70,210 72,210" fill="none" stroke="#D08770" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#aA)"/>
+  <text x="98" y="244" font-size="10" fill="#D08770">no-op</text>
+
+  <path d="M220,146 L220,178" stroke="#88C0D0" stroke-width="1.6" marker-end="url(#aF)"/>
+  <path d="M220,234 L220,258" stroke="#88C0D0" stroke-width="1.6" marker-end="url(#aF)"/>
+  <path d="M220,318 L220,346" stroke="#88C0D0" stroke-width="1.6" marker-end="url(#aF)"/>
+  <text x="230" y="338" font-size="10.5" fill="#A3BE8C">edited</text>
+  <path d="M220,402 L220,424" stroke="#88C0D0" stroke-width="1.6" marker-end="url(#aF)"/>
+  <path d="M220,474 L220,498" stroke="#88C0D0" stroke-width="1.6" marker-end="url(#aF)"/>
+
+  <rect x="70" y="100" width="7" height="46" rx="3.5" fill="#81A1C1"/>
+  <rect x="74" y="100" width="296" height="46" rx="11" fill="#3B4252" stroke="#4C566A"/>
+  <text x="90" y="122" font-size="14.5" font-weight="700" fill="#ECEFF4">1 · BASELINE</text>
+  <text x="90" y="139" font-size="11.5" fill="#9AA5B8">code · score iter_000 (skipped on --resume)</text>
+
+  <rect x="70" y="182" width="7" height="52" rx="3.5" fill="#EBCB8B"/>
+  <rect x="74" y="182" width="296" height="52" rx="11" fill="#3B4252" stroke="#4C566A"/>
+  <text x="90" y="205" font-size="14.5" font-weight="700" fill="#ECEFF4">2 · ACT — one edit</text>
+  <text x="90" y="223" font-size="11.5" fill="#9AA5B8">haiku / sonnet · edit from the last critique</text>
+
+  <path d="M220,262 L296,290 L220,318 L144,290 Z" fill="#3B4252" stroke="#81A1C1" stroke-width="1.5"/>
+  <text x="220" y="294" font-size="13.5" fill="#E5E9F0" text-anchor="middle">changed?</text>
+
+  <rect x="70" y="350" width="7" height="52" rx="3.5" fill="#A3BE8C"/>
+  <rect x="74" y="350" width="296" height="52" rx="11" fill="#3B4252" stroke="#4C566A"/>
+  <text x="90" y="373" font-size="14.5" font-weight="700" fill="#ECEFF4">3 · OBSERVE + SCORE</text>
+  <text x="90" y="391" font-size="11.5" fill="#9AA5B8">run tests / render → 0–100 · code or opus judge</text>
+
+  <rect x="70" y="428" width="7" height="46" rx="3.5" fill="#81A1C1"/>
+  <rect x="74" y="428" width="296" height="46" rx="11" fill="#3B4252" stroke="#4C566A"/>
+  <text x="90" y="450" font-size="14.5" font-weight="700" fill="#ECEFF4">4 · KEEP-BEST restore</text>
+  <text x="90" y="467" font-size="11.5" fill="#9AA5B8">code · roll back a regressed pass</text>
+
+  <rect x="60" y="502" width="7" height="66" rx="3.5" fill="#81A1C1"/>
+  <rect x="64" y="502" width="316" height="66" rx="12" fill="#3B4252" stroke="#81A1C1" stroke-width="2"/>
+  <text x="84" y="530" font-size="15" font-weight="700" fill="#ECEFF4">5 · GATE — gateVerdict (code)</text>
+  <text x="84" y="552" font-size="10.5" fill="#B8C0CF">precedence  error › done › capped › plateau › running</text>
+
+  <path d="M380,520 C470,400 510,230 596,182" fill="none" stroke="#A3BE8C" stroke-width="1.8"/>
+  <path d="M380,528 C480,440 520,300 596,270" fill="none" stroke="#EBCB8B" stroke-width="1.8"/>
+  <path d="M380,540 C490,486 520,392 596,358" fill="none" stroke="#D08770" stroke-width="1.8"/>
+  <path d="M380,548 C470,524 520,470 596,446" fill="none" stroke="#BF616A" stroke-width="1.8"/>
+
+  <rect x="600" y="150" width="7" height="62" rx="3.5" fill="#A3BE8C"/>
+  <rect x="604" y="150" width="356" height="62" rx="11" fill="#3B4252" stroke="#4C566A"/>
+  <circle cx="626" cy="177" r="6" fill="#A3BE8C"/>
+  <text x="642" y="182" font-size="15" font-weight="700" fill="#ECEFF4">DONE</text>
+  <text x="620" y="200" font-size="11.5" fill="#9AA5B8">score ≥ target → confirm-scorer veto check</text>
+
+  <rect x="600" y="238" width="7" height="62" rx="3.5" fill="#EBCB8B"/>
+  <rect x="604" y="238" width="356" height="62" rx="11" fill="#3B4252" stroke="#4C566A"/>
+  <circle cx="626" cy="265" r="6" fill="#EBCB8B"/>
+  <text x="642" y="270" font-size="15" font-weight="700" fill="#ECEFF4">CAPPED</text>
+  <text x="620" y="288" font-size="11.5" fill="#9AA5B8">pass ≥ cap · over --budget / --budget-tokens</text>
+
+  <rect x="600" y="326" width="7" height="62" rx="3.5" fill="#D08770"/>
+  <rect x="604" y="326" width="356" height="62" rx="11" fill="#3B4252" stroke="#4C566A"/>
+  <circle cx="626" cy="353" r="6" fill="#D08770"/>
+  <text x="642" y="358" font-size="15" font-weight="700" fill="#ECEFF4">PLATEAU</text>
+  <text x="620" y="376" font-size="11.5" fill="#9AA5B8">best stalled → one opus rescue, then stands</text>
+
+  <rect x="600" y="414" width="7" height="62" rx="3.5" fill="#BF616A"/>
+  <rect x="604" y="414" width="356" height="62" rx="11" fill="#3B4252" stroke="#4C566A"/>
+  <circle cx="626" cy="441" r="6" fill="#BF616A"/>
+  <text x="642" y="446" font-size="15" font-weight="700" fill="#ECEFF4">ERROR</text>
+  <text x="620" y="464" font-size="11.5" fill="#9AA5B8">invalid score · or a pass threw</text>
+
+  <rect x="36" y="596" width="924" height="62" rx="10" fill="#333A48" stroke="#3B4252"/>
+  <rect x="36" y="596" width="6" height="62" rx="3" fill="#81A1C1"/>
+  <text x="56" y="620" font-size="11.5" fill="#D8DEE9">Two budget dials (code-owned), checked after every pass — may overshoot by one:  --budget &lt;USD&gt; · --budget-tokens &lt;N&gt;.</text>
+  <text x="56" y="640" font-size="11.5" fill="#9AA5B8">No-op pass (editor changed nothing) is still charged → retry, escalate to opus after 2, then error. On Max/Pro, tokens are the real ceiling.</text>
+</g>
+</svg>

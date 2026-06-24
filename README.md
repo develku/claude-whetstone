@@ -14,23 +14,18 @@ measured score threshold, where <b>code owns the gate</b> and the <b>model owns 
 
 ## How the loop works
 
-```mermaid
-flowchart TD
-    baseline([baseline\nscore iter_000]) --> ACT
+<p align="center">
+  <img src="assets/whetstone-loop.svg" width="900"
+       alt="The whetstone loop — every decision: a code-owned pipeline (baseline → ACT edit → observe + score → keep-best → GATE) fanning out to five verdicts (running, done, capped, plateau, error), labelled with the model used at each step and the two budget dials.">
+</p>
 
-    ACT[ACT\nmodel makes one edit\nusing last critique] --> OBSERVE
-    OBSERVE[OBSERVE\nproduce real output\nrun tests / render / call endpoint] --> SCORE
-    SCORE[SCORE\nexternal scorer\n0–100 + critique] --> PERSIST
-    PERSIST[PERSIST\nsnapshot iter_NNN\nupdate state.json] --> GATE
-
-    GATE{GATE\ncode-owned\ngateVerdict}
-
-    GATE -->|running| ACT
-    GATE -->|done\nscore ≥ target| done([done])
-    GATE -->|capped\npass ≥ hard_cap or over budget| capped([capped])
-    GATE -->|plateau\nbest score stalled| plateau([plateau])
-    GATE -->|error\nmalformed score| error([error])
-```
+**In plain words.** whetstone keeps editing *one* file and re-scoring it until a number says it's good
+enough — or until a limit says stop. Each round a cheap model (haiku/sonnet) makes one small edit; an
+external scorer grades the result **0–100** and writes a one-line critique; then **code** (not the model)
+checks that score against your target and your budget and decides whether to go again. The model can't
+vote itself done — only the score can. If an edit makes things worse the best version is restored; if the
+cheap model gets stuck, one bolder Opus pass is tried; when the target, the pass cap, or the token/USD
+budget is reached, the loop stops on its own.
 
 Stop conditions, all decided in code (`gateVerdict`): `score >= target` → **done**;
 `pass >= hard_cap` → **capped**; best score stalls under `min_delta` across `plateau_window` passes →
@@ -124,6 +119,44 @@ stopped the run stops it again immediately, and resume refuses with an actionabl
 restarts the editor ladder from the cheap model (re-escalating only if it plateaus again) and skips
 re-scoring a baseline. Optionally override `--target`/`--model` too; anything you don't pass keeps its
 saved value.
+
+## Long, unattended runs
+
+whetstone is built for the detached, hours-long case — a real scorer gives every pass a gradient, and
+code (not you) holds the wheel:
+
+1. **Pick a deterministic scorer** so each pass gets a real signal — `test-pass-rate`, or `composite`
+   (tests + a judge). A long run only pays off when the gradient is real.
+2. **Set a high cap and a token budget as the true ceiling.** On a Max/Pro plan, tokens — not USD — are
+   what the rate limit counts; a token budget is roughly `cap × 150000`:
+   ```bash
+   node src/driver.mjs "<goal>" --artifact src/thing.mjs \
+     --scorer 'node scorers/composite.mjs --scorers-file gate.txt' \
+     --target 95 --cap 60 --budget-tokens 8000000 \
+     --model sonnet --loop-dir .loop/longrun-01 --mcp-config empty-mcp.json
+   ```
+3. **Detach it** so it survives the terminal closing — this is whetstone's reason to exist (no live
+   session, no Workflow-tool entitlement needed):
+   ```bash
+   nohup node src/driver.mjs "<goal>" --artifact src/thing.mjs --scorer '<scorer>' \
+     --cap 60 --budget-tokens 8000000 --loop-dir .loop/longrun-01 \
+     --mcp-config empty-mcp.json > .loop/longrun-01/run.log 2>&1 &
+   ```
+   (or a cron / launchd job for scheduled runs.)
+4. **It manages the long haul itself:** on a plateau it tries one bold Opus rescue, then gives up rather
+   than burning Opus every pass; keep-best rolls back a regressing edit so the run can't drift backward;
+   and `--confirm-scorer` re-checks `done` against an independent signal, vetoing a gamed finish — which
+   matters more the longer the run goes.
+5. **Watch without attaching:** `tail -f .loop/longrun-01/run.log`, or read `best_score` / `pass` /
+   `spent_tokens` in `state.json`.
+6. **Capped below target and want more?** Resume with a raised limit:
+   ```bash
+   node src/driver.mjs --resume --loop-dir .loop/longrun-01 --cap 120 --budget-tokens 16000000
+   ```
+
+> Long-run caveats: every pass writes a full artifact snapshot with no pruning, so disk ≈ `artifact_size ×
+> passes`; the editor auto-accepts edits unattended for hours, so scope the artifact's project permissions
+> tightly; and a run still raises **one** artifact — not a whole-repo refactor.
 
 ## ⚠️ Cost, auth & budgets (read before the first live run)
 
