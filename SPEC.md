@@ -132,4 +132,6 @@ pass burns ~100–150K tokens, so a per-run budget is roughly `cap × 150000`). 
 - Regression policy: **decided — keep-best is the enforced default.** `restoreTarget`
   (`src/regression.mjs`) rolls the best snapshot back over the artifact whenever a pass scores below
   the best so far; set `regression_policy: keep-latest` to opt out. (Resolved during dogfooding.)
-- Multi-file artifacts (a `git stash`/commit snapshot unit) vs strict single-file.
+- Multi-file artifacts: **in progress** — the `whetstone-scope` loop (`src/scope-*.mjs`) widens the
+  artifact to a `--scope` dir with a git commit-per-pass snapshot unit and read-only gate fence (see
+  `docs/orchestrator-design.md`).
