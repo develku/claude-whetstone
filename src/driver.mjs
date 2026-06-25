@@ -8,7 +8,6 @@ import { pathToFileURL } from 'node:url'
 import { resolve, join } from 'node:path'
 import { homedir } from 'node:os'
 import { shq } from './shq.mjs'
-export { shq }
 import {
   initState,
   recordPass,
@@ -25,6 +24,8 @@ import { makeClaudeAct } from './act-claude.mjs'
 import { validateConfig, EFFORT_LEVELS } from './validate.mjs'
 import { prepareResume } from './resume.mjs'
 import { formatReport } from './summary.mjs'
+
+export { shq } // re-exported so callers can keep importing shq from driver (the canonical impl is shq.mjs)
 
 // Hard wall-clock cap on the scorer/observe children so a hung command (flaky endpoint, a
 // never-returning render/server step) can't wedge an unattended loop forever.

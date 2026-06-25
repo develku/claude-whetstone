@@ -1,8 +1,9 @@
 # whetstone-scope — open-ended repo-agent orchestrator design
 
-> Status: **approved design, pre-implementation** (2026-06-24). Build order is MVP → v1 → v2; code starts
-> at the MVP. Produced by a 6-agent design workflow (4 candidate architectures → judge → synthesis;
-> run `wf_bae667c2`). This file is the durable plan; commit bodies carry per-step provenance.
+> Status: **shipped** — MVP + v1 scope loop merged (PR #1), and the v2 planner tier (`decompose.mjs`)
+> merged 2026-06-25 (implementation spec: `docs/superpowers/specs/2026-06-25-decompose-v2-design.md`).
+> Build order was MVP → v1 → v2. Produced by a 6-agent design workflow (4 candidate architectures →
+> judge → synthesis; run `wf_bae667c2`). This file is the durable plan; commit bodies carry per-step provenance.
 
 ## The decision (one line)
 
