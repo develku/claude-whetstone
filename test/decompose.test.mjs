@@ -96,6 +96,18 @@ test('splitBudget: divides only the dials that are set', () => {
   assert.deepEqual(splitBudget({ usd: null, tokens: null }, 4), { budgetUsd: null, budgetTokens: null })
 })
 
+// budget_tokens is a COUNTED integer (validate.mjs requires Number.isInteger); a fractional share would
+// make every child's validateConfig throw, so decompose would silently no-op whenever --budget-tokens is
+// set to a value not evenly divisible by the child count. Floor the token share (keeps sum <= remaining).
+test('splitBudget: floors the token share to an integer; usd may stay fractional', () => {
+  const share = splitBudget({ usd: 1, tokens: 100000 }, 3)
+  assert.ok(Number.isInteger(share.budgetTokens), `budgetTokens must be an integer, got ${share.budgetTokens}`)
+  assert.equal(share.budgetTokens, 33333) // floor(100000/3), not 33333.333…
+  assert.equal(share.budgetUsd, 1 / 3) // usd is a compared threshold, fractional is fine
+  // invariant preserved: the children's token shares never sum above the remaining budget
+  assert.ok(share.budgetTokens * 3 <= 100000)
+})
+
 test('buildChildCfg: child repo is the PARENT scope, never finding.scope; no recursion [CR#5]', () => {
   const parentCfg = { scope: '/repo', readOnly: ['test/'], model: 'sonnet', effort: 'medium', escalateModel: 'opus', noEscalate: false, mcpConfig: null }
   const state = { goal: 'make tests pass', target_score: 90 }

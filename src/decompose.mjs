@@ -64,7 +64,10 @@ export function decomposable(findings, seen, ctx) {
 export function splitBudget(remaining, n) {
   return {
     budgetUsd: remaining.usd == null ? null : remaining.usd / n,
-    budgetTokens: remaining.tokens == null ? null : remaining.tokens / n,
+    // FLOOR the token share: budget_tokens is a COUNTED integer (validate.mjs requires Number.isInteger),
+    // so a fractional share would make every child's validateConfig throw and decompose would silently
+    // no-op. Floor (not round) keeps the children's shares summing to <= the remaining token budget.
+    budgetTokens: remaining.tokens == null ? null : Math.floor(remaining.tokens / n),
   }
 }
 
