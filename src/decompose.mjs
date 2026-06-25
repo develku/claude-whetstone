@@ -7,6 +7,7 @@ import { join, resolve, sep } from 'node:path'
 import { gateVerdict } from './gate.mjs'
 import { gitHead, gitTreeChanged, gitRestore } from './git-snapshot.mjs'
 import { scopeChanged } from './scope-act.mjs'
+import { shq } from './shq.mjs'
 
 const key = (f) => String(f?.area ?? '')
 
@@ -17,8 +18,10 @@ export function coarseSignalPlateau(state) {
   return gateVerdict(state).status === 'plateau' && state.best_score < state.target_score
 }
 
-// Findings are code-owned: read them from the last review file on disk, never from a model-supplied
-// state field. Returns [] when there is no scored history, no review ref, or an unreadable/torn file.
+// Findings come from the last review file on disk — a code-owned SCORER writes them. They are NOT
+// trusted blindly: when the run dir nests inside --scope, the editor model can overwrite the review
+// file, so a finding is only safe AFTER resolveSubGate's allowlist + shq + scope-escape fence. Treat
+// the contents as untrusted input that the fence (not this read) makes safe.
 export function readLatestFindings(parentLoopDir, state) {
   const ref = state.history?.at(-1)?.critique_ref
   if (!ref) return []
@@ -29,10 +32,6 @@ export function readLatestFindings(parentLoopDir, state) {
     return []
   }
 }
-
-// POSIX single-quote: every finding-supplied arg is wrapped so a metacharacter can never reach the
-// shell unquoted. Inlined (like scope-context) to keep decompose off the driver/CLI import graph.
-const shq = (s) => `'${String(s).replace(/'/g, "'\\''")}'`
 
 // Build a child sub-gate from a finding, or null when it is not SAFELY decomposable. The scorer id is
 // resolved against an operator-owned allowlist (never executed as a raw string) and every arg is
@@ -54,9 +53,16 @@ export function resolveSubGate(finding, { repoDir, allowlist }) {
   return { editScope, scorerCmd }
 }
 
-// The findings worth fanning out: resolvable to a sub-gate AND not already decomposed this run.
+// The findings worth fanning out, paired with their resolved sub-gate: resolvable AND not already
+// decomposed this run. Returning the resolved sub-gate avoids re-resolving it in the closure.
 export function decomposable(findings, seen, ctx) {
-  return findings.filter((f) => !seen.has(key(f)) && resolveSubGate(f, ctx) != null)
+  const out = []
+  for (const f of findings) {
+    if (seen.has(key(f))) continue
+    const subgate = resolveSubGate(f, ctx)
+    if (subgate != null) out.push({ finding: f, subgate })
+  }
+  return out
 }
 
 // Per-child budget share: divide each SET dial by the children still to launch; a null dial stays null
@@ -76,7 +82,7 @@ const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(
 // A child is a normal whetstone-scope run, narrowed: same repo (NEVER finding.scope as cwd [CR#5]),
 // a focused goal, the scorer-emitted sub-gate, a small cap, its budget share, and decompose:false so
 // it cannot recurse (depth cap 1). Its loop dir nests under the parent's (which is gitignored/outside).
-export function buildChildCfg(parentCfg, state, finding, subgate, share, childCap, parentLoopDir) {
+export function buildChildCfg(parentCfg, state, finding, subgate, share, childCap, parentLoopDir, index) {
   return {
     goal: `${state.goal} — specifically: ${finding.suggestion ?? finding.area}`,
     scope: parentCfg.scope,
@@ -93,10 +99,10 @@ export function buildChildCfg(parentCfg, state, finding, subgate, share, childCa
     model: parentCfg.model,
     effort: parentCfg.effort,
     escalateModel: parentCfg.escalateModel,
-    noEscalate: parentCfg.noEscalate,
+    noEscalate: true, // a child is already the parent's escalated tier; no second opus escalation inside it
     mcpConfig: parentCfg.mcpConfig,
     decompose: false,
-    loopDir: join(parentLoopDir, 'children', slug(finding.area)),
+    loopDir: join(parentLoopDir, 'children', `${slug(finding.area)}-${index}`),
   }
 }
 
@@ -112,25 +118,28 @@ const cleanTree = (dir) => !scopeChanged(dir)
 // sequentially on the shared branch, each transactional [CR#2], with spend recomputed against the
 // budget before each launch [CR#6]. Child spend always charges the parent (money is spent even when
 // the git edits are rolled back). `changed` is a TREE diff so an all-no-op fan-out reads honest.
+// Worst-case children across a run = (unique decomposable finding-areas seen at plateaus) x childCap
+// passes; --decompose requires a budget (scope-cli decomposeNeedsBudget) so total spend is bounded
+// regardless of how many parent passes re-fire the fan-out.
 export function makeDecomposeAct({ repoDir, parentLoopDir, parentCfg, runChild, rescueAct, allowlist, maxChildren = 4, childCap = 3, log = () => {} }) {
-  const seen = new Set()
+  const seen = new Set() // [CR#3] dedupe finding-areas across parent passes within a run
   const ctx = { repoDir, allowlist }
   return async (state) => {
-    if (!coarseSignalPlateau(state)) return rescueAct(state)
+    if (!coarseSignalPlateau(state)) { log({ event: 'decompose-skip', reason: 'not-plateau' }); return rescueAct(state) }
     const fresh = decomposable(readLatestFindings(parentLoopDir, state), seen, ctx)
-    if (!fresh.length) return rescueAct(state)
-    const picked = [...fresh].sort((a, b) => sev(b) - sev(a)).slice(0, maxChildren)
-    log({ event: 'decompose', children: picked.length, areas: picked.map(key), childCap })
+    if (!fresh.length) { log({ event: 'decompose-skip', reason: 'no-fresh-findings' }); return rescueAct(state) }
+    const picked = [...fresh].sort((a, b) => sev(b.finding) - sev(a.finding)).slice(0, maxChildren)
+    log({ event: 'decompose', children: picked.length, areas: picked.map((p) => key(p.finding)), childCap })
     const headBefore = gitHead(repoDir)
     let costUsd = 0
     let tokens = 0
     for (let i = 0; i < picked.length; i++) {
-      const f = picked[i]
+      const { finding: f, subgate } = picked[i]
       const remaining = { usd: rem(state.budget_usd, state.spent_usd + costUsd), tokens: rem(state.budget_tokens, (state.spent_tokens ?? 0) + tokens) }
       if (exhausted(remaining)) { log({ event: 'decompose-budget-stop', after: i }); break }
       seen.add(key(f))
       const childHead = gitHead(repoDir)
-      const cfg = buildChildCfg(parentCfg, state, f, resolveSubGate(f, ctx), splitBudget(remaining, picked.length - i), childCap, parentLoopDir)
+      const cfg = buildChildCfg(parentCfg, state, f, subgate, splitBudget(remaining, picked.length - i), childCap, parentLoopDir, i)
       try {
         const { state: cs, verdict } = await runChild(cfg)
         costUsd += cs.spent_usd ?? 0           // money is spent regardless of whether we keep the edits

@@ -6,6 +6,9 @@ import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { makeDecomposeAct } from '../src/decompose.mjs'
 
+// Unique vs decompose.test.mjs: this exercises the TWO-distinct-children fan-out (slug routing) and the
+// end-to-end "child loop dirs are git-ignored, never committed" property (the ls-files assertion below).
+
 const git = (dir, ...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim()
 function tempRepo() {
   const dir = mkdtempSync(join(tmpdir(), 'whet-dl-'))

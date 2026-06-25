@@ -7,6 +7,8 @@ import { copyFileSync, readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { resolve, join } from 'node:path'
 import { homedir } from 'node:os'
+import { shq } from './shq.mjs'
+export { shq }
 import {
   initState,
   recordPass,
@@ -23,11 +25,6 @@ import { makeClaudeAct } from './act-claude.mjs'
 import { validateConfig, EFFORT_LEVELS } from './validate.mjs'
 import { prepareResume } from './resume.mjs'
 import { formatReport } from './summary.mjs'
-
-// Shell-quote a value for the scorer/observe command line (these run with shell:true). Single
-// quotes neutralize spaces and metacharacters; an embedded ' is closed, escaped, and reopened.
-// Exported for test — this repo itself lives under a path with spaces, so quoting is load-bearing.
-export const shq = (s) => `'${String(s).replace(/'/g, "'\\''")}'`
 
 // Hard wall-clock cap on the scorer/observe children so a hung command (flaky endpoint, a
 // never-returning render/server step) can't wedge an unattended loop forever.

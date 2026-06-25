@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { parseScopeCli, cleanTreeGuard, buildAllowlist, decomposeNeedsConfirm, scopeDeps } from '../src/scope-cli.mjs'
+import { parseScopeCli, cleanTreeGuard, buildAllowlist, decomposeNeedsConfirm, decomposeNeedsBudget, scopeDeps } from '../src/scope-cli.mjs'
 
 const git = (dir, ...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim()
 
@@ -63,4 +63,17 @@ test('decomposeNeedsConfirm: --decompose requires --confirm-scorer [CR#7]', () =
 test('scopeDeps: --decompose injects a decompose actEscalated closure', () => {
   const deps = scopeDeps({ scope: '/r', readOnly: [], model: 'sonnet', effort: 'medium', escalateModel: 'opus', noEscalate: false, mcpConfig: null, decompose: true, maxChildren: 4, childCap: 3, scorerAllow: [], loopDir: '/r/.loop/x' })
   assert.equal(typeof deps.actEscalated, 'function')
+})
+
+test('decomposeNeedsBudget: --decompose requires --budget or --budget-tokens', () => {
+  assert.equal(decomposeNeedsBudget({ decompose: true, budgetUsd: null, budgetTokens: null }), true)
+  assert.equal(decomposeNeedsBudget({ decompose: true, budgetUsd: 2, budgetTokens: null }), false)
+  assert.equal(decomposeNeedsBudget({ decompose: true, budgetUsd: null, budgetTokens: 100000 }), false)
+  assert.equal(decomposeNeedsBudget({ decompose: false, budgetUsd: null, budgetTokens: null }), false)
+})
+
+test('buildAllowlist: excludes composite from the auto set; --scorer-allow can re-add it', () => {
+  const m = buildAllowlist([])
+  assert.equal(m.has('test-pass-rate'), true)
+  assert.equal(m.has('composite'), false) // shell-executes manifest lines -> not an auto sub-gate
 })

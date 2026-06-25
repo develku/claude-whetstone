@@ -87,8 +87,8 @@ test('decomposable: keeps resolvable, unseen findings only', () => {
     { area: 'C', scorer: { id: 'unknown', args: [] } },       // bad id -> dropped
   ]
   const seen = new Set(['A'])                                  // already decomposed -> dropped
-  assert.deepEqual(decomposable(findings, seen, ctx).map((f) => f.area), [])
-  assert.deepEqual(decomposable(findings, new Set(), ctx).map((f) => f.area), ['A'])
+  assert.deepEqual(decomposable(findings, seen, ctx).map((x) => x.finding.area), [])
+  assert.deepEqual(decomposable(findings, new Set(), ctx).map((x) => x.finding.area), ['A'])
 })
 
 test('splitBudget: divides only the dials that are set', () => {
@@ -113,7 +113,7 @@ test('buildChildCfg: child repo is the PARENT scope, never finding.scope; no rec
   const state = { goal: 'make tests pass', target_score: 90 }
   const finding = { area: 'auth login', suggestion: 'fix auth', scope: 'src/auth' }
   const subgate = { editScope: 'src/auth', scorerCmd: "node '/abs/test-pass-rate.mjs' '--only' 'auth login'" }
-  const cfg = buildChildCfg(parentCfg, state, finding, subgate, { budgetUsd: 2, budgetTokens: 100000 }, 3, '/parent/loop')
+  const cfg = buildChildCfg(parentCfg, state, finding, subgate, { budgetUsd: 2, budgetTokens: 100000 }, 3, '/parent/loop', 0)
   assert.equal(cfg.scope, '/repo')              // git cwd is the parent repo, NOT finding.scope
   assert.equal(cfg.artifactPath, '/repo')
   assert.equal(cfg.editScope, 'src/auth')        // finding.scope only steers the editor prompt
@@ -122,8 +122,9 @@ test('buildChildCfg: child repo is the PARENT scope, never finding.scope; no rec
   assert.equal(cfg.hardCap, 3)
   assert.equal(cfg.budgetUsd, 2)
   assert.equal(cfg.decompose, false)             // depth cap 1
+  assert.equal(cfg.noEscalate, true)             // a child is already the parent's escalated tier
   assert.match(cfg.goal, /specifically: fix auth/)
-  assert.equal(cfg.loopDir, '/parent/loop/children/auth-login')
+  assert.equal(cfg.loopDir, '/parent/loop/children/auth-login-0')
 })
 
 test('makeDecomposeAct: not at a plateau -> delegates to rescue, no children [CR#1]', async () => {

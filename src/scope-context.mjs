@@ -7,12 +7,9 @@
 import { spawnSync } from 'node:child_process'
 import { writeReview, recordPass, saveState, zeroPad } from './state.mjs'
 import { gitSnapshot, gitVerifyAt } from './git-snapshot.mjs'
+import { shq } from './shq.mjs'
 
 const CHILD_TIMEOUT_MS = 5 * 60 * 1000
-
-// Shell-quote for the scorer command line (runs with shell:true). Single quotes neutralize spaces and
-// metacharacters; an embedded ' is closed, escaped, reopened. (Inlined to keep this off the CLI module.)
-const shq = (s) => `'${String(s).replace(/'/g, "'\\''")}'`
 
 // Run the project scorer in cwd=scopeDir — same {score,critique,findings}+exit-code contract as the
 // single-file path; the scored "output" is the scope dir itself.

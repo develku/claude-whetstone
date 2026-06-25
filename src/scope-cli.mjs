@@ -49,12 +49,17 @@ export function cleanTreeGuard(scopeDir) {
 
 const SCORERS_DIR = rpath(dirname(fileURLToPath(import.meta.url)), '..', 'scorers')
 
+// composite executes raw manifest-file lines via shell:true, so it is not a safe AUTO sub-gate id;
+// an operator can still opt it in explicitly via --scorer-allow.
+const SUBGATE_UNSAFE = new Set(['composite'])
+
 // The scorer-id allowlist a child sub-gate is resolved against: every shipped scorer (by basename) plus
 // any operator-provided path via --scorer-allow. A finding can only ever name an id in this map [CR#4].
 export function buildAllowlist(extraPaths = []) {
   const m = new Map()
   for (const f of readdirSync(SCORERS_DIR)) {
-    if (f.endsWith('.mjs')) m.set(f.replace(/\.mjs$/, ''), join(SCORERS_DIR, f))
+    const id = f.replace(/\.mjs$/, '')
+    if (f.endsWith('.mjs') && !SUBGATE_UNSAFE.has(id)) m.set(id, join(SCORERS_DIR, f))
   }
   for (const p of extraPaths) m.set(basename(p).replace(/\.[^.]+$/, ''), rpath(p))
   return m
@@ -65,6 +70,12 @@ export function buildAllowlist(extraPaths = []) {
 // from a dirty tree. [CR#7]
 export function decomposeNeedsConfirm(cfg) {
   return !!cfg.decompose && !cfg.confirmScorerCmd
+}
+
+// --decompose multiplies spend across children; require an explicit spend ceiling so an unattended
+// fan-out can't run unbounded. At least one dial (USD or tokens) must be set.
+export function decomposeNeedsBudget(cfg) {
+  return !!cfg.decompose && cfg.budgetUsd == null && cfg.budgetTokens == null
 }
 
 // Wire the scope I/O seams as runFromConfig deps; everything else (gate, escalation, confirm, budget)
@@ -112,6 +123,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
   if (decomposeNeedsConfirm(cfg)) {
     process.stderr.write('refusing to start: --decompose requires --confirm-scorer (the held-out clean-checkout gate that verifies done from a pristine checkout)\n')
+    process.exit(2)
+  }
+  if (decomposeNeedsBudget(cfg)) {
+    process.stderr.write('refusing to start: --decompose requires a spend ceiling — set --budget and/or --budget-tokens (fan-out multiplies spend across children)\n')
     process.exit(2)
   }
   const { state, verdict } = await runFromConfig(cfg, scopeDeps(cfg))
