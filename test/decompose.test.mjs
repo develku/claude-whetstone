@@ -3,9 +3,8 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { coarseSignalPlateau, readLatestFindings, resolveSubGate, decomposable, splitBudget, buildChildCfg } from '../src/decompose.mjs'
+import { coarseSignalPlateau, readLatestFindings, resolveSubGate, decomposable, splitBudget, buildChildCfg, makeDecomposeAct } from '../src/decompose.mjs'
 import { execFileSync } from 'node:child_process'
-import { makeDecomposeAct } from '../src/decompose.mjs'
 
 const git = (dir, ...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim()
 function tempRepo() {
@@ -21,7 +20,7 @@ function plateauWithFindings(loopDir, findings) {
   return {
     goal: 'g', target_score: 90, min_delta: 1, plateau_window: 3, hard_cap: 10, pass: 3,
     best_score: 50, budget_usd: null, budget_tokens: null, spent_usd: 0, spent_tokens: 0,
-    history: [50, 50, 50, { score: 50, ref: 1 }].map((s, i) =>
+    history: [0, 1, 2, 3].map((i) =>
       i === 3 ? { pass: 3, score: 50, critique_ref: 'reviews/review_003.json' } : { pass: i, score: 50, critique_ref: null }),
   }
 }
@@ -134,7 +133,7 @@ test('makeDecomposeAct: fans out, aggregates spend, dedups across passes [CR#3]'
     const state = plateauWithFindings(repo, [finding])
     const allowlist = allowOf('tpr', '/abs/tpr.mjs')
     let calls = 0
-    const runChild = async (cfg) => { calls++; writeFileSync(join(repo, 'edit.txt'), `child ${calls}`); git(repo, 'add', '-A'); git(repo, 'commit', '-q', '-m', 'child'); return { state: { spent_usd: 0.5, spent_tokens: 1000 }, verdict: { status: 'done' } } }
+    const runChild = async () => { calls++; writeFileSync(join(repo, 'edit.txt'), `child ${calls}`); git(repo, 'add', '-A'); git(repo, 'commit', '-q', '-m', 'child'); return { state: { spent_usd: 0.5, spent_tokens: 1000 }, verdict: { status: 'done' } } }
     const act = makeDecomposeAct({ repoDir: repo, parentLoopDir: repo, parentCfg: { scope: repo, readOnly: [] }, runChild, rescueAct: async () => ({ changed: false, costUsd: 0, tokens: 0 }), allowlist })
     const r1 = await act(state)
     assert.equal(calls, 1)
@@ -159,5 +158,39 @@ test('makeDecomposeAct: a failed child is rolled back and not counted as a lasti
     assert.equal(git(repo, 'rev-parse', 'HEAD'), head0)   // rolled back to before the failed child
     assert.equal(r.changed, false)                         // its edits left no lasting change
     assert.equal(r.costUsd, 0.3)                           // but the money it spent is still charged
+  } finally { rmSync(repo, { recursive: true, force: true }) }
+})
+
+test('makeDecomposeAct: a done child that leaves a dirty tree is rolled back, money still charged [CR#2]', async () => {
+  const repo = tempRepo()
+  try {
+    const finding = { area: 'A', suggestion: 'fix A', scorer: { id: 'tpr', args: [] } }
+    const state = plateauWithFindings(repo, [finding])
+    const head0 = git(repo, 'rev-parse', 'HEAD')
+    // child "succeeds" (done) but leaves an UNCOMMITTED edit -> dirty tree -> must be rolled back
+    const runChild = async () => { writeFileSync(join(repo, 'stray.txt'), 'uncommitted'); return { state: { spent_usd: 0.2, spent_tokens: 7 }, verdict: { status: 'done' } } }
+    const act = makeDecomposeAct({ repoDir: repo, parentLoopDir: repo, parentCfg: { scope: repo, readOnly: [] }, runChild, rescueAct: async () => ({ changed: false, costUsd: 0, tokens: 0 }), allowlist: allowOf('tpr', '/x.mjs') })
+    const r = await act(state)
+    assert.equal(git(repo, 'rev-parse', 'HEAD'), head0)        // rolled back
+    assert.equal(git(repo, 'status', '--porcelain'), '')        // dirty edit swept by clean -fdq
+    assert.equal(r.changed, false)
+    assert.equal(r.costUsd, 0.2)                                // money still charged
+  } finally { rmSync(repo, { recursive: true, force: true }) }
+})
+
+test('makeDecomposeAct: fan-out stops when the budget is exhausted [CR#6]', async () => {
+  const repo = tempRepo()
+  try {
+    const findings = [
+      { area: 'A', suggestion: 'fix A', severity: 'high', scorer: { id: 'tpr', args: [] } },
+      { area: 'B', suggestion: 'fix B', severity: 'high', scorer: { id: 'tpr', args: [] } },
+    ]
+    const state = { ...plateauWithFindings(repo, findings), budget_usd: 1, spent_usd: 0 }
+    let calls = 0
+    const runChild = async () => { calls++; writeFileSync(join(repo, `e${calls}.txt`), 'x'); git(repo, 'add', '-A'); git(repo, 'commit', '-q', '-m', 'c'); return { state: { spent_usd: 1.5, spent_tokens: 10 }, verdict: { status: 'done' } } }
+    const act = makeDecomposeAct({ repoDir: repo, parentLoopDir: repo, parentCfg: { scope: repo, readOnly: [] }, runChild, rescueAct: async () => ({ changed: false, costUsd: 0, tokens: 0 }), allowlist: allowOf('tpr', '/x.mjs') })
+    const r = await act(state)
+    assert.equal(calls, 1)              // first child spent 1.5 > budget 1 -> second child never launches
+    assert.equal(r.costUsd, 1.5)
   } finally { rmSync(repo, { recursive: true, force: true }) }
 })
