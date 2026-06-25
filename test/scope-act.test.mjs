@@ -6,6 +6,13 @@ import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { scopeChanged, buildScopePrompt, enforceReadOnly } from '../src/scope-act.mjs'
 
+test('buildScopePrompt: editScope narrows the edit instruction', () => {
+  const state = { goal: 'g', last_critique: 'do x', history: [], escalated: false }
+  const p = buildScopePrompt(state, { scopeDir: '/repo', readOnly: [], editScope: 'src/auth' })
+  assert.match(p, /src\/auth/)        // the focus path appears
+  assert.match(p, /\/repo/)           // still anchored to the repo
+})
+
 const git = (dir, ...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim()
 
 function tempRepo() {
