@@ -100,7 +100,7 @@ for (f of picked) {
   childHead = gitHead(repoDir)
   cfg = buildChildCfg(parentCfg, state, f, resolveSubGate(f, ctx), splitBudget(remaining, left), childCap, parentLoopDir)
   try {
-    const { state: cs, verdict } = await runChild(cfg)           // [CR#3] spend is in cs.state.*, not cs.*
+    const { state: cs, verdict } = await runChild(cfg)           // [CR#3] cs IS the child's returned state, so spend is cs.spent_*
     if (verdict.status === 'error' || !cleanTree(repoDir)) gitRestore(repoDir, childHead)   // [CR#2]
     costUsd += cs.spent_usd; tokens += cs.spent_tokens
   } catch (e) { gitRestore(repoDir, childHead); log(`child failed: ${e.message}`) }         // [CR#2]
@@ -177,7 +177,7 @@ returns `{ state, verdict }` and optionally mutates a throwaway git repo:
 - dedupe: same finding key across two passes → child run once.
 - injection rejection: `scorer.id` not in allowlist, or `scope` escaping the repo → finding not decomposable. `[CR#4][CR#5]`
 - child failure: stub returns `verdict.status==='error'` (or throws) → `gitRestore` to `childHead`, next child still runs, no contamination. `[CR#2]`
-- cost aggregation reads `cs.state.spent_*`; sums returned; over-budget stops the loop. `[CR#3][CR#6]`
+- cost aggregation reads `cs.spent_*` (cs = the destructured child `state`); sums returned; over-budget stops the loop. `[CR#3][CR#6]`
 - `gitTreeChanged`: empty-commit-only fan-out → `changed === false`.
 - no loopdir pollution after a fan-out (repo `git status` clean of run-dir files).
 Integration reuses the `test/scope-loop.test.mjs` harness. `makeDecomposeAct`'s live spawn path is
