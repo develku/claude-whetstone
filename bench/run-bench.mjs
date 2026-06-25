@@ -5,10 +5,10 @@
 // I/O (`runArm`) and the CLI are added in later tasks; `sweep` takes runArm injected so it is unit-
 // testable with a fake.
 import { aggregate } from './aggregate.mjs'
-import { readFileSync, mkdtempSync, cpSync, rmSync, writeFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync, cpSync, rmSync, writeFileSync, readdirSync, mkdirSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { classify } from './adjudicate.mjs'
 
@@ -84,4 +84,37 @@ export async function runArm(fixture, arm, { model = 'haiku', perRunBudget = 1, 
     rmSync(work, { recursive: true, force: true })
     rmSync(loopDir, { recursive: true, force: true })
   }
+}
+
+export function discoverFixtures(fixturesDir = join(HERE, 'fixtures')) {
+  return readdirSync(fixturesDir)
+    .map((id) => join(fixturesDir, id))
+    .filter((d) => { try { return statSync(join(d, 'fixture.json')).isFile() } catch { return false } })
+    .map(loadFixture)
+}
+
+function parseArgs(argv) {
+  const get = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d }
+  return {
+    trials: Number(get('--trials', 3)),
+    model: get('--model', 'haiku'),
+    perRunBudget: Number(get('--per-run-budget', 1)),
+    totalBudget: Number(get('--total-budget', 24)),
+  }
+}
+
+async function main(argv, stamp) {
+  const o = parseArgs(argv)
+  const fixtures = discoverFixtures()
+  const runOne = (fx, arm, opts) => runArm(fx, arm, { ...opts, model: o.model, perRunBudget: o.perRunBudget })
+  const { aggregate: agg, spent, dropped } = await sweep(fixtures, { trials: o.trials, runArm: runOne, totalBudget: o.totalBudget, log: (m) => process.stderr.write(m + '\n') })
+  const reportsDir = join(HERE, 'reports'); mkdirSync(reportsDir, { recursive: true })
+  const report = `${agg.markdown}\n\n_spent $${spent.toFixed(2)}, dropped ${dropped} run(s)_\n`
+  writeFileSync(join(reportsDir, `${stamp}.md`), report)
+  process.stdout.write(report + '\n')
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  main(process.argv.slice(2), stamp).catch((e) => { process.stderr.write(String(e?.stack || e) + '\n'); process.exit(1) })
 }
