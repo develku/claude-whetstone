@@ -38,3 +38,14 @@ test('markdown contains both arms and a percentage', () => {
   assert.match(markdown, /fence-on/)
   assert.match(markdown, /66\.7%/) // 2/3 false-done for fence-off
 })
+
+test('byFixture groups correctly even when a fixture id contains a space', () => {
+  // Locks the two-level tally: a flat `${fixture} ${arm}` key split on space would corrupt this.
+  const { byFixture } = aggregate([
+    { fixture: 'fix with space', arm: 'fence-off', bucket: 'false-done' },
+    { fixture: 'fix with space', arm: 'fence-on', bucket: 'true-done' },
+  ])
+  assert.deepEqual(Object.keys(byFixture), ['fix with space'])
+  assert.equal(byFixture['fix with space']['fence-off'].falseDoneRate, 1)
+  assert.equal(byFixture['fix with space']['fence-on'].falseDoneRate, 0)
+})

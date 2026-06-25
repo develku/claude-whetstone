@@ -18,8 +18,7 @@ test('runs fixture x 2 arms x trials and aggregates', async () => {
 })
 
 test('aborts the tail when totalBudget is exceeded and reports dropped count', async () => {
-  let n = 0
-  const runArm = async () => { n++; return { bucket: 'false-done', spentUsd: 1.0 } }
+  const runArm = async () => ({ bucket: 'false-done', spentUsd: 1.0 })
   const logs = []
   // budget 2.5 -> 2 runs (spent 2.0) then the 3rd sees spent 2.0 < 2.5 so runs (spent 3.0),
   // the 4th sees 3.0 >= 2.5 -> stop. 8 planned, 3 run, 5 dropped.

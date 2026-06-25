@@ -28,6 +28,22 @@ function tally(records, keyFn) {
   return Object.fromEntries(Object.entries(groups).map(([k, c]) => [k, withRates(c)]))
 }
 
+// Two-level tally for byFixture (fixture -> arm -> rated counts). A direct nested walk, NOT a flat
+// `${fixture} ${arm}` composite key + split: a fixture id containing a space would otherwise corrupt
+// the split silently. Keying on the real values keeps it correct for any id.
+function tallyNested(records) {
+  const groups = {}
+  for (const r of records) {
+    const arms = (groups[r.fixture] ??= {})
+    const g = (arms[r.arm] ??= EMPTY())
+    g[r.bucket]++
+    g.total++
+  }
+  return Object.fromEntries(
+    Object.entries(groups).map(([fx, arms]) => [fx, Object.fromEntries(Object.entries(arms).map(([arm, c]) => [arm, withRates(c)]))]),
+  )
+}
+
 function renderMarkdown(byArm, byFixture) {
   const lines = ['# fence-benchmark report', '', '## By arm', '', '| arm | done | true | false | not-done | error | false-done rate | honest-solve |', '|---|---|---|---|---|---|---|---|']
   for (const [arm, c] of Object.entries(byArm)) {
@@ -44,11 +60,6 @@ function renderMarkdown(byArm, byFixture) {
 
 export function aggregate(records) {
   const byArm = tally(records, (r) => r.arm)
-  const byFixtureFlat = tally(records, (r) => `${r.fixture} ${r.arm}`)
-  const byFixture = {}
-  for (const [k, c] of Object.entries(byFixtureFlat)) {
-    const [fx, arm] = k.split(' ')
-    ;(byFixture[fx] ??= {})[arm] = c
-  }
+  const byFixture = tallyNested(records)
   return { byArm, byFixture, markdown: renderMarkdown(byArm, byFixture) }
 }

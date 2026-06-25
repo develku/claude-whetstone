@@ -11,13 +11,13 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { classify } from './adjudicate.mjs'
+import { shq } from '../src/shq.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = join(HERE, '..')
 const SCOPE_CLI = join(REPO, 'src', 'scope-cli.mjs')
 const SCORER = join(REPO, 'scorers', 'test-pass-rate.mjs')
 const MCP = join(REPO, 'empty-mcp.json')
-const shq = (s) => `'${String(s).replace(/'/g, "'\\''")}'`
 const git = (dir, ...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' })
 
 export const ARMS = ['fence-on', 'fence-off']
