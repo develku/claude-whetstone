@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { makeDecomposeAct, readLatestFindings } from '../src/decompose.mjs'
+import { makeDecomposeAct } from '../src/decompose.mjs'
 
 const git = (dir, ...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim()
 function tempRepo() {
@@ -36,6 +36,7 @@ test('decompose fan-out: two children edit the shared repo, spend aggregates, no
       // a child writes its area's file under the repo and commits (its own gitignored loopDir is created too)
       mkdirSync(cfg.loopDir, { recursive: true }); writeFileSync(join(cfg.loopDir, '.gitignore'), '*\n')
       writeFileSync(join(cfg.loopDir, 'state.json'), '{}')
+      // cfg.goal is set from finding.suggestion by buildChildCfg (Task 4), so it carries 'fix A'/'fix B'
       const f = cfg.goal.includes('fix A') ? 'a' : 'b'
       writeFileSync(join(repo, `${f}.txt`), 'fixed'); git(repo, 'add', '-A'); git(repo, 'commit', '-q', '-m', `child ${f}`)
       return { state: { spent_usd: 1.5, spent_tokens: 2000 }, verdict: { status: 'done' } }
