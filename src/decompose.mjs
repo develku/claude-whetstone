@@ -5,6 +5,8 @@
 import { readFileSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { gateVerdict } from './gate.mjs'
+import { gitHead, gitTreeChanged, gitRestore } from './git-snapshot.mjs'
+import { scopeChanged } from './scope-act.mjs'
 
 const key = (f) => String(f?.area ?? '')
 
@@ -92,5 +94,50 @@ export function buildChildCfg(parentCfg, state, finding, subgate, share, childCa
     mcpConfig: parentCfg.mcpConfig,
     decompose: false,
     loopDir: join(parentLoopDir, 'children', slug(finding.area)),
+  }
+}
+
+const sevRank = { critical: 3, high: 2, medium: 1, low: 0 }
+const sev = (f) => sevRank[String(f?.severity).toLowerCase()] ?? 0
+const rem = (budget, spent) => (budget == null ? null : Math.max(0, budget - spent))
+const exhausted = (r) => (r.usd != null && r.usd <= 0) || (r.tokens != null && r.tokens <= 0)
+const cleanTree = (dir) => !scopeChanged(dir)
+
+// The escalated-slot closure. Because runLoop makes actEscalated sticky, the FIRST thing it does is
+// re-check it is genuinely at a plateau [CR#1] (no-op-path entries and post-improvement passes fall
+// through to a single rescue edit). It then fans out one short child per fresh, resolvable finding,
+// sequentially on the shared branch, each transactional [CR#2], with spend recomputed against the
+// budget before each launch [CR#6]. Child spend always charges the parent (money is spent even when
+// the git edits are rolled back). `changed` is a TREE diff so an all-no-op fan-out reads honest.
+export function makeDecomposeAct({ repoDir, parentLoopDir, parentCfg, runChild, rescueAct, allowlist, maxChildren = 4, childCap = 3, log = () => {} }) {
+  const seen = new Set()
+  const ctx = { repoDir, allowlist }
+  return async (state) => {
+    if (!coarseSignalPlateau(state)) return rescueAct(state)
+    const fresh = decomposable(readLatestFindings(parentLoopDir, state), seen, ctx)
+    if (!fresh.length) return rescueAct(state)
+    const picked = [...fresh].sort((a, b) => sev(b) - sev(a)).slice(0, maxChildren)
+    log({ event: 'decompose', children: picked.length, areas: picked.map(key), childCap })
+    const headBefore = gitHead(repoDir)
+    let costUsd = 0
+    let tokens = 0
+    for (let i = 0; i < picked.length; i++) {
+      const f = picked[i]
+      const remaining = { usd: rem(state.budget_usd, state.spent_usd + costUsd), tokens: rem(state.budget_tokens, (state.spent_tokens ?? 0) + tokens) }
+      if (exhausted(remaining)) { log({ event: 'decompose-budget-stop', after: i }); break }
+      seen.add(key(f))
+      const childHead = gitHead(repoDir)
+      const cfg = buildChildCfg(parentCfg, state, f, resolveSubGate(f, ctx), splitBudget(remaining, picked.length - i), childCap, parentLoopDir)
+      try {
+        const { state: cs, verdict } = await runChild(cfg)
+        costUsd += cs.spent_usd ?? 0           // money is spent regardless of whether we keep the edits
+        tokens += cs.spent_tokens ?? 0
+        if (verdict.status === 'error' || !cleanTree(repoDir)) gitRestore(repoDir, childHead) // discard a bad child
+      } catch (e) {
+        gitRestore(repoDir, childHead)
+        log({ event: 'decompose-child-error', area: key(f), error: e.message })
+      }
+    }
+    return { changed: gitTreeChanged(repoDir, headBefore), costUsd, tokens }
   }
 }

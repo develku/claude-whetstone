@@ -4,6 +4,28 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { coarseSignalPlateau, readLatestFindings, resolveSubGate, decomposable, splitBudget, buildChildCfg } from '../src/decompose.mjs'
+import { execFileSync } from 'node:child_process'
+import { makeDecomposeAct } from '../src/decompose.mjs'
+
+const git = (dir, ...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim()
+function tempRepo() {
+  const dir = mkdtempSync(join(tmpdir(), 'whet-dc-'))
+  git(dir, 'init', '-q'); git(dir, 'config', 'user.email', 't@e.com'); git(dir, 'config', 'user.name', 't')
+  git(dir, 'commit', '--allow-empty', '-q', '-m', 'init')
+  return dir
+}
+// Write a review file so readLatestFindings has data; return a plateau state pointing at it.
+function plateauWithFindings(loopDir, findings) {
+  mkdirSync(join(loopDir, 'reviews'), { recursive: true })
+  writeFileSync(join(loopDir, 'reviews', 'review_003.json'), JSON.stringify({ score: 50, critique: 'x', findings }))
+  return {
+    goal: 'g', target_score: 90, min_delta: 1, plateau_window: 3, hard_cap: 10, pass: 3,
+    best_score: 50, budget_usd: null, budget_tokens: null, spent_usd: 0, spent_tokens: 0,
+    history: [50, 50, 50, { score: 50, ref: 1 }].map((s, i) =>
+      i === 3 ? { pass: 3, score: 50, critique_ref: 'reviews/review_003.json' } : { pass: i, score: 50, critique_ref: null }),
+  }
+}
+const allowOf = (id, path) => new Map([[id, path]])
 
 // A state the gate reads as `plateau` (best-score flat over plateau_window+1 passes), below target.
 function plateauState(over = {}) {
@@ -91,4 +113,51 @@ test('buildChildCfg: child repo is the PARENT scope, never finding.scope; no rec
   assert.equal(cfg.decompose, false)             // depth cap 1
   assert.match(cfg.goal, /specifically: fix auth/)
   assert.equal(cfg.loopDir, '/parent/loop/children/auth-login')
+})
+
+test('makeDecomposeAct: not at a plateau -> delegates to rescue, no children [CR#1]', async () => {
+  const repo = tempRepo()
+  try {
+    const running = { ...plateauWithFindings(repo, []), history: [50, 60, 70, 80].map((score, i) => ({ pass: i, score, critique_ref: null })), best_score: 80 }
+    let childRan = false
+    const act = makeDecomposeAct({ repoDir: repo, parentLoopDir: repo, parentCfg: { scope: repo }, runChild: async () => { childRan = true; return { state: {}, verdict: { status: 'done' } } }, rescueAct: async () => ({ changed: true, costUsd: 0.1, tokens: 5, _rescue: true }), allowlist: new Map() })
+    const r = await act(running)
+    assert.equal(r._rescue, true)
+    assert.equal(childRan, false)
+  } finally { rmSync(repo, { recursive: true, force: true }) }
+})
+
+test('makeDecomposeAct: fans out, aggregates spend, dedups across passes [CR#3]', async () => {
+  const repo = tempRepo()
+  try {
+    const finding = { area: 'A', suggestion: 'fix A', scorer: { id: 'tpr', args: ['--only', 'A'] } }
+    const state = plateauWithFindings(repo, [finding])
+    const allowlist = allowOf('tpr', '/abs/tpr.mjs')
+    let calls = 0
+    const runChild = async (cfg) => { calls++; writeFileSync(join(repo, 'edit.txt'), `child ${calls}`); git(repo, 'add', '-A'); git(repo, 'commit', '-q', '-m', 'child'); return { state: { spent_usd: 0.5, spent_tokens: 1000 }, verdict: { status: 'done' } } }
+    const act = makeDecomposeAct({ repoDir: repo, parentLoopDir: repo, parentCfg: { scope: repo, readOnly: [] }, runChild, rescueAct: async () => ({ changed: false, costUsd: 0, tokens: 0 }), allowlist })
+    const r1 = await act(state)
+    assert.equal(calls, 1)
+    assert.equal(r1.changed, true)            // a real edit landed
+    assert.equal(r1.costUsd, 0.5)
+    assert.equal(r1.tokens, 1000)
+    const r2 = await act(state)               // same finding area -> deduped -> rescue, no second child
+    assert.equal(calls, 1)
+    assert.equal(r2.changed, false)
+  } finally { rmSync(repo, { recursive: true, force: true }) }
+})
+
+test('makeDecomposeAct: a failed child is rolled back and not counted as a lasting change [CR#2]', async () => {
+  const repo = tempRepo()
+  try {
+    const finding = { area: 'A', suggestion: 'fix A', scorer: { id: 'tpr', args: [] } }
+    const state = plateauWithFindings(repo, [finding])
+    const head0 = git(repo, 'rev-parse', 'HEAD')
+    const runChild = async () => { writeFileSync(join(repo, 'broken.txt'), 'half-done'); git(repo, 'add', '-A'); git(repo, 'commit', '-q', '-m', 'child wip'); return { state: { spent_usd: 0.3, spent_tokens: 10 }, verdict: { status: 'error' } } }
+    const act = makeDecomposeAct({ repoDir: repo, parentLoopDir: repo, parentCfg: { scope: repo, readOnly: [] }, runChild, rescueAct: async () => ({ changed: false, costUsd: 0, tokens: 0 }), allowlist: allowOf('tpr', '/x.mjs') })
+    const r = await act(state)
+    assert.equal(git(repo, 'rev-parse', 'HEAD'), head0)   // rolled back to before the failed child
+    assert.equal(r.changed, false)                         // its edits left no lasting change
+    assert.equal(r.costUsd, 0.3)                           // but the money it spent is still charged
+  } finally { rmSync(repo, { recursive: true, force: true }) }
 })
