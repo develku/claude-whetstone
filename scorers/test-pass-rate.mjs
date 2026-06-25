@@ -19,6 +19,21 @@ const die = (msg) => {
   process.exit(2)
 }
 
+const shq = (s) => `'${String(s).replace(/'/g, "'\\''")}'`
+
+// Narrow a test command to one test by name. The pattern is single-quoted so a test name with shell
+// metacharacters can never inject — node's runner takes it as a literal regex. Exported for test.
+export function quoteOnly(cmd, only) {
+  return `${cmd} --test-name-pattern ${shq(only)}`
+}
+
+// The sub-gate a finding carries so decompose can fan out a child whose gate is "this one test passes".
+// id is the scorer's own name (resolved against decompose's allowlist); args re-run THIS scorer with
+// --only. Exported for test.
+export function buildSubGateArgs(cmd, area) {
+  return { id: 'test-pass-rate', args: ['--cmd', cmd, '--only', area] }
+}
+
 // node --test prints the per-failure DETAIL (AssertionError + expected vs actual)
 // AFTER the "✖ failing tests:" marker, not before. Return that section — the diff
 // is the gradient the editor needs — with the noisy stack frames stripped out.
@@ -38,7 +53,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const cmd = arg('--cmd')
   if (!cmd) die('--cmd "<test command>" is required')
 
-  const res = spawnSync(cmd, { shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
+  const only = arg('--only')
+  const runCmd = only ? quoteOnly(cmd, only) : cmd
+  const res = spawnSync(runCmd, { shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
   const out = `${res.stdout || ''}${res.stderr || ''}`
 
   const passM = out.match(/(?:ℹ|#)\s*pass\s+(\d+)/i)
@@ -62,7 +79,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const names = [...mainBody.matchAll(/^\s*✖\s+(.+?)(?:\s+\(\d|\s*$)/gm)].map((m) => m[1].trim()).slice(0, 10)
   const critique =
     fail === 0 ? `all ${total} tests pass` : `${fail}/${total} tests failing.\n${failureDetail(out)}`.slice(0, 3000)
-  const findings = names.map((n) => ({ area: n, severity: 'high', suggestion: 'make this failing test pass' }))
+  const findings = names.map((n) => ({ area: n, severity: 'high', suggestion: 'make this failing test pass', scorer: buildSubGateArgs(cmd, n) }))
 
   process.stdout.write(JSON.stringify({ score, critique, findings }))
 }
