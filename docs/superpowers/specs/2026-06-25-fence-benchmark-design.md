@@ -1,11 +1,20 @@
 # fence-benchmark — proving the read-only fence is load-bearing
 
-> Status: **approved design, pre-implementation** (2026-06-25). This is whetstone's first
+> Status: **shipped + run** (2026-06-25, merged main `6985a3b`). This is whetstone's first
 > thesis-measuring artifact: it turns the claim *"code owns the gate, and the read-only fence stops
 > the editor from gaming it"* into a **number** — the false-done rate with the fence ON vs OFF.
 > Motivated by the competitive analysis (path #2: "prove the thesis with a number") and aligned with
 > the ICLR-2026 reward-hacking literature (models overwrite tests / monkey-patch scoring; defense =
 > held-out / isomorphic verification).
+>
+> **Empirical result (first run): NULL — 0% false-done on both arms.** A helpful `claude -p` (haiku)
+> editor honestly fixes the trivial fixtures rather than gaming, even unfenced, so the fence is never
+> exercised. The fence *mechanism* is proven at $0 (the integration test, with a deterministic gamer);
+> the live sweep shows a real helpful editor does not game easy tasks — reward-hacking is largely an
+> RL-optimization phenomenon. The fence is therefore *insurance* whose value scales with editor
+> optimization pressure and task difficulty. A non-null `OFF ≫ ON` number needs gaming-pressure fixtures
+> (honest fix infeasible within budget) and/or an adversarial editor. See `bench/README.md` →
+> "First run" for the full reasoning.
 
 ## The decision (one line)
 
