@@ -24,3 +24,20 @@ export async function admitCheck({ candidateCmd, goodArtifact, badArtifact, repl
   if (bad.pass) return { admit: false, reason: 'passes a known-bad artifact — trivial / non-discriminating, catches nothing' }
   return { admit: true, reason: `discriminates (passes good, fails bad) reproducibly over ${replayRuns} runs` }
 }
+
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { shq } from '../shq.mjs'
+
+// Default runCheck adapter: run the candidate as a whetstone scorer against an artifact and map its
+// score to a boolean (score >= target -> pass), reusing the scorer contract used by the loop. A non-zero
+// scorer exit throws (a broken check is not silently treated as a verdict).
+export function scorerRunCheck(candidateCmd, artifact, { target = 100, loopDir } = {}) {
+  const dir = loopDir ?? mkdtempSync(join(tmpdir(), 'forge-check-'))
+  const full = `${candidateCmd} --output ${shq(artifact)} --loop-dir ${shq(dir)} --pass 000`
+  const res = spawnSync(full, { shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 5 * 60 * 1000, killSignal: 'SIGKILL' })
+  if (res.status !== 0) throw new Error(`candidate check exited ${res.status}: ${(res.stderr || '').slice(0, 300)}`)
+  return { pass: JSON.parse(res.stdout).score >= target }
+}

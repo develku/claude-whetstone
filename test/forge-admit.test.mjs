@@ -43,3 +43,31 @@ test('replayRuns=1 does a single read (no flakiness check) and still discriminat
   const r = await admitCheck({ ...base, replayRuns: 1, runCheck: stub({ good: [true], bad: [false] }) })
   assert.equal(r.admit, true)
 })
+
+import { scorerRunCheck } from '../src/forge/admit.mjs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { shq } from '../src/shq.mjs'
+
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..')
+// NOTE: shq() added vs plan — repo path contains spaces (iCloud drive); without quoting the shell
+// splits the path and node cannot find the module. Fix category: obvious breaking env defect.
+const CONTENT_SCORER = `node ${shq(join(REPO, 'test/fixtures/content-scorer.mjs'))} --needle FORGE_OK`
+
+test('scorerRunCheck maps score>=target to pass against a real artifact', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-adapter-'))
+  const good = join(dir, 'good.txt'); writeFileSync(good, 'all FORGE_OK here')
+  const bad = join(dir, 'bad.txt'); writeFileSync(bad, 'nothing relevant')
+  assert.equal(scorerRunCheck(CONTENT_SCORER, good, { target: 100 }).pass, true)
+  assert.equal(scorerRunCheck(CONTENT_SCORER, bad, { target: 100 }).pass, false)
+})
+
+test('admitCheck end-to-end with the real scorerRunCheck adapter admits a discriminating check', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-e2e-'))
+  const good = join(dir, 'good.txt'); writeFileSync(good, 'FORGE_OK')
+  const bad = join(dir, 'bad.txt'); writeFileSync(bad, 'broken')
+  const r = await admitCheck({ candidateCmd: CONTENT_SCORER, goodArtifact: good, badArtifact: bad, replayRuns: 2, runCheck: scorerRunCheck })
+  assert.equal(r.admit, true)
+})
