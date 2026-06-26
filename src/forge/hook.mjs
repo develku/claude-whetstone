@@ -4,8 +4,10 @@
 // and runs the cycle (src/forge/run.mjs). Kept out of driver.mjs so the driver change stays a thin guarded
 // call. The allowlist is built inline from --scorer-allow (not imported from scope-cli) to avoid a
 // driver<->scope-cli import cycle.
-import { resolve, basename } from 'node:path'
+import { resolve, basename, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { safeSnapshotPath } from '../state.mjs'
+import { isUnsafeScorer } from '../scorer-safety.mjs'
 import { generateCandidates, claudePropose } from './generate.mjs'
 import { admitCheck, scorerRunCheck } from './admit.mjs'
 import { loadStore, saveStore, addCheck } from './store.mjs'
@@ -23,17 +25,30 @@ export function forgeShouldFire(cfg, state, verdict) {
     !!cfg.confirmScorerCmd && !!cfg.forgeStorePath
 }
 
+// Scorers whose contract is "execute my argument" (a --cmd / raw manifest line run via shell:true) turn
+// the shq-quoted DATA args back into code INSIDE the scorer, downstream of the Forge fence — so they must
+// NEVER be a proposable Forge check, even if an operator --scorer-allow names one (the MODEL picks the id;
+// the operator only names paths). The denylist test is normalization-robust + realpath-aware via
+// isUnsafeScorer (shared with scope-cli's SUBGATE_UNSAFE so the two trust boundaries cannot drift).
+// io-assert (JSON data only) is the safe behavioural check.
+const FORGE_UNSAFE_SCORERS = new Set(['test-pass-rate', 'composite'])
+const SCORERS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scorers')
+const SHIPPED_UNSAFE = [resolve(SCORERS_DIR, 'test-pass-rate.mjs'), resolve(SCORERS_DIR, 'composite.mjs')]
+
 // The proposable-scorer allowlist: operator-named scorers only (--scorer-allow), basename -> absolute path.
-// Mirrors scope-cli buildAllowlist's extraPaths handling; kept local to avoid a driver<->scope-cli cycle.
+// Command-executing scorers are denylisted (above).
 export function forgeAllowlist(scorerAllow = []) {
-  return new Map(scorerAllow.map((p) => [basename(p).replace(/\.[^.]+$/, ''), resolve(p)]))
+  return new Map(
+    scorerAllow
+      .filter((p) => !isUnsafeScorer(p, FORGE_UNSAFE_SCORERS, SHIPPED_UNSAFE))
+      .map((p) => [basename(p).replace(/\.[^.]+$/, ''), resolve(p)]),
+  )
 }
 
 // Usage hints for the shipped discriminating scorers so the model proposes valid args; '' for unknown ids.
 const SCORER_USAGE = {
   'io-assert': "--fn <exported function name> --case 'JSON_INPUT=>JSON_OUTPUT' (repeat --case for several inputs; a BEHAVIOURAL check that ANY correct implementation passes and the gamed one fails — PREFER this over a brittle textual contains)",
   contains: '--needle <substring present only in an honest artifact> (brittle — rejects valid alternate phrasings; use only when a behavioural check is impossible)',
-  'test-pass-rate': '--cmd <test command> --only <test name>',
 }
 export function forgeCatalog(allowlist) {
   return [...allowlist.keys()].map((id) => ({ id, usage: SCORER_USAGE[id] ?? '' }))

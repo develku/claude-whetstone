@@ -14,6 +14,7 @@ import { makeScopeAct } from './scope-act.mjs'
 import { gitRestore } from './git-snapshot.mjs'
 import { formatReport } from './summary.mjs'
 import { makeDecomposeAct } from './decompose.mjs'
+import { isUnsafeScorer } from './scorer-safety.mjs'
 
 // driver's parseCli plus --scope (becomes the artifact) and --read-only (comma list of gate paths
 // the editor may not touch — the tests/scorer it is graded by).
@@ -49,9 +50,14 @@ export function cleanTreeGuard(scopeDir) {
 
 const SCORERS_DIR = rpath(dirname(fileURLToPath(import.meta.url)), '..', 'scorers')
 
-// composite executes raw manifest-file lines via shell:true, so it is not a safe AUTO sub-gate id;
-// an operator can still opt it in explicitly via --scorer-allow.
+// composite executes raw manifest-file lines via shell:true, so a model-authored decompose finding that
+// names it as a sub-gate would reach a shell. It is denied from BOTH the AUTO set and operator --scorer-allow
+// extraPaths (the model picks the finding's scorer id; the operator only names paths). test-pass-rate is NOT
+// denied here — it is a legitimate child sub-gate (a project test command), unlike in the Forge where the
+// model proposes its --cmd. The denylist test (isUnsafeScorer) is normalization-robust + realpath-aware and
+// is shared with the Forge denylist (src/forge/hook.mjs) so the two trust boundaries cannot drift.
 const SUBGATE_UNSAFE = new Set(['composite'])
+const SUBGATE_UNSAFE_PATHS = [join(SCORERS_DIR, 'composite.mjs')]
 
 // The scorer-id allowlist a child sub-gate is resolved against: every shipped scorer (by basename) plus
 // any operator-provided path via --scorer-allow. A finding can only ever name an id in this map [CR#4].
@@ -61,8 +67,19 @@ export function buildAllowlist(extraPaths = []) {
     const id = f.replace(/\.mjs$/, '')
     if (f.endsWith('.mjs') && !SUBGATE_UNSAFE.has(id)) m.set(id, join(SCORERS_DIR, f))
   }
-  for (const p of extraPaths) m.set(basename(p).replace(/\.[^.]+$/, ''), rpath(p))
+  for (const p of extraPaths) {
+    if (isUnsafeScorer(p, SUBGATE_UNSAFE, SUBGATE_UNSAFE_PATHS)) continue
+    m.set(basename(p).replace(/\.[^.]+$/, ''), rpath(p))
+  }
   return m
+}
+
+// The Verifier Forge sources its good/bad pair from FILE snapshots; on a scope run a snapshot is a git SHA
+// (not a file path) and the artifact is a directory, so the Forge would silently no-op (or feed wrong
+// content). parseScopeCli inherits --forge/--forge-store from parseCli, so reject it loudly here until
+// scope-mode Forge ships (deferred). Single-file --forge via driver.mjs is unaffected.
+export function forgeUnsupportedOnScope(cfg) {
+  return !!cfg.forge
 }
 
 // --decompose without a held-out confirm scorer is refused: the done-edge must be verified from a
@@ -127,6 +144,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
   if (decomposeNeedsBudget(cfg)) {
     process.stderr.write('refusing to start: --decompose requires a spend ceiling — set --budget and/or --budget-tokens (fan-out multiplies spend across children)\n')
+    process.exit(2)
+  }
+  if (forgeUnsupportedOnScope(cfg)) {
+    process.stderr.write('refusing to start: --forge is not supported on --scope runs (the Verifier Forge is single-file only; scope-mode Forge is deferred)\n')
     process.exit(2)
   }
   const { state, verdict } = await runFromConfig(cfg, scopeDeps(cfg))

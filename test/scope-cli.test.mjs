@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { parseScopeCli, cleanTreeGuard, buildAllowlist, decomposeNeedsConfirm, decomposeNeedsBudget, scopeDeps } from '../src/scope-cli.mjs'
+import { parseScopeCli, cleanTreeGuard, buildAllowlist, decomposeNeedsConfirm, decomposeNeedsBudget, scopeDeps, forgeUnsupportedOnScope } from '../src/scope-cli.mjs'
 
 const git = (dir, ...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim()
 
@@ -72,8 +72,22 @@ test('decomposeNeedsBudget: --decompose requires --budget or --budget-tokens', (
   assert.equal(decomposeNeedsBudget({ decompose: false, budgetUsd: null, budgetTokens: null }), false)
 })
 
-test('buildAllowlist: excludes composite from the auto set; --scorer-allow can re-add it', () => {
+test('buildAllowlist: excludes composite from the auto set AND refuses to re-add it via --scorer-allow', () => {
   const m = buildAllowlist([])
   assert.equal(m.has('test-pass-rate'), true)
   assert.equal(m.has('composite'), false) // shell-executes manifest lines -> not an auto sub-gate
+  // A model-authored decompose finding can name a sub-gate id, so a command-executing scorer must NOT be
+  // re-addable via --scorer-allow either (shared isUnsafeScorer with the Forge denylist). Dodges blocked too.
+  assert.equal(buildAllowlist(['/x/composite.mjs']).has('composite'), false)
+  assert.equal(buildAllowlist(['/x/composite.v2.mjs']).has('composite.v2'), false)
+  assert.equal(buildAllowlist(['/x/Composite.mjs']).has('Composite'), false)
+  // test-pass-rate IS a legitimate decompose sub-gate (a child's test command), so it stays allowed.
+  assert.equal(buildAllowlist(['/x/test-pass-rate.mjs']).has('test-pass-rate'), true)
+})
+
+test('forgeUnsupportedOnScope: --forge is rejected on scope runs (the Forge is single-file only)', () => {
+  // The Forge sources good/bad from file snapshots; on a scope run a snapshot is a git SHA, not a file,
+  // so the Forge would silently no-op. Reject it loudly until scope-mode Forge ships.
+  assert.equal(forgeUnsupportedOnScope({ forge: true }), true)
+  assert.equal(forgeUnsupportedOnScope({ forge: false }), false)
 })

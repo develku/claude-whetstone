@@ -20,9 +20,35 @@ test('forgeShouldFire is false when any condition is missing', () => {
 })
 
 test('forgeAllowlist maps each --scorer-allow path to basename->absolute', () => {
-  const m = forgeAllowlist(['/a/contains.mjs', 'rel/test-pass-rate.mjs'])
+  const m = forgeAllowlist(['/a/contains.mjs', 'rel/io-assert.mjs'])
   assert.equal(m.get('contains'), '/a/contains.mjs')
-  assert.match(m.get('test-pass-rate'), /\/rel\/test-pass-rate\.mjs$/)
+  assert.match(m.get('io-assert'), /\/rel\/io-assert\.mjs$/)
+})
+
+test('forgeAllowlist excludes command-executing scorers (denylist)', () => {
+  // A scorer whose contract is "run my argument" (--cmd via shell:true) turns shq-quoted data back
+  // into code INSIDE the scorer, downstream of the Forge fence — so it must never be a proposable check.
+  const m = forgeAllowlist(['/a/test-pass-rate.mjs', '/a/composite.mjs', '/a/io-assert.mjs'])
+  assert.equal(m.has('test-pass-rate'), false)
+  assert.equal(m.has('composite'), false)
+  assert.equal(m.get('io-assert'), '/a/io-assert.mjs') // data-only behavioural check stays
+})
+
+test('forgeAllowlist denylist resists rename/case/extension dodges (normalization-mismatch bypass)', () => {
+  // The original Phase A filter compared a single-extension-strip, case-preserving id against a
+  // lowercase/extensionless Set — so these all slipped past and re-opened RCE-by-replay.
+  const m = forgeAllowlist(['/a/composite.v2.mjs', '/a/Composite.mjs', '/a/composite', '/a/test-pass-rate.backup.mjs', '/a/io-assert.mjs'])
+  assert.equal(m.has('composite.v2'), false)
+  assert.equal(m.has('Composite'), false)
+  assert.equal(m.has('composite'), false)
+  assert.equal(m.has('test-pass-rate.backup'), false)
+  assert.equal(m.get('io-assert'), '/a/io-assert.mjs') // the one safe scorer survives
+})
+
+test('forgeCatalog never advertises a denylisted scorer even if --scorer-allow names it', () => {
+  const cat = forgeCatalog(forgeAllowlist(['/a/test-pass-rate.mjs', '/a/io-assert.mjs']))
+  assert.equal(cat.find((c) => c.id === 'test-pass-rate'), undefined)
+  assert.ok(cat.find((c) => c.id === 'io-assert'))
 })
 
 test('forgeCatalog lists allowlist ids with a usage hint (default empty)', () => {

@@ -97,6 +97,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     .join(' ')
 
   const results = list.map((cmd) => {
+    // shell:true is safe ONLY because every manifest line is fence-constructed by its writer —
+    // `node <allowlisted-script> <shq-quoted-arg>…` (see src/forge/gate.mjs, src/scope-cli.mjs). A
+    // sub-scorer that itself EXECUTES one of its args (e.g. test-pass-rate's --cmd) would re-open a
+    // shell hole through this line — which is exactly why the Forge denylists such scorers
+    // (FORGE_UNSAFE_SCORERS in src/forge/hook.mjs) and scope-cli excludes composite (SUBGATE_UNSAFE).
     const res = spawnSync(`${cmd} ${tail}`, { shell: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: SUB_TIMEOUT_MS, killSignal: 'SIGKILL' })
     if (res.error) die(`sub-scorer failed to spawn (${cmd}): ${res.error.message}`)
     try {

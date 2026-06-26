@@ -15,6 +15,11 @@ const COMPOSITE = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'sco
 
 // The composite manifest body: the base confirm scorer plus every stored check, one bare cmd per line.
 // Empty when there are no checks (the caller treats that as passthrough). Pure.
+// NOTE: a stored check's per-check `target` is intentionally NOT emitted here — composite combines sub-scores
+// by MIN and the loop compares that MIN against the RUN target, not each check's stored target. This is sound
+// because every admittable check is a BOOLEAN discriminator (io-assert/contains emit only 0 or 100), so
+// MIN>=run-target and MIN>=100 coincide. If a graded (non-0/100) deterministic scorer ever becomes
+// allowlistable, give composite a per-sub threshold rather than relying on this coincidence.
 export function gateManifestLines(baseConfirmCmd, checks) {
   if (!checks.length) return []
   return [baseConfirmCmd, ...checks.map((c) => c.cmd)]
