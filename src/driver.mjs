@@ -26,6 +26,7 @@ import { prepareResume } from './resume.mjs'
 import { formatReport } from './summary.mjs'
 import { forgeShouldFire, runForgeHook } from './forge/hook.mjs'
 import { composeConfirm } from './forge/gate.mjs'
+import { loadStore, saveStore, findCheckKeys, retireCheck } from './forge/store.mjs'
 
 export { shq } // re-exported so callers can keep importing shq from driver (the canonical impl is shq.mjs)
 
@@ -271,6 +272,29 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const flag = (name) => {
     const i = argv.indexOf(name)
     return i >= 0 ? argv[i + 1] : undefined
+  }
+
+  // Verifier Forge retirement: tombstone a false-positive check so it stops gating, without deleting its
+  // record. Manual (operator judgment) — auto-retiring a check that vetoes where the base confirm passes
+  // could remove a genuine catch the base gate missed. Standalone: load -> match by cmd -> retire -> save.
+  if (argv.includes('--forge-retire')) {
+    const storePath = flag('--forge-store')
+    const cmd = flag('--check')
+    if (!storePath || !cmd) {
+      process.stderr.write('usage: driver.mjs --forge-retire --forge-store <path> --check "<scorer cmd>"\n')
+      process.exit(2)
+    }
+    const store = loadStore(storePath)
+    const keys = findCheckKeys(store, cmd)
+    if (!keys.length) {
+      process.stderr.write(`no stored check matches: ${cmd}\n`)
+      process.exit(1)
+    }
+    let next = store
+    for (const k of keys) next = retireCheck(next, k)
+    saveStore(storePath, next)
+    process.stdout.write(`retired ${keys.length} check(s) matching: ${cmd}\n`)
+    process.exit(0)
   }
 
   if (argv.includes('--resume')) {

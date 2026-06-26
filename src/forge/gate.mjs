@@ -8,7 +8,8 @@ import { writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { shq } from '../shq.mjs'
-import { loadStore as defaultLoadStore, listChecks as defaultListChecks } from './store.mjs'
+// listActiveChecks (not listChecks) so retired (tombstoned) checks are folded out of the gate.
+import { loadStore as defaultLoadStore, listActiveChecks as defaultListChecks } from './store.mjs'
 
 const COMPOSITE = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scorers', 'composite.mjs')
 
