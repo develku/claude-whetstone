@@ -20,6 +20,11 @@ export function validateConfig(state) {
   if (!Number.isInteger(state.plateau_window) || state.plateau_window < 1) {
     errors.push('plateau_window must be an integer at least 1')
   }
+  // stability_runs is COUNTED (re-run the scorer N times at the done-edge), so — like hard_cap — it
+  // must be a positive integer. Default is 1 (off). A fractional/NaN value would corrupt the probe loop.
+  if (!Number.isInteger(state.stability_runs) || state.stability_runs < 1) {
+    errors.push('stability_runs must be an integer at least 1')
+  }
   // budget is optional; validate only when one is set. `!= null` treats both null (the
   // initState default) and a missing key from an older state.json (undefined) as "no budget".
   if (state.budget_usd != null && (!Number.isFinite(state.budget_usd) || state.budget_usd <= 0)) {

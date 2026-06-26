@@ -23,6 +23,9 @@ export function initState(cfg) {
     min_delta: cfg.minDelta ?? 1,
     plateau_window: cfg.plateauWindow ?? 3,
     hard_cap: cfg.hardCap ?? 10,
+    // Done-edge confidence dial: re-measure the primary scorer N times when the gate says done, accept
+    // only if the WEAKEST reading clears target. 1 = off (single reading = the historical behavior).
+    stability_runs: cfg.stabilityRuns ?? 1,
     budget_usd: cfg.budgetUsd ?? null,
     budget_tokens: cfg.budgetTokens ?? null,
     model: cfg.model ?? null,

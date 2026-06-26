@@ -207,6 +207,7 @@ export function parseCli(argv, defaults = {}) {
     hardCap: get('--cap') ? Number(get('--cap')) : defaults.hardCap,
     budgetUsd: get('--budget') ? Number(get('--budget')) : defaults.budgetUsd,
     budgetTokens: get('--budget-tokens') ? Number(get('--budget-tokens')) : defaults.budgetTokens,
+    stabilityRuns: get('--stability-runs') ? Number(get('--stability-runs')) : defaults.stabilityRuns,
     model: get('--model', defaults.model ?? 'sonnet'),
     effort: get('--effort', defaults.effort ?? 'medium'),
     escalateModel: get('--model-escalate', defaults.escalateModel ?? 'opus'),
@@ -229,11 +230,13 @@ function parseResumeOverrides(argv) {
   const budgetTokens = get('--budget-tokens')
   const target = get('--target')
   const model = get('--model')
+  const stability = get('--stability-runs')
   if (cap !== undefined) o.hard_cap = Number(cap)
   if (budget !== undefined) o.budget_usd = Number(budget)
   if (budgetTokens !== undefined) o.budget_tokens = Number(budgetTokens)
   if (target !== undefined) o.target_score = Number(target)
   if (model !== undefined) o.model = model
+  if (stability !== undefined) o.stability_runs = Number(stability)
   return o
 }
 
@@ -249,7 +252,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (argv.includes('--resume')) {
     const loopDir = flag('--loop-dir')
     if (!loopDir) {
-      process.stderr.write('usage: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--target T] [--model M] [--model-escalate opus | --no-escalate] [--mcp-config <path>]\n')
+      process.stderr.write('usage: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--stability-runs N] [--target T] [--model M] [--model-escalate opus | --no-escalate] [--mcp-config <path>]\n')
       process.exit(2)
     }
     try {
@@ -270,7 +273,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
   const cfg = parseCli(argv, loadConfig())
   if (!cfg.goal || !cfg.artifactPath || !cfg.scorerCmd) {
-    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--budget-tokens N] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--target T] [--model M]\n')
+    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--budget-tokens N] [--stability-runs N] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--stability-runs N] [--target T] [--model M]\n')
     process.exit(2)
   }
   const { state, verdict } = await runFromConfig(cfg)

@@ -9,7 +9,7 @@ import { isoNow } from './state.mjs'
 
 // Only these keys may be overridden on resume; everything else (history, best_score,
 // spent_usd, snapshots) is carried forward untouched.
-const OVERRIDABLE = ['hard_cap', 'budget_usd', 'budget_tokens', 'target_score', 'model']
+const OVERRIDABLE = ['hard_cap', 'budget_usd', 'budget_tokens', 'target_score', 'model', 'stability_runs']
 
 const HINTS = {
   done: 'the run already reached its target',

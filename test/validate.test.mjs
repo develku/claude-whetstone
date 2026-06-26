@@ -150,3 +150,24 @@ test('allows every valid effort level', () => {
     assert.deepEqual(validateConfig({ ...valid(), effort: e }), [])
   }
 })
+
+// stability_runs is COUNTED (re-run the scorer N times at the done-edge), so — like hard_cap — it must
+// be a positive integer. The default (1 = off) must validate, and a bad value must fail fast.
+test('a valid config defaults stability_runs to 1 (off)', () => {
+  assert.equal(valid().stability_runs, 1)
+})
+
+test('flags a stability_runs below 1', () => {
+  const errs = validateConfig({ ...valid(), stability_runs: 0 })
+  assert.equal(errs.length, 1)
+  assert.match(errs[0], /stability_runs/)
+})
+
+test('flags a non-integer stability_runs', () => {
+  assert.match(validateConfig({ ...valid(), stability_runs: 1.5 })[0], /stability_runs/)
+})
+
+test('allows stability_runs of 1 (the default) and higher', () => {
+  assert.deepEqual(validateConfig({ ...valid(), stability_runs: 1 }), [])
+  assert.deepEqual(validateConfig({ ...valid(), stability_runs: 3 }), [])
+})

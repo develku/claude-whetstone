@@ -113,7 +113,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const argv = process.argv
   const cfg = parseScopeCli(argv, loadConfig())
   if (!cfg.goal || !cfg.scope || !cfg.scorerCmd) {
-    process.stderr.write('usage: scope-cli.mjs "<goal>" --scope <repo dir> --scorer "<project test/build cmd>" [--read-only test/,gate] [--confirm-scorer "<cmd>"] [--target 90] [--cap 10] [--budget X] [--budget-tokens N] [--model sonnet] [--effort medium] [--no-escalate] [--mcp-config <path>] [--loop-dir <dir>] [--decompose] [--max-children 4] [--child-cap 3] [--scorer-allow <paths>]\n')
+    process.stderr.write('usage: scope-cli.mjs "<goal>" --scope <repo dir> --scorer "<project test/build cmd>" [--read-only test/,gate] [--confirm-scorer "<cmd>"] [--target 90] [--cap 10] [--budget X] [--budget-tokens N] [--stability-runs N] [--model sonnet] [--effort medium] [--no-escalate] [--mcp-config <path>] [--loop-dir <dir>] [--decompose] [--max-children 4] [--child-cap 3] [--scorer-allow <paths>]\n')
     process.exit(2)
   }
   const guard = cleanTreeGuard(cfg.scope)

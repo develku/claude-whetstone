@@ -210,6 +210,11 @@ test('parseCli reads --confirm-scorer (null when absent)', () => {
   )
 })
 
+test('parseCli reads --stability-runs as a number (the confidence dial), undefined when absent', () => {
+  assert.equal(parseCli(['node', 'driver.mjs', 'g', '--artifact', 'x', '--scorer', 's', '--stability-runs', '3']).stabilityRuns, 3)
+  assert.equal(parseCli(['node', 'driver.mjs', 'g', '--artifact', 'x', '--scorer', 's']).stabilityRuns, undefined)
+})
+
 test('a confirm scorer vetoes a gamed done: the loop continues instead of finishing', async () => {
   // primary (contains DONE) hits target 100, but the independent confirm scorer (contains a needle
   // the artifact lacks) returns 0 every pass -> the done is vetoed and the run caps, never "done".
