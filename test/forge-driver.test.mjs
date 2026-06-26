@@ -14,6 +14,13 @@ test('parseCli parses --forge / --forge-store / --scorer-allow', () => {
   assert.deepEqual(cfg.scorerAllow, ['/a/x.mjs', '/a/y.mjs'])
 })
 
+test('parseCli collects REPEATABLE --forge-oracle into an array (defaults to [])', () => {
+  // oracle values are full scorer command strings (commas/spaces), so they must REPEAT, not comma-split.
+  const cfg = parseCli(['node', 'driver.mjs', 'g', '--artifact', 'a', '--scorer', 's', '--forge-oracle', 'node o1.mjs --needle Z', '--forge-oracle', 'node o2.mjs'])
+  assert.deepEqual(cfg.forgeOracleCmds, ['node o1.mjs --needle Z', 'node o2.mjs'])
+  assert.deepEqual(parseCli(['node', 'driver.mjs', 'g', '--artifact', 'a', '--scorer', 's']).forgeOracleCmds, [])
+})
+
 // A stubbed run that goes done at baseline, gets vetoed once by confirm, then confirms on the next pass.
 const recoverRun = (loopDir, extra) => {
   let confirmCalls = 0
@@ -35,6 +42,29 @@ test('runPrepared fires the Forge hook on a recovered-veto done when --forge is 
   let fired = null
   await recoverRun(loopDir, { runForgeHook: async ({ state }) => { fired = state.confirm_vetoed_at_pass } })
   assert.equal(fired, 0)
+})
+
+test('a THROWING Forge hook does NOT fail an already-successful run (fail-safe) and logs forge-error', async () => {
+  const loopDir = mkdtempSync(join(tmpdir(), 'forge-drv-'))
+  const events = []
+  const { verdict } = await recoverRun(loopDir, {
+    runForgeHook: async () => { throw new Error('boom') },
+    log: (e) => events.push(e),
+  })
+  assert.equal(verdict.status, 'done') // the paid, completed run still succeeds
+  const fe = events.find((e) => e.status === 'forge-error')
+  assert.ok(fe && /boom/.test(fe.reason))
+})
+
+test('runPrepared logs forge-declined (not forge) when the hook returns corroborated:false', async () => {
+  const loopDir = mkdtempSync(join(tmpdir(), 'forge-drv-'))
+  const events = []
+  await recoverRun(loopDir, {
+    runForgeHook: async () => ({ admitted: [], rejected: [], conflicts: [{ oracleCmd: 'o', reason: 'disputed' }], excluded: [], corroborated: false }),
+    log: (e) => events.push(e),
+  })
+  assert.ok(events.find((e) => e.status === 'forge-declined'), 'a corroboration decline is logged distinctly')
+  assert.equal(events.find((e) => e.status === 'forge'), undefined) // not mislabeled as a normal learn
 })
 
 test('runPrepared does NOT fire the Forge hook without --forge', async () => {

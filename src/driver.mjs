@@ -148,7 +148,12 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
   if (forgeShouldFire(cfg, final, verdict)) {
     try {
       const r = await (deps.runForgeHook ?? runForgeHook)({ cfg, state: final, loopDir })
-      ;(deps.log ?? defaultLog)({ pass: final.pass, score: final.current_score, best: final.best_score, status: 'forge', reason: `admitted ${r.admitted.length}, rejected ${r.rejected.length}` })
+      const log = deps.log ?? defaultLog
+      const base = { pass: final.pass, score: final.current_score, best: final.best_score }
+      // A corroboration DECLINE (2a) is a distinct, healthy outcome — log it apart from a normal learn so it
+      // is not mistaken for a 0-admitted no-op or (when it threw) a forge-error.
+      if (r.corroborated === false) log({ ...base, status: 'forge-declined', reason: `declined to learn — ${r.conflicts.length} oracle conflict(s)` })
+      else log({ ...base, status: 'forge', reason: `admitted ${r.admitted.length}, rejected ${r.rejected.length}` })
     } catch (e) {
       ;(deps.log ?? defaultLog)({ pass: final.pass, score: final.current_score, best: final.best_score, status: 'forge-error', reason: e.message })
     }
@@ -214,6 +219,9 @@ export function parseCli(argv, defaults = {}) {
     const i = argv.indexOf(name)
     return i >= 0 ? argv[i + 1] : def
   }
+  // Collect a REPEATABLE flag (every occurrence). `get` returns only the first — wrong for --forge-oracle,
+  // whose values are full scorer COMMAND strings (commas/spaces/quotes), so they must repeat, not comma-split.
+  const getAll = (name) => argv.reduce((a, t, i) => (t === name && argv[i + 1] != null ? [...a, argv[i + 1]] : a), [])
   // The goal is the FIRST positional only (argv[2]). Scanning for any non-`--` token would pick
   // up a flag's value (e.g. --artifact x.txt) as the goal when the positional is omitted, slipping
   // past the usage guard and running with a garbage goal in every paid edit prompt.
@@ -239,6 +247,10 @@ export function parseCli(argv, defaults = {}) {
     forge: argv.includes('--forge'),
     forgeStorePath: get('--forge-store', null),
     scorerAllow: (get('--scorer-allow', '') || '').split(',').map((s) => s.trim()).filter(Boolean),
+    // Frontier 2a: independent operator-trusted oracle command(s) that must corroborate a veto before the
+    // Forge learns from it (repeatable). Empty => single-oracle behavior (today's). Run verbatim, NOT
+    // through forgeAllowlist (operator-authored, same trust class as --confirm-scorer).
+    forgeOracleCmds: getAll('--forge-oracle'),
   }
 }
 
@@ -321,7 +333,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
   const cfg = parseCli(argv, loadConfig())
   if (!cfg.goal || !cfg.artifactPath || !cfg.scorerCmd) {
-    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--budget-tokens N] [--stability-runs N] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>] [--forge --forge-store <path> --scorer-allow <scorer.mjs,...>]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--stability-runs N] [--target T] [--model M]\n')
+    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--budget-tokens N] [--stability-runs N] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>] [--forge --forge-store <path> --scorer-allow <scorer.mjs,...> [--forge-oracle "<scorer cmd>" ...]]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--stability-runs N] [--target T] [--model M]\n')
     process.exit(2)
   }
   const { state, verdict } = await runFromConfig(cfg)

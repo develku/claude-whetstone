@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { runForge } from '../src/forge/run.mjs'
-import { emptyStore, addCheck } from '../src/forge/store.mjs'
+import { emptyStore, addCheck, checkKey } from '../src/forge/store.mjs'
 
 // In-memory store ops so the cycle is tested with no disk.
 const memStore = () => {
@@ -36,4 +36,44 @@ test('runForge excludes admit-rejected candidates and never writes an empty stor
   assert.equal(out.admitted.length, 0)
   assert.equal(out.rejected.length, 2)
   assert.equal(saved, false)
+})
+
+test('runForge: corroboration DECLINE returns early (generate never called) with a FULL backward-compatible shape', async () => {
+  let genCalls = 0
+  const generate = async () => { genCalls++; return { candidates: [], rejected: [] } }
+  const corroborate = async () => ({ corroborated: false, conflicts: [{ oracleCmd: 'o', reason: 'disputed' }], excluded: [] })
+  const out = await runForge(base({ generate, admit: async () => ({ admit: true }), corroborate, oracleCmds: ['o'], ...memStore() }))
+  assert.equal(genCalls, 0) // declined BEFORE the expensive generate ($0)
+  // every existing consumer key is present (driver.mjs/bench read admitted/rejected/candidates/costUsd/tokens)
+  assert.deepEqual(out, { admitted: [], rejected: [], candidates: [], costUsd: 0, tokens: 0, conflicts: [{ oracleCmd: 'o', reason: 'disputed' }], excluded: [], corroborated: false })
+})
+
+test('runForge: corroboration PASS proceeds to generate->admit->store and reports corroborated:true', async () => {
+  const m = memStore()
+  const generate = async () => ({ candidates: [{ scorerId: 'contains', args: ['--needle', 'X'], cmd: 'node /contains.mjs --needle X', rationale: 'r' }], rejected: [], costUsd: 0.02, tokens: 5 })
+  const corroborate = async () => ({ corroborated: true, conflicts: [], excluded: [] })
+  const out = await runForge(base({ generate, admit: async () => ({ admit: true, reason: 'ok' }), corroborate, oracleCmds: ['o'], ...m }))
+  assert.equal(out.corroborated, true)
+  assert.equal(out.admitted.length, 1)
+  assert.equal(m.get().checks.length, 1)
+})
+
+test('runForge: no corroborate injected -> unchanged behavior, return carries corroborated:true', async () => {
+  const m = memStore()
+  const generate = async () => ({ candidates: [{ scorerId: 'contains', args: [], cmd: 'node /contains.mjs', rationale: '' }], rejected: [] })
+  const out = await runForge(base({ generate, admit: async () => ({ admit: true, reason: 'ok' }), ...m }))
+  assert.equal(out.corroborated, true)
+  assert.equal(out.admitted.length, 1)
+})
+
+test('runForge: a re-proposed PREVIOUSLY-RETIRED check is classified rejected, not admitted (accurate accounting)', async () => {
+  const cmd = 'node /contains.mjs --needle X'
+  const retiredStore = { version: 1, checks: [], retired: [{ key: checkKey({ cmd, target: 100 }), reason: 'manually retired', ts: 't' }] }
+  let saved = false
+  const generate = async () => ({ candidates: [{ scorerId: 'contains', args: ['--needle', 'X'], cmd, rationale: 'r' }], rejected: [] })
+  const out = await runForge(base({ generate, admit: async () => ({ admit: true, reason: 'discriminates' }), loadStore: () => retiredStore, saveStore: () => { saved = true } }))
+  assert.equal(out.admitted.length, 0)
+  assert.equal(out.rejected.length, 1)
+  assert.match(out.rejected[0].reason, /retired/i)
+  assert.equal(saved, false) // nothing newly admitted -> no write
 })

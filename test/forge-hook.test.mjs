@@ -72,3 +72,24 @@ test('runForgeHook sources good=final artifact + bad=vetoed snapshot and calls r
   assert.equal(seen.allowlist.get('contains'), '/a/contains.mjs')
   assert.equal(seen.critique, 'gamed it')
 })
+
+test('runForgeHook threads cfg.forgeOracleCmds and injects a corroborate fn (2a)', async () => {
+  const state = {
+    goal: 'g', artifact_path: '/run/final.txt', last_critique: '', confirm_vetoed_at_pass: 1,
+    history: [{}, { snapshot: 'snapshots/iter_001.txt' }],
+  }
+  const cfg = { forge: true, confirmScorerCmd: 'x', forgeStorePath: '/run/checks.json', scorerAllow: [], model: 'sonnet', forgeOracleCmds: ['node o1.mjs', 'node o2.mjs --x 1'] }
+  let seen = null
+  const runForge = async (args) => { seen = args; return { admitted: [], rejected: [], corroborated: true } }
+  await runForgeHook({ cfg, state, loopDir: '/run' }, { runForge, generate: async () => ({}), admit: async () => ({}) })
+  assert.deepEqual(seen.oracleCmds, ['node o1.mjs', 'node o2.mjs --x 1'])
+  assert.equal(typeof seen.corroborate, 'function')
+})
+
+test('runForgeHook defaults oracleCmds to [] when cfg has none', async () => {
+  const state = { goal: 'g', artifact_path: '/run/final.txt', last_critique: '', confirm_vetoed_at_pass: 0, history: [{ snapshot: 'snapshots/iter_000.txt' }] }
+  const cfg = { forge: true, confirmScorerCmd: 'x', forgeStorePath: '/run/checks.json', scorerAllow: [], model: 'sonnet' }
+  let seen = null
+  await runForgeHook({ cfg, state, loopDir: '/run' }, { runForge: async (a) => { seen = a; return {} }, generate: async () => ({}), admit: async () => ({}) })
+  assert.deepEqual(seen.oracleCmds, [])
+})

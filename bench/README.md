@@ -111,3 +111,36 @@ Forge allowlist), preferred over `contains` in the catalog. With it, every learn
 assertion that **passes ALL valid alternate phrasings and fails only the gamed artifact** — 0 brittle. The
 ledger now regression-guards that property. (`io-assert` is the conservative, data-only step; model-authored
 *test code* remains the deferred, sandboxing-required option.)
+
+## Forge corroboration ledger (2026-06-27) — the deeper "confirm = ground truth" ceiling
+
+The brittleness ledger above assumes a **correct** held-out confirm. The deeper, separate ceiling: there is a
+**single** confirm oracle, and the Forge faithfully distils whatever it believes — so if that one oracle is
+**wrong** (a buggy/over-strict proxy that vetoes genuinely-correct code), the Forge bakes the mistake into a
+permanent check that rejects correct code forever. `io-assert` fixed *brittleness*, not this *oracle-dependence*
+(note that io-assert can't fossilize a wrong oracle when good/bad are behaviourally identical — it can't
+discriminate them — but it faithfully fossilizes a **buggy** confirm when they differ behaviourally).
+
+The fix (frontier 2a) is **differential corroboration**: before the Forge learns from a veto, ≥1 independent
+operator-trusted oracle (`--forge-oracle "<scorer cmd>"`, repeatable) must agree the good/bad labelling holds.
+On any **stable** oracle's dissent the veto is suspect and the Forge **declines** to learn (a flaky oracle is
+*excluded* from the quorum, never a dissent — so one noisy oracle can't become a permanent learning kill-switch).
+Agreement rule = unanimity (a false-decline costs one cheap recoverable check; a false-learn fossilizes forever).
+
+```bash
+node bench/forge-corroborate-ledger.mjs   # always $0 — deterministic, no model spend
+```
+
+Each scenario encodes a **buggy primary confirm** that accepted a gamed-to-its-bug "good" and vetoed the
+genuinely-correct "bad" (e.g. the confirm wrongly demands `f(2)===5`). Two arms, both $0:
+
+| arm | K (learned) | fossilizes correct code? |
+|---|---|---|
+| BEFORE (no oracle) | 1 | **2/2 YES** — the learned check rejects genuinely-correct code |
+| AFTER (`--forge-oracle` = a correct behavioural oracle) | 0 | **0/2** — declined (corroborated=false, conflict flagged) |
+
+**Result: 2/2 wrong-oracle fossilizations → 0/2, with 2/2 clean declines.** An independent oracle that disputes
+the veto stops the Forge from baking a buggy confirm's judgment into a permanent check. **Honest scope:** this
+*reduces* single-oracle single-point-of-failure and surfaces conflicts; it does **not** escape needing *some*
+trusted measure (you now trust ensemble agreement), does nothing for **correlated** errors (every oracle wrong
+the same way), and degrades to today's single-oracle behaviour when no `--forge-oracle` is configured.
