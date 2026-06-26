@@ -25,6 +25,7 @@ import { validateConfig, EFFORT_LEVELS } from './validate.mjs'
 import { prepareResume } from './resume.mjs'
 import { formatReport } from './summary.mjs'
 import { forgeShouldFire, runForgeHook } from './forge/hook.mjs'
+import { composeConfirm } from './forge/gate.mjs'
 
 export { shq } // re-exported so callers can keep importing shq from driver (the canonical impl is shq.mjs)
 
@@ -101,6 +102,14 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
   const errors = validateConfig(state)
   if (errors.length) throw new Error(errors.join('; '))
   const loopDir = cfg.loopDir
+  // Verifier Forge (brick 4b): on a FRESH --forge run, compose the confirm scorer = MIN(base, ...stored
+  // checks) so the accumulated checks harden this gate. Fresh-only (!skipBaseline): on --resume the composed
+  // cmd is already persisted in state.json (its manifest persists in loopDir), so re-composing would nest a
+  // composite inside a composite. loop.mjs control flow is untouched.
+  if (!skipBaseline && cfg.forge && cfg.forgeStorePath) {
+    const composed = composeConfirm({ baseConfirmCmd: state.confirm_scorer_cmd, storePath: cfg.forgeStorePath, loopDir })
+    if (composed !== state.confirm_scorer_cmd) state = { ...state, confirm_scorer_cmd: composed }
+  }
   saveState(loopDir, state)
 
   // The context (evaluate/persist/confirm) is injectable so a different artifact KIND can swap it:
