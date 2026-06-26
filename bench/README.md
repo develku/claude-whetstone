@@ -81,3 +81,27 @@ and the warm-store re-run's gate manifest now carries that cheap deterministic c
 Honest caveat: this proves the Forge *learns a useful check when a game is caught* — the deterministic editor
 supplies the gaming pressure that a real helpful editor (per the NULL above) usually won't. A `K = 0` run
 (model proposes nothing admittable) is logged plainly as the honest negative; the harness does not hide it.
+
+## Forge replay ledger (2026-06-26) — measured, not anecdotal
+
+`forge-ledger.mjs` runs the Forge across N single-file gaming scenarios (`forge-fixtures/scenarios.mjs`,
+overfit-the-visible-gate cases: `sign`/`abs`/`parity`/`fizz`/`clamp`) and reports **rates** instead of one
+anecdote. For each learned check it probes (at $0): **true-discriminator** (passes honest, fails gamed) and
+**brittleness** — does it wrongly reject a valid ALTERNATE honest phrasing (`Math.sign`, `!(n & 1)`,
+`Math.max/min`, ...)?
+
+```bash
+node bench/forge-ledger.mjs --verify         # $0 — verify every scenario's gaming logic first
+node bench/forge-ledger.mjs --model sonnet   # ~$0.80 real generate
+```
+
+**Result (5 scenarios, sonnet, $0.78):**
+- **proposal success 5/5** — the model reliably proposes a useful discriminator on every gaming case (not a fluke).
+- **true-discriminator 8/8** — every learned check catches its own gaming.
+- **brittleness 8/8 (10/10 check×alt pairs)** — **every** learned `contains` check rejects a valid alternate implementation.
+
+The measured **ceiling**: cheap textual guards distil the confirm's judgment but **fossilize a phrasing, not
+the behaviour** — a run that legitimately rewrites `n < 0` as `Math.sign(n)` would be wrongly vetoed by the
+learned check. This quantifies the cross-model criticism (simple textual checks are brittle for non-local /
+behavioural cases). **Next lead:** let the Forge propose **behavioural** checks — e.g. model-authored
+input/output assertions admitted as a `test-pass-rate`-style scorer — not just `contains` substrings.
