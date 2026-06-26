@@ -9,3 +9,6 @@ npm-debug.log*
 .DS_Store
 
 bench/reports/
+
+# Tier-3 plan files — ephemeral per-session reasoning trace; design intent lives in docs/superpowers/specs/ (tracked)
+docs/superpowers/plans/
