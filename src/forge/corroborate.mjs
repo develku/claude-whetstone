@@ -37,7 +37,8 @@ export async function corroborateLabels({ goodArtifact, badArtifact, oracleCmds 
     const good = await replay(runCheck, oracleCmd, goodArtifact, replayRuns)
     const bad = await replay(runCheck, oracleCmd, badArtifact, replayRuns)
     if (good.unstable || bad.unstable) {
-      excluded.push({ oracleCmd, reason: `oracle verdict not reproducible (${good.unstable ? 'good' : 'bad'} unstable) — excluded from corroboration` })
+      const which = [good.unstable && 'good', bad.unstable && 'bad'].filter(Boolean).join(' and ')
+      excluded.push({ oracleCmd, reason: `oracle verdict not reproducible (${which} unstable) — excluded from corroboration` })
     } else if (!good.pass) {
       conflicts.push({ oracleCmd, reason: 'independent oracle REJECTS the good artifact — the primary veto is disputed (good may be honest)' })
     } else if (bad.pass) {

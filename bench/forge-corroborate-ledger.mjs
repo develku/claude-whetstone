@@ -71,7 +71,7 @@ async function runArm(sc, withOracle) {
     oracleCmds: withOracle ? [ioCmd(sc.oracleCases)] : [],
     loadStore, saveStore, addCheck,
   })
-  const learned = listChecks(loadStore(existsSync(storePath) ? storePath : '/nope'))
+  const learned = existsSync(storePath) ? listChecks(loadStore(storePath)) : []
   // fossilized-wrong = a stored check REJECTS the genuinely-correct impl (badSrc) or any alt-correct phrasing.
   const correctFiles = [badF, ...sc.altCorrect.map(writeSrc)]
   const fossilizes = learned.some((c) => correctFiles.some((f) => !scorerRunCheck(c.cmd, f, { target: c.target }).pass))
