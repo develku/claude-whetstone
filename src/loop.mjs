@@ -67,7 +67,8 @@ export async function runLoop({ state, evaluate, act, persist, save = null, log 
   // WEAKEST >= target — a flaky scorer that spiked to target on ONE pass does not finish on luck. Only
   // catches scorers nondeterministic on repeated identical runs (real flaky tests), and only probabilistically
   // (min-of-K); K is the operator's dial. Re-runs the scorer (cheap, not model spend) only at the done-edge.
-  // K=1 (default) => no re-runs => historical behavior unchanged.
+  // Each probe re-runs the FULL evaluate pipeline — incl. observe_cmd if set — so it measures the whole
+  // observe->score path's reproducibility, not just the scorer. K=1 (default) => no re-runs => unchanged.
   async function stabilityCheck(st, vd) {
     if (vd.status !== 'done' || (st.stability_runs ?? 1) <= 1) return { s: st, v: vd }
     let min = st.current_score

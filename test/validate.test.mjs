@@ -171,3 +171,11 @@ test('allows stability_runs of 1 (the default) and higher', () => {
   assert.deepEqual(validateConfig({ ...valid(), stability_runs: 1 }), [])
   assert.deepEqual(validateConfig({ ...valid(), stability_runs: 3 }), [])
 })
+
+// An old state.json predating the Confidence Gate has no stability_runs — resume must still validate
+// (absent => 1 => off), matching initState's default and stabilityCheck's `?? 1` fallback.
+test('allows an absent stability_runs (a pre-Confidence-Gate state.json)', () => {
+  const s = valid()
+  delete s.stability_runs
+  assert.deepEqual(validateConfig(s), [])
+})

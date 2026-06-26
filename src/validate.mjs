@@ -21,8 +21,11 @@ export function validateConfig(state) {
     errors.push('plateau_window must be an integer at least 1')
   }
   // stability_runs is COUNTED (re-run the scorer N times at the done-edge), so — like hard_cap — it
-  // must be a positive integer. Default is 1 (off). A fractional/NaN value would corrupt the probe loop.
-  if (!Number.isInteger(state.stability_runs) || state.stability_runs < 1) {
+  // must be a positive integer. ?? 1: an old state.json predating this field has no stability_runs;
+  // read absent as 1 (off), matching initState's default and stabilityCheck's fallback, so --resume of
+  // a pre-Confidence-Gate run still validates. A present fractional/NaN value is still caught.
+  const stabilityRuns = state.stability_runs ?? 1
+  if (!Number.isInteger(stabilityRuns) || stabilityRuns < 1) {
     errors.push('stability_runs must be an integer at least 1')
   }
   // budget is optional; validate only when one is set. `!= null` treats both null (the
