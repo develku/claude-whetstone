@@ -27,8 +27,8 @@ test('forgeAllowlist maps each --scorer-allow path to basename->absolute', () =>
 
 test('forgeCatalog lists allowlist ids with a usage hint (default empty)', () => {
   const cat = forgeCatalog(new Map([['contains', '/a/contains.mjs'], ['custom', '/a/custom.mjs']]))
-  assert.deepEqual(cat.find((c) => c.id === 'contains'), { id: 'contains', usage: '--needle <substring that an honest artifact contains>' })
-  assert.deepEqual(cat.find((c) => c.id === 'custom'), { id: 'custom', usage: '' })
+  assert.match(cat.find((c) => c.id === 'contains').usage, /--needle/) // contains carries a usage hint
+  assert.deepEqual(cat.find((c) => c.id === 'custom'), { id: 'custom', usage: '' }) // unknown id -> empty
 })
 
 test('runForgeHook sources good=final artifact + bad=vetoed snapshot and calls runForge', async () => {

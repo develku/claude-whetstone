@@ -31,7 +31,8 @@ export function forgeAllowlist(scorerAllow = []) {
 
 // Usage hints for the shipped discriminating scorers so the model proposes valid args; '' for unknown ids.
 const SCORER_USAGE = {
-  contains: '--needle <substring that an honest artifact contains>',
+  'io-assert': "--fn <exported function name> --case 'JSON_INPUT=>JSON_OUTPUT' (repeat --case for several inputs; a BEHAVIOURAL check that ANY correct implementation passes and the gamed one fails — PREFER this over a brittle textual contains)",
+  contains: '--needle <substring present only in an honest artifact> (brittle — rejects valid alternate phrasings; use only when a behavioural check is impossible)',
   'test-pass-rate': '--cmd <test command> --only <test name>',
 }
 export function forgeCatalog(allowlist) {

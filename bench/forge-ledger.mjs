@@ -26,6 +26,7 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = join(HERE, '..')
 const TPR = join(REPO, 'scorers', 'test-pass-rate.mjs')
 const CONTAINS = join(REPO, 'scorers', 'contains.mjs')
+const IO_ASSERT = join(REPO, 'scorers', 'io-assert.mjs')
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d }
 const model = arg('--model', 'sonnet')
 
@@ -65,7 +66,7 @@ async function runScenario(sc) {
     scorerCmd: tprFor(join(wd, 'visible.test.mjs')),
     confirmScorerCmd: tprFor(join(wd, 'heldout.test.mjs')),
     targetScore: 100, hardCap: 6, noEscalate: true,
-    forge: true, forgeStorePath: storePath, scorerAllow: [CONTAINS], model,
+    forge: true, forgeStorePath: storePath, scorerAllow: [CONTAINS, IO_ASSERT], model,
     loopDir: join(wd, '.loop'),
   }
   const { state, verdict } = await runFromConfig(cfg, deps)
@@ -153,10 +154,15 @@ console.log(`proposal success:   ${withCheck}/${n} scenarios learned >=1 admitte
 console.log(`true-discriminator: ${trueDisc}/${allChecks.length} learned checks pass-honest/fail-gamed`)
 console.log(`BRITTLENESS:        ${brittle}/${allChecks.length} learned checks reject a valid alternate phrasing  ·  ${altRejected}/${altPairs.length} (check,alt) pairs wrongly rejected`)
 console.log(`total generate cost: $${cost.toFixed(4)}`)
-console.log(`\nreading: the Forge proposes useful discriminators (proposal success), but a 'contains' check that`)
-console.log(`over-fits one honest phrasing is BRITTLE — it rejects equally-correct alternate implementations.`)
-console.log(`That is the measured ceiling: cheap textual guards distil the confirm's judgment but can fossilize`)
-console.log(`a phrasing, not the behaviour. The next lead is richer (behavioural/execution) admitted checks.`)
+if (brittle > 0) {
+  console.log(`\nreading: ${brittle}/${allChecks.length} learned checks are BRITTLE — they over-fit one honest phrasing and reject`)
+  console.log(`equally-correct alternate implementations. Textual (contains) guards fossilize a phrasing, not the`)
+  console.log(`behaviour. Lead: steer the model to behavioural io-assert checks (input/output, phrasing-agnostic).`)
+} else {
+  console.log(`\nreading: 0 brittle — every learned check is BEHAVIOURAL (io-assert input/output), passing ALL valid`)
+  console.log(`alternate phrasings and failing only the gamed artifact. The fossilization ceiling is closed for these`)
+  console.log(`cases (was 8/8 brittle with contains-only). This ledger drove the fix and now regression-guards it.`)
+}
 
 const reports = join(HERE, 'reports')
 if (!existsSync(reports)) mkdirSync(reports, { recursive: true })

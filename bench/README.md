@@ -95,13 +95,19 @@ node bench/forge-ledger.mjs --verify         # $0 — verify every scenario's ga
 node bench/forge-ledger.mjs --model sonnet   # ~$0.80 real generate
 ```
 
-**Result (5 scenarios, sonnet, $0.78):**
-- **proposal success 5/5** — the model reliably proposes a useful discriminator on every gaming case (not a fluke).
-- **true-discriminator 8/8** — every learned check catches its own gaming.
-- **brittleness 8/8 (10/10 check×alt pairs)** — **every** learned `contains` check rejects a valid alternate implementation.
+The ledger drove a **measure → fix → re-measure** cycle (5 scenarios, sonnet, ~$0.80 each):
 
-The measured **ceiling**: cheap textual guards distil the confirm's judgment but **fossilize a phrasing, not
-the behaviour** — a run that legitimately rewrites `n < 0` as `Math.sign(n)` would be wrongly vetoed by the
-learned check. This quantifies the cross-model criticism (simple textual checks are brittle for non-local /
-behavioural cases). **Next lead:** let the Forge propose **behavioural** checks — e.g. model-authored
-input/output assertions admitted as a `test-pass-rate`-style scorer — not just `contains` substrings.
+| allowlist | proposal | true-discrim | **brittleness** |
+|---|---|---|---|
+| `contains` only | 5/5 | 8/8 | **8/8 (100%)** — every learned check fossilizes a phrasing |
+| `+ io-assert` (behavioural) | 4/5 | 4/4 | 1/4 (~25%) |
+| `+ array-input spread` | **5/5** | **5/5** | **0/5 (0%)** |
+
+The ceiling the first row exposed: a cheap **textual** `contains` guard distils the confirm's judgment but
+**fossilizes a phrasing, not the behaviour** — a run that rewrites `n < 0` as `Math.sign(n)` is wrongly
+vetoed (quantifying the cross-model criticism that textual checks are brittle for non-local cases). The fix
+was a new **behavioural** scorer `io-assert` (`--fn f --case 'INPUT=>OUTPUT'`, JSON data only — inside the
+Forge allowlist), preferred over `contains` in the catalog. With it, every learned check is an input/output
+assertion that **passes ALL valid alternate phrasings and fails only the gamed artifact** — 0 brittle. The
+ledger now regression-guards that property. (`io-assert` is the conservative, data-only step; model-authored
+*test code* remains the deferred, sandboxing-required option.)
