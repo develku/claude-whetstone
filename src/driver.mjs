@@ -24,6 +24,7 @@ import { makeClaudeAct } from './act-claude.mjs'
 import { validateConfig, EFFORT_LEVELS } from './validate.mjs'
 import { prepareResume } from './resume.mjs'
 import { formatReport } from './summary.mjs'
+import { forgeShouldFire, runForgeHook } from './forge/hook.mjs'
 
 export { shq } // re-exported so callers can keep importing shq from driver (the canonical impl is shq.mjs)
 
@@ -132,6 +133,16 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
     log: deps.log ?? defaultLog,
   })
   saveState(loopDir, final)
+  // Verifier Forge (brick 4a): on a recovered-veto done, learn private checks from the run. Post-run, so the
+  // loop control flow above is untouched. Fail-safe — a Forge error must not fail an already-successful run.
+  if (forgeShouldFire(cfg, final, verdict)) {
+    try {
+      const r = await (deps.runForgeHook ?? runForgeHook)({ cfg, state: final, loopDir })
+      ;(deps.log ?? defaultLog)({ pass: final.pass, score: final.current_score, best: final.best_score, status: 'forge', reason: `admitted ${r.admitted.length}, rejected ${r.rejected.length}` })
+    } catch (e) {
+      ;(deps.log ?? defaultLog)({ pass: final.pass, score: final.current_score, best: final.best_score, status: 'forge-error', reason: e.message })
+    }
+  }
   return { state: final, verdict }
 }
 
@@ -214,6 +225,10 @@ export function parseCli(argv, defaults = {}) {
     noEscalate: argv.includes('--no-escalate'),
     mcpConfig: get('--mcp-config', defaults.mcpConfig ?? null),
     loopDir: get('--loop-dir', `.loop/run_${new Date().toISOString().replace(/[:.]/g, '').slice(0, 15)}`),
+    // Verifier Forge (brick 4a): opt-in. On a recovered-veto done, generate->admit->store private checks.
+    forge: argv.includes('--forge'),
+    forgeStorePath: get('--forge-store', null),
+    scorerAllow: (get('--scorer-allow', '') || '').split(',').map((s) => s.trim()).filter(Boolean),
   }
 }
 
@@ -273,7 +288,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
   const cfg = parseCli(argv, loadConfig())
   if (!cfg.goal || !cfg.artifactPath || !cfg.scorerCmd) {
-    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--budget-tokens N] [--stability-runs N] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--stability-runs N] [--target T] [--model M]\n')
+    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--budget-tokens N] [--stability-runs N] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>] [--forge --forge-store <path> --scorer-allow <scorer.mjs,...>]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--stability-runs N] [--target T] [--model M]\n')
     process.exit(2)
   }
   const { state, verdict } = await runFromConfig(cfg)
