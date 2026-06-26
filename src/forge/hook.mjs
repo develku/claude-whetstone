@@ -48,7 +48,8 @@ export function forgeAllowlist(scorerAllow = []) {
 
 // Usage hints for the shipped discriminating scorers so the model proposes valid args; '' for unknown ids.
 const SCORER_USAGE = {
-  'io-assert': "--fn <exported function name> --case 'JSON_INPUT=>JSON_OUTPUT' (repeat --case for several inputs; a BEHAVIOURAL check that ANY correct implementation passes and the gamed one fails — PREFER this over a brittle textual contains)",
+  'io-assert': "--fn <exported function name> --case 'JSON_INPUT=>JSON_OUTPUT' (repeat --case for several inputs; a BEHAVIOURAL check for a PURE function that ANY correct implementation passes and the gamed one fails — PREFER this over a brittle textual contains)",
+  'io-trace': "--new <ClassExport> | --factory <fnExport> [--init '<JSON args>'] --trace '<JSON [[method,...args],...]>' --expect '<JSON [return,...]>' (BEHAVIOURAL check for STATEFUL surfaces — construct a subject and assert a method-call SEQUENCE's returns; end the trace with a getter to assert final state; PREFER this over contains when the export is a class/factory rather than a pure function)",
   contains: '--needle <substring present only in an honest artifact> (brittle — rejects valid alternate phrasings; use only when a behavioural check is impossible)',
 }
 export function forgeCatalog(allowlist) {

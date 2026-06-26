@@ -144,3 +144,34 @@ the veto stops the Forge from baking a buggy confirm's judgment into a permanent
 *reduces* single-oracle single-point-of-failure and surfaces conflicts; it does **not** escape needing *some*
 trusted measure (you now trust ensemble agreement), does nothing for **correlated** errors (every oracle wrong
 the same way), and degrades to today's single-oracle behaviour when no `--forge-oracle` is configured.
+
+## Forge io-trace ledger (2026-06-27) — behavioural checks beyond pure functions (frontier 2b)
+
+`io-assert` (the brittleness ledger above) checks one `IN=>OUT` of a **pure function**. Many real surfaces are
+**stateful** — a class/factory whose behaviour depends on a *sequence* of calls ("push then pop returns the
+pushed value") — which a single `IN=>OUT` cannot express. `scorers/io-trace.mjs` is the DATA-only
+generalization: construct a subject (`--new <Class>` | `--factory <fn>`), replay a method **sequence**
+(`--trace '[[method,...args],...]'`), and assert the observed **returns** (`--expect '[...]'`). End the trace
+with a getter to assert final state. A 1-step trace is io-assert's case; io-trace is the N-step superset, still
+inside the allowlist trust boundary (args are JSON data, never code).
+
+```bash
+node bench/forge-iotrace-ledger.mjs   # always $0 — deterministic, no model spend
+```
+
+Three stateful scenarios (counter / stack / toggle), each gamed-to-the-visible vs honest + alternate honest
+phrasings (array- vs linked-list stack, closure- vs object-counter):
+
+| metric | result |
+|---|---|
+| io-trace true-discriminator (honest PASS, gamed FAIL) | **3/3** |
+| io-trace brittleness (rejects a valid alternate phrasing) | **0/3** |
+| io-assert applicable (can validate the honest stateful artifact at all) | **0/3** |
+
+io-trace is a non-brittle behavioural discriminator on every stateful scenario — passing all alternate honest
+phrasings, failing only the gamed impl — exactly as io-assert does for pure functions, where io-assert is
+structurally inapplicable (a single call can't carry state across a sequence). **Deferred** (further frontier):
+argument-mutation / IO surfaces (needs a mutated-input/output trace form) and **non-deterministic** surfaces
+(needs invariant assertions — sorted / permutation-of / in-range — not an exact `--expect`). Real-model
+elicitation (does a model *propose* io-trace, à la io-assert's proposal 5/5?) is the natural paid follow-up;
+this ledger proves the mechanism at $0.
