@@ -62,6 +62,47 @@ export async function runLoop({ state, evaluate, act, persist, save = null, log 
     return { s: ns, v: v2 }
   }
 
+  // Done-edge stability re-measurement (the Confidence Gate): when the gate would declare done, re-run
+  // the PRIMARY scorer (state.stability_runs total readings incl. the triggering one) and require the
+  // WEAKEST >= target — a flaky scorer that spiked to target on ONE pass does not finish on luck. Only
+  // catches scorers nondeterministic on repeated identical runs (real flaky tests), and only probabilistically
+  // (min-of-K); K is the operator's dial. Re-runs the scorer (cheap, not model spend) only at the done-edge.
+  // K=1 (default) => no re-runs => historical behavior unchanged.
+  async function stabilityCheck(st, vd) {
+    if (vd.status !== 'done' || (st.stability_runs ?? 1) <= 1) return { s: st, v: vd }
+    let min = st.current_score
+    for (let i = 1; i < st.stability_runs; i++) {
+      const { score } = await evaluate(st)
+      // Guard the probe to the same 0..100 invariant the gate enforces: an out-of-range/NaN re-measurement
+      // must never confirm a (flaky) done, nor silently veto to the cap — a broken scorer halts with error.
+      if (!validScore(score)) {
+        const reason = `stability re-measurement returned an invalid score: ${String(score)} (need a number in 0..100)`
+        return { s: { ...st, status: 'error', status_reason: reason }, v: { status: 'error', reason } }
+      }
+      if (score < min) min = score
+    }
+    if (min >= st.target_score) return { s: st, v: vd } // every reading clears target — done stands
+    // Veto like confirmDone: reuse the SAME done-edge marker so a kill during the next editor spawn is
+    // not mistaken for done on --resume (prepareResume treats confirm_vetoed_at_pass == pass as running).
+    const critique = `score not reproducible: min ${min} over ${st.stability_runs} runs is below target ${st.target_score} — make the solution deterministic, not luck-dependent`
+    const ns = { ...st, last_critique: critique, confirm_vetoed_at_pass: st.pass }
+    if (save) save(ns)
+    const v2 =
+      ns.pass >= ns.hard_cap
+        ? { status: 'capped', reason: `cap ${ns.hard_cap} hit; primary met target but stability vetoed (min ${min} < ${ns.target_score})` }
+        : { status: 'running', reason: `done vetoed by stability (min ${min} < target ${ns.target_score} over ${ns.stability_runs} runs)` }
+    return { s: ns, v: v2 }
+  }
+
+  // The done-edge: first re-measure the primary for reproducibility (stability), THEN re-score with the
+  // held-out confirm scorer. Either vetoes a gate `done`; both reuse the same veto marker. Stability runs
+  // first so a flaky primary is rejected before paying for a confirm run.
+  async function verifyDone(st, vd) {
+    const stable = await stabilityCheck(st, vd)
+    if (stable.v.status !== 'done') return stable
+    return confirmDone(stable.s, stable.v)
+  }
+
   // A side effect (scorer crash, editor spawn failure/timeout, maxBuffer overflow, disk error)
   // throws out of evaluate/act/persist. Convert it to a terminal status=error verdict so the run
   // returns a consistent state the caller can save — a later --resume sees the failure, not a
@@ -71,7 +112,7 @@ export async function runLoop({ state, evaluate, act, persist, save = null, log 
     // already carries a scored history and the live artifact is the best snapshot, so skip the
     // baseline and continue straight into the edit loop from the loaded state.
     s = skipBaseline ? state : persist(state, await evaluate(state))
-    ;({ s, v } = await confirmDone(s, gateVerdict(s)))
+    ;({ s, v } = await verifyDone(s, gateVerdict(s)))
     log({ pass: s.pass, score: s.current_score, best: s.best_score, ...v })
 
     while (v.status === 'running') {
@@ -111,7 +152,7 @@ export async function runLoop({ state, evaluate, act, persist, save = null, log 
       const target = restoreTarget(s)
       if (target != null && restore != null) await restore(target)
 
-      ;({ s, v } = await confirmDone(s, gateVerdict(s)))
+      ;({ s, v } = await verifyDone(s, gateVerdict(s)))
 
       // Budget cap AFTER the gate, so precedence holds (error > done > capped): a pass that meets
       // the target (done) or returns an invalid score (error) is NOT overridden by the budget cap.

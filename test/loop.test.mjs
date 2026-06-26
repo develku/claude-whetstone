@@ -253,6 +253,67 @@ test('a confirmation that clears target lets done stand', async () => {
   assert.equal(verdict.status, 'done')
 })
 
+// --- Confidence Gate (done-edge stability re-measurement; --stability-runs) ---
+// When the gate would declare done, the primary scorer is re-run stability_runs times total and the
+// WEAKEST reading must clear target — a flaky scorer that spiked to target once does not finish on luck.
+// K=1 (default) does no re-runs. Each done-edge consumes 1 main evaluate + (K-1) probes from the queue.
+
+test('stability_runs=1 (default) does a single reading — backward-compatible done, no re-runs', async () => {
+  const h = harness({ scores: [95] }) // one score only: a second evaluate call would shift undefined -> error
+  const { verdict } = await runLoop({ state: cfg({ targetScore: 90, stabilityRuns: 1 }), ...h, log: () => {} })
+  assert.equal(verdict.status, 'done')
+})
+
+test('a flaky primary (min over K runs below target) vetoes done', async () => {
+  // baseline: eval 95 (done candidate) -> probe 40 -> min 40 < 90 -> veto (pass 0 < cap 1, running)
+  // pass 1:   eval 95 -> probe 40 -> min 40 < 90 -> veto (pass 1 >= cap 1, capped)
+  const h = harness({ scores: [95, 40, 95, 40] })
+  const { state, verdict } = await runLoop({
+    state: cfg({ targetScore: 90, hardCap: 1, stabilityRuns: 2 }),
+    ...h,
+    log: () => {},
+  })
+  assert.equal(verdict.status, 'capped') // NOT done — a one-off spike never finishes
+  assert.match(state.last_critique, /reproducible|stability/i) // steers the next edit toward determinism
+})
+
+test('a stable primary (all K runs clear target) finishes done', async () => {
+  const h = harness({ scores: [95, 95, 95] }) // baseline eval + 2 probes, all >= target
+  const { verdict } = await runLoop({ state: cfg({ targetScore: 90, stabilityRuns: 3 }), ...h, log: () => {} })
+  assert.equal(verdict.status, 'done')
+})
+
+test('an invalid stability probe score halts with error — never confirms a flaky done', async () => {
+  const h = harness({ scores: [95, 150] }) // probe out of 0..100
+  const { verdict } = await runLoop({ state: cfg({ targetScore: 90, stabilityRuns: 2 }), ...h, log: () => {} })
+  assert.equal(verdict.status, 'error')
+})
+
+test('stability composes with confirm: a stable primary still faces the held-out confirm veto', async () => {
+  const h = harness({ scores: [95, 95, 95, 95] }) // stable across probes, but confirm rejects
+  const { verdict } = await runLoop({
+    state: cfg({ targetScore: 90, hardCap: 1, stabilityRuns: 2 }),
+    ...h,
+    confirm: async () => ({ score: 50, critique: 'confirm gap' }),
+    log: () => {},
+  })
+  assert.equal(verdict.status, 'capped')
+  assert.match(verdict.reason, /confirm/i)
+})
+
+test('stability vetoes BEFORE confirm runs: a flaky primary never reaches the confirm scorer', async () => {
+  let confirmCalled = false
+  const h = harness({ scores: [95, 40, 95, 40] })
+  const { verdict } = await runLoop({
+    state: cfg({ targetScore: 90, hardCap: 1, stabilityRuns: 2 }),
+    ...h,
+    confirm: async () => { confirmCalled = true; return { score: 100, critique: '' } },
+    log: () => {},
+  })
+  assert.equal(verdict.status, 'capped')
+  assert.equal(confirmCalled, false) // verifyDone runs stability first; a flaky done never reaches confirm
+})
+
 test('skipBaseline resumes from the given state without re-scoring a baseline', async () => {
   // A state that already carries history (as if loaded from a capped run): pass 1, two
   // scored passes. With skipBaseline the loop must NOT re-evaluate a baseline first — the
