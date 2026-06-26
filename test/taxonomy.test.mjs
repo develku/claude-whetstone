@@ -8,7 +8,6 @@ import { readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { TAXONOMY } from '../bench/taxonomy/manifest.mjs'
-import { gateVerdict } from '../src/gate.mjs'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..')
 const abs = (p) => join(REPO, p)
@@ -37,27 +36,14 @@ test('GREEN integrity: each defense file + proof test exists and the proof still
   }
 })
 
-test('one-gap invariant: exactly one RED entry, and it is flaky-score', () => {
-  const red = TAXONOMY.filter((e) => e.status === 'RED')
-  assert.equal(red.length, 1)
-  assert.equal(red[0].id, 'flaky-score')
-})
-
-test('RED entry: no defense, no proof, but documented in notes', () => {
-  const red = TAXONOMY.find((e) => e.status === 'RED')
-  assert.equal(red.defense, null)
-  assert.equal(red.proof, null)
-  assert.ok(red.notes.length > 0)
-})
-
-test('flaky-score gap-demo: a transient spike to target reaches done (the RED, unguarded today)', () => {
-  // RED: gateVerdict (src/gate.mjs:28,33) reads only scores.at(-1) and stops at the first latest>=target;
-  // no repeated-run / variance / lower-confidence-bound check. A flaky scorer that spikes to target on
-  // the latest pass reaches done without a genuine fix. The future Confidence Gate must FLIP this
-  // assertion (done -> running/plateau); this test pins the gap so closing it is a deliberate change.
-  const v = gateVerdict({
-    target_score: 100, hard_cap: 5, min_delta: 1, plateau_window: 3, pass: 2,
-    history: [{ score: 40 }, { score: 40 }, { score: 100 }],
-  })
-  assert.equal(v.status, 'done')
+test('RED entries (if any) are documented gaps: no defense, no proof, non-empty notes', () => {
+  // After the Confidence Gate closed flaky-score there are ZERO RED entries; this stays correct
+  // (vacuously) and still constrains any future re-opened gap. The v1 "exactly one RED" scaffold and the
+  // gateVerdict([40,40,100]) gap-demo were removed when the gap closed — gateVerdict is unchanged; the
+  // defense now lives in the loop (stabilityCheck), proven by test/loop.test.mjs.
+  for (const red of TAXONOMY.filter((e) => e.status === 'RED')) {
+    assert.equal(red.defense, null, `${red.id}: a RED gap must have no defense`)
+    assert.equal(red.proof, null, `${red.id}: a RED gap must have no proof`)
+    assert.ok(red.notes.length > 0, `${red.id}: a RED gap must be documented in notes`)
+  }
 })
