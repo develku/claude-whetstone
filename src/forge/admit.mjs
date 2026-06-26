@@ -4,6 +4,11 @@
 // a known-bad one) and its verdict is REPRODUCIBLE. The model may PROPOSE checks; a trivial always-pass
 // check (which would lower the bar) or a flaky check is rejected here — the meta-stop. runCheck is injected
 // so the decision logic is pure and unit-testable.
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { shq } from '../shq.mjs'
 
 // Run a check `runs` times against one artifact; report the (consistent) verdict, or unstable if they disagree.
 async function replay(runCheck, cmd, artifact, runs) {
@@ -25,19 +30,19 @@ export async function admitCheck({ candidateCmd, goodArtifact, badArtifact, repl
   return { admit: true, reason: `discriminates (passes good, fails bad) reproducibly over ${replayRuns} runs` }
 }
 
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { shq } from '../shq.mjs'
-
 // Default runCheck adapter: run the candidate as a whetstone scorer against an artifact and map its
 // score to a boolean (score >= target -> pass), reusing the scorer contract used by the loop. A non-zero
-// scorer exit throws (a broken check is not silently treated as a verdict).
+// scorer exit throws (a broken check is not silently treated as a verdict). A temp loop dir we create is
+// cleaned up after the run (the Forge calls this in admission loops — no /tmp accumulation).
 export function scorerRunCheck(candidateCmd, artifact, { target = 100, loopDir } = {}) {
-  const dir = loopDir ?? mkdtempSync(join(tmpdir(), 'forge-check-'))
-  const full = `${candidateCmd} --output ${shq(artifact)} --loop-dir ${shq(dir)} --pass 000`
-  const res = spawnSync(full, { shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 5 * 60 * 1000, killSignal: 'SIGKILL' })
-  if (res.status !== 0) throw new Error(`candidate check exited ${res.status}: ${(res.stderr || '').slice(0, 300)}`)
-  return { pass: JSON.parse(res.stdout).score >= target }
+  const ours = loopDir == null
+  const dir = ours ? mkdtempSync(join(tmpdir(), 'forge-check-')) : loopDir
+  try {
+    const full = `${candidateCmd} --output ${shq(artifact)} --loop-dir ${shq(dir)} --pass 000`
+    const res = spawnSync(full, { shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 5 * 60 * 1000, killSignal: 'SIGKILL' })
+    if (res.status !== 0) throw new Error(`candidate check exited ${res.status}: ${(res.stderr || '').slice(0, 300)}`)
+    return { pass: JSON.parse(res.stdout).score >= target }
+  } finally {
+    if (ours) rmSync(dir, { recursive: true, force: true })
+  }
 }
