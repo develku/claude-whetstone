@@ -33,7 +33,8 @@ export function parseScopeCli(argv, defaults = {}) {
   cfg.maxChildren = get('--max-children') ? Number(get('--max-children')) : 4
   cfg.childCap = get('--child-cap') ? Number(get('--child-cap')) : 3
   cfg.scorerAllow = (get('--scorer-allow') || '').split(',').map((s) => s.trim()).filter(Boolean)
-  cfg.forgeMaxFiles = get('--forge-max-files') ? Number(get('--forge-max-files')) : undefined // scope multi-file learn cap (hook default 8)
+  const fmf = get('--forge-max-files') // scope multi-file learn cap (hook default 8); parse '0' as 0, not undefined, so the guard catches it
+  cfg.forgeMaxFiles = fmf !== undefined ? Number(fmf) : undefined
   return cfg
 }
 
@@ -91,6 +92,13 @@ export function forgeStoreInsideScope(cfg) {
 // veto source) and a --forge-store (where learned checks live); refuse early rather than silently no-op.
 export function forgeNeedsStoreAndConfirm(cfg) {
   return !!cfg.forge && (!cfg.forgeStorePath || !cfg.confirmScorerCmd)
+}
+
+// --forge-max-files, if set, must be a positive integer (it caps how many changed files the scope Forge learns
+// for). Validate at the boundary rather than silently coercing: 0/negative/non-integer would be a user error
+// that should surface, not fall back. Unset (undefined) is fine — the hook applies its default of 8.
+export function forgeMaxFilesInvalid(cfg) {
+  return cfg.forgeMaxFiles !== undefined && (!Number.isInteger(cfg.forgeMaxFiles) || cfg.forgeMaxFiles < 1)
 }
 
 // --decompose without a held-out confirm scorer is refused: the done-edge must be verified from a
@@ -164,6 +172,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
   if (forgeStoreInsideScope(cfg)) {
     process.stderr.write('refusing to start: --forge-store must be OUTSIDE --scope (the loop git-resets the scope; a store inside it would be clobbered and the editor could tamper with it)\n')
+    process.exit(2)
+  }
+  if (forgeMaxFilesInvalid(cfg)) {
+    process.stderr.write('refusing to start: --forge-max-files must be a positive integer\n')
     process.exit(2)
   }
   const { state, verdict } = await runFromConfig(cfg, scopeDeps(cfg))

@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { parseScopeCli, cleanTreeGuard, buildAllowlist, decomposeNeedsConfirm, decomposeNeedsBudget, scopeDeps, forgeStoreInsideScope, forgeNeedsStoreAndConfirm } from '../src/scope-cli.mjs'
+import { parseScopeCli, cleanTreeGuard, buildAllowlist, decomposeNeedsConfirm, decomposeNeedsBudget, scopeDeps, forgeStoreInsideScope, forgeNeedsStoreAndConfirm, forgeMaxFilesInvalid } from '../src/scope-cli.mjs'
 
 const git = (dir, ...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim()
 
@@ -112,4 +112,18 @@ test('parseScopeCli parses --forge-max-files (scope multi-file learn cap)', () =
 test('parseScopeCli leaves forgeMaxFiles undefined when --forge-max-files absent (hook default applies)', () => {
   const cfg = parseScopeCli(['node', 'scope-cli.mjs', 'g', '--scope', '/r', '--scorer', 'npm test'])
   assert.equal(cfg.forgeMaxFiles, undefined)
+})
+
+test('parseScopeCli parses --forge-max-files 0 as 0 (not silently undefined) so the guard can catch it', () => {
+  const cfg = parseScopeCli(['node', 'scope-cli.mjs', 'g', '--scope', '/r', '--scorer', 'npm test', '--forge-max-files', '0'])
+  assert.equal(cfg.forgeMaxFiles, 0)
+})
+
+test('forgeMaxFilesInvalid: refuses non-positive-integer --forge-max-files, allows positive/unset', () => {
+  assert.equal(forgeMaxFilesInvalid({ forgeMaxFiles: undefined }), false) // unset -> hook default 8
+  assert.equal(forgeMaxFilesInvalid({ forgeMaxFiles: 8 }), false)
+  assert.equal(forgeMaxFilesInvalid({ forgeMaxFiles: 0 }), true)
+  assert.equal(forgeMaxFilesInvalid({ forgeMaxFiles: -1 }), true)
+  assert.equal(forgeMaxFilesInvalid({ forgeMaxFiles: 2.5 }), true)
+  assert.equal(forgeMaxFilesInvalid({ forgeMaxFiles: NaN }), true) // 'abc' -> Number -> NaN
 })

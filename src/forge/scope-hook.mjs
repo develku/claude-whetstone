@@ -61,6 +61,9 @@ export async function runScopeForgeHook({ cfg, state }, deps = {}) {
     const acc = { admitted: [], rejected: [], candidates: [], costUsd: 0, tokens: 0, conflicts: [], excluded: [], corroborated: true, perFile: [], skippedFiles, coverageComplete: skippedFiles.length === 0 }
     for (const rel of learnSet) {
       try {
+        // To override generation per file in a test, inject deps.propose (it flows through scopeGenerateCandidates
+        // with this iteration's `rel`). deps.generate is the whole-step escape hatch and is NOT per-file aware —
+        // runForge calls it without `rel`, so an injected generate sees the same args every iteration.
         const generate = deps.generate ?? ((a) => scopeGenerateCandidates({ ...a, rel, allChanged: changed, model: cfg.model, propose: deps.propose }))
         const r = await (deps.runForge ?? runForge)({
           goal: state.goal, goodArtifact: wtGood, badArtifact: wtBad, critique: state.last_critique ?? '',
