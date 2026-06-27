@@ -5,6 +5,7 @@
 // changed file, and runs the standard runForge with the worktree roots as good/bad artifacts and kind:'scope'.
 // Each learned check is a per-file behavioural check (--rel) — so it composes via the existing string gate.
 // loop.mjs is untouched; this is the scope deps.runForgeHook.
+import { extname } from 'node:path'
 import { gitMaterialize, gitCleanup, gitDiffNames, gitHead, isSha } from '../git-snapshot.mjs'
 import { admitCheck, scorerRunCheck } from './admit.mjs'
 import { scopeGenerateCandidates } from './scope-generate.mjs'
@@ -14,6 +15,16 @@ import { runForge } from './run.mjs'
 import { forgeAllowlist, forgeCatalog } from './hook.mjs'
 
 const skip = (reason) => ({ admitted: [], rejected: [{ scorerId: '-', reason }], candidates: [], conflicts: [], excluded: [], corroborated: true, costUsd: 0, tokens: 0, skipped: true })
+
+// Deterministic learn-order for a multi-file recovery diff: CODE files before non-code, then by path. When the
+// cap truncates, the LEAST likely-gamed files (docs/config) drop first — never a code file while a doc remains.
+// This only sets PRIORITY; it never excludes (every file within the cap is still learned), so it is safe in a
+// way an extension PRE-filter (which could drop a gamed file) is not. Pure + stable.
+const CODE_EXT = new Set(['.mjs', '.js', '.cjs', '.ts', '.jsx', '.tsx', '.mts', '.cts', '.py', '.go', '.rb', '.rs', '.java', '.php', '.swift', '.c', '.cc', '.cpp', '.h', '.hpp'])
+const isCode = (rel) => CODE_EXT.has(extname(rel))
+export function rankChangedFiles(changed) {
+  return [...changed].sort((a, b) => (isCode(b) - isCode(a)) || (a < b ? -1 : a > b ? 1 : 0))
+}
 
 export async function runScopeForgeHook({ cfg, state }, deps = {}) {
   const scopeDir = state.artifact_path

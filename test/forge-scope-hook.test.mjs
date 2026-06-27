@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
-import { runScopeForgeHook } from '../src/forge/scope-hook.mjs'
+import { runScopeForgeHook, rankChangedFiles } from '../src/forge/scope-hook.mjs'
 import { loadStore } from '../src/forge/store.mjs'
 
 const IO_ASSERT = join(dirname(fileURLToPath(import.meta.url)), '..', 'scorers', 'io-assert.mjs')
@@ -57,4 +57,10 @@ test('runScopeForgeHook refuses a non-SHA snapshot (trust boundary)', async () =
   const state = { goal: 'g', artifact_path: dir, confirm_vetoed_at_pass: 0, history: [{ snapshot: '../evil' }] }
   const r = await runScopeForgeHook({ cfg, state, loopDir: dir }, { propose: stubPropose })
   assert.equal(r.skipped, true)
+})
+
+test('rankChangedFiles orders code before non-code, then by path (stable, never drops)', () => {
+  const out = rankChangedFiles(['z.md', 'src/b.mjs', 'a.json', 'src/a.mjs'])
+  assert.deepEqual(out, ['src/a.mjs', 'src/b.mjs', 'a.json', 'z.md'])
+  assert.equal(rankChangedFiles(['x.txt']).length, 1) // never drops
 })
