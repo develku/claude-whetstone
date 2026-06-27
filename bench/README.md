@@ -244,6 +244,35 @@ for `shuffle` (a non-deterministic output io-assert structurally cannot pin) and
 `sort`. (clamp learned K=0 here — sonnet proposed an over-specific io-assert that rejected the honest good, so admit
 correctly dropped it; reported honestly, not hidden.) The property check is not just mechanically sound but ELICITED.
 
+## Forge exploit-regression ledger (2026-06-28) — brick 1.5 (a candidate must survive the exploit archive)
+
+`admitCheck` proves a candidate DISCRIMINATES the one observed good/bad pair; it does NOT prove the check can't
+be DODGED by a known gaming pattern. `src/forge/exploit-regression.mjs` `admitSurvivesExploits` is a WRAPPER over
+the base admit (composes after `mutationAdmit`) that runs an admitted candidate against an archive of executable
+EXPLOIT ARTIFACTS — the candidate must be FAIL-SAFE (never report pass) on each, else it is rejected as having a
+dodge hole. The archive's exports are NON-CALLABLE (so behavioural checks always error→survive — zero false
+rejection); the active bite is a brittle `contains` check whose needle is a generic token present as DEAD TEXT in
+`text-rich-broken`. Opt-in: `--forge-exploit-regression`. (Design:
+`docs/superpowers/specs/2026-06-28-verifier-forge-exploit-regression-design.md`; codex review folded the framing —
+this is known-exploit REGRESSION survival over a finite archive, NOT taxonomy closure; the read-only "isolation"
+is a regression test, not a sandbox guarantee.)
+
+```bash
+node bench/forge-exploit-ledger.mjs            # always $0 — deterministic, no model spend
+node bench/forge-exploit-ledger.mjs --verify   # terse; exit 1 if it regresses
+```
+
+| metric (3 cases: io-assert, io-effect, contains) | result |
+| --- | --- |
+| behavioural checks survive the archive (no false rejection) | **2/2** |
+| brittle textual check bitten (rejected — dodged by dead text) | **1/1** (fooledBy=text-rich-broken) |
+| all as expected | **3/3** |
+
+NON-NULL: admitSurvivesExploits operationalizes "behavioural > textual" as a HARD admission gate — genuine
+behavioural checks pass (the non-callable archive guarantees no behavioural false rejection) while a brittle
+contains check whose needle is dead text in an exploit is rejected. The archive GROWS as real dodges are found.
+(Paid elicitation N/A — brick 1.5 is an admission GUARD, not a new scorer / learning capability.)
+
 ## Forge io-effect ledger + real-model elicitation (2026-06-28) — argument-mutation / IO-side-effect (2b-extended trace form)
 
 io-assert/io-trace/io-invariant all observe RETURN VALUES; a whole class of correct behaviour is a SIDE EFFECT

@@ -147,6 +147,26 @@ test('runForgeHook routes the admit seam to mutationAdmit when cfg.forgeMutation
   assert.equal(captured.mutation.confirmedMutants, 0)
 })
 
+test('runForgeHook routes the admit seam through admitSurvivesExploits when cfg.forgeExploitRegression is set (brick 1.5)', async () => {
+  // admitSurvivesExploits returns an `.exploits` field; plain admitCheck does not. good='FORGE_OK' so the
+  // candidate (contains --needle FORGE_OK) is admitted by base and survives the archive (no exploit contains it).
+  const dir = mkdtempSync(join(tmpdir(), 'forge-hook-exp-'))
+  const good = join(dir, 'good.txt'); writeFileSync(good, 'FORGE_OK')
+  const bad = join(dir, 'bad.txt'); writeFileSync(bad, 'broken')
+  const state = { goal: 'g', artifact_path: good, last_critique: '', confirm_vetoed_at_pass: 0, history: [{ snapshot: 'snap' }] }
+  const cfg = { forge: true, confirmScorerCmd: 'x', forgeStorePath: join(dir, 'checks.json'), scorerAllow: [], model: 'sonnet', forgeExploitRegression: true }
+  let captured = null
+  await runForgeHook({ cfg, state, loopDir: dir }, {
+    goodArtifact: good, badArtifact: bad,
+    generate: async () => ({ candidates: [], rejected: [] }),
+    pruneFlaky: async () => [],
+    runForge: async (args) => { captured = await args.admit({ candidateCmd: CONTENT_SCORER, goodArtifact: good, badArtifact: bad, replayRuns: 2 }); return { admitted: [], rejected: [], corroborated: true } },
+  })
+  assert.ok(captured.exploits, 'admit must be admitSurvivesExploits (returns an .exploits field)')
+  assert.equal(captured.admit, true)
+  assert.equal(captured.exploits.fooledBy.length, 0)
+})
+
 test('runForgeHook uses plain admitCheck (no .mutation field) when forgeMutationAdmit is unset', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'forge-hook-plain-'))
   const good = join(dir, 'good.txt'); writeFileSync(good, 'FORGE_OK')

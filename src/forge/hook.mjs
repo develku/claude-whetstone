@@ -11,6 +11,7 @@ import { isUnsafeScorer } from '../scorer-safety.mjs'
 import { generateCandidates, claudePropose } from './generate.mjs'
 import { admitCheck, scorerRunCheck } from './admit.mjs'
 import { mutationAdmit } from './mutation-admit.mjs'
+import { admitSurvivesExploits } from './exploit-regression.mjs'
 import { corroborateLabels } from './corroborate.mjs'
 import { pruneFlaky } from './prune.mjs'
 import { loadStore, saveStore, addCheck } from './store.mjs'
@@ -67,12 +68,17 @@ export async function runForgeHook({ cfg, state, loopDir }, deps = {}) {
   const good = deps.goodArtifact ?? state.artifact_path
   const allowlist = forgeAllowlist(cfg.scorerAllow)
   const generate = deps.generate ?? ((a) => generateCandidates({ ...a, propose: (p) => claudePropose(p, { model: cfg.model }) }))
-  // Item 1: when --forge-mutation-admit is set, the default admit becomes the mutation-backed WRAPPER (it calls
-  // admitCheck first and only ever ADDS a rejection — never more permissive). It reuses cfg.forgeOracleCmds (the
-  // same 2a oracles corroborate uses) to oracle-filter the mutant neighbourhood. deps.admit still overrides in tests.
-  const admit = deps.admit ?? (cfg.forgeMutationAdmit
+  // Admission composition (centralized order: admitCheck -> mutationAdmit -> admitSurvivesExploits — each is a
+  // WRAPPER that calls its base first and only ever ADDS a rejection, so the gate is never more permissive).
+  // Item 1 (--forge-mutation-admit): require killing an oracle-confirmed mutant neighbourhood (reuses the 2a
+  // oracles). Brick 1.5 (--forge-exploit-regression): require surviving the executable exploit archive. Both
+  // opt-in and composable; deps.admit still overrides in tests.
+  const baseAdmit = cfg.forgeMutationAdmit
     ? (a) => mutationAdmit({ ...a, runCheck: scorerRunCheck, oracleCmds: cfg.forgeOracleCmds ?? [], mutationKillThreshold: cfg.forgeMutationThreshold })
-    : (a) => admitCheck({ ...a, runCheck: scorerRunCheck }))
+    : (a) => admitCheck({ ...a, runCheck: scorerRunCheck })
+  const admit = deps.admit ?? (cfg.forgeExploitRegression
+    ? (a) => admitSurvivesExploits({ ...a, runCheck: scorerRunCheck, baseAdmit })
+    : baseAdmit)
   // Frontier 2a: corroborate the veto's good/bad labelling with independent operator oracles before learning.
   // Oracles run VERBATIM via scorerRunCheck (operator-authored, NOT through forgeAllowlist). Empty oracleCmds
   // => corroborateLabels is a $0 passthrough, so this is inert unless --forge-oracle is set.

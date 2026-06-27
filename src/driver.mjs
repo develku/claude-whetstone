@@ -257,6 +257,9 @@ export function parseCli(argv, defaults = {}) {
     // oracle-confirmed mutant neighbourhood". Requires --forge-oracle (the entry guard refuses it otherwise).
     forgeMutationAdmit: argv.includes('--forge-mutation-admit'),
     forgeMutationThreshold: get('--forge-mutation-threshold') ? Number(get('--forge-mutation-threshold')) : defaults.forgeMutationThreshold,
+    // Brick 1.5: also require an admitted candidate to SURVIVE the executable exploit archive (reject a check an
+    // archived gaming pattern can dodge). Composes after mutation-admit. Opt-in.
+    forgeExploitRegression: argv.includes('--forge-exploit-regression'),
   }
 }
 
