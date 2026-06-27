@@ -6,7 +6,7 @@
 // dir is carried in cfg.artifactPath (the "artifact" is the directory).
 import { spawnSync } from 'node:child_process'
 import { readdirSync } from 'node:fs'
-import { dirname, basename, join, resolve as rpath } from 'node:path'
+import { dirname, basename, join, resolve as rpath, sep } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { runFromConfig, parseCli, loadConfig, editorEffort } from './driver.mjs'
 import { scopeBuildContext } from './scope-context.mjs'
@@ -15,6 +15,7 @@ import { gitRestore } from './git-snapshot.mjs'
 import { formatReport } from './summary.mjs'
 import { makeDecomposeAct } from './decompose.mjs'
 import { isUnsafeScorer } from './scorer-safety.mjs'
+import { runScopeForgeHook } from './forge/scope-hook.mjs'
 
 // driver's parseCli plus --scope (becomes the artifact) and --read-only (comma list of gate paths
 // the editor may not touch — the tests/scorer it is graded by).
@@ -74,12 +75,21 @@ export function buildAllowlist(extraPaths = []) {
   return m
 }
 
-// The Verifier Forge sources its good/bad pair from FILE snapshots; on a scope run a snapshot is a git SHA
-// (not a file path) and the artifact is a directory, so the Forge would silently no-op (or feed wrong
-// content). parseScopeCli inherits --forge/--forge-store from parseCli, so reject it loudly here until
-// scope-mode Forge ships (deferred). Single-file --forge via driver.mjs is unaffected.
-export function forgeUnsupportedOnScope(cfg) {
-  return !!cfg.forge
+// The Verifier Forge IS supported on scope runs (per-file scope checks; src/forge/scope-hook.mjs, injected as
+// deps.runForgeHook below). Trust boundary: the check store must live OUTSIDE --scope — the loop git-resets/
+// cleans the scope, which would clobber a store inside it, and the editor could tamper with it. Refuse a
+// --forge-store within --scope.
+export function forgeStoreInsideScope(cfg) {
+  if (!cfg.forge || !cfg.forgeStorePath || !cfg.scope) return false
+  const base = rpath(cfg.scope)
+  const store = rpath(cfg.forgeStorePath)
+  return store === base || store.startsWith(base + sep)
+}
+
+// --forge on scope only fires on a recovered confirm-veto, so it needs both a held-out --confirm-scorer (the
+// veto source) and a --forge-store (where learned checks live); refuse early rather than silently no-op.
+export function forgeNeedsStoreAndConfirm(cfg) {
+  return !!cfg.forge && (!cfg.forgeStorePath || !cfg.confirmScorerCmd)
 }
 
 // --decompose without a held-out confirm scorer is refused: the done-edge must be verified from a
@@ -105,6 +115,7 @@ export function scopeDeps(cfg) {
     buildContext: scopeBuildContext,
     act: makeScopeAct({ ...common, model: cfg.model, effort: cfg.effort }),
     restore: (sha) => gitRestore(cfg.scope, sha),
+    runForgeHook: (a) => runScopeForgeHook(a), // scope (repo) Forge: materialize SHAs + learn a per-file check
   }
   const rescueAct = cfg.noEscalate
     ? null
@@ -130,7 +141,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const argv = process.argv
   const cfg = parseScopeCli(argv, loadConfig())
   if (!cfg.goal || !cfg.scope || !cfg.scorerCmd) {
-    process.stderr.write('usage: scope-cli.mjs "<goal>" --scope <repo dir> --scorer "<project test/build cmd>" [--read-only test/,gate] [--confirm-scorer "<cmd>"] [--target 90] [--cap 10] [--budget X] [--budget-tokens N] [--stability-runs N] [--model sonnet] [--effort medium] [--no-escalate] [--mcp-config <path>] [--loop-dir <dir>] [--decompose] [--max-children 4] [--child-cap 3] [--scorer-allow <paths>]\n')
+    process.stderr.write('usage: scope-cli.mjs "<goal>" --scope <repo dir> --scorer "<project test/build cmd>" [--read-only test/,gate] [--confirm-scorer "<cmd>"] [--target 90] [--cap 10] [--budget X] [--budget-tokens N] [--stability-runs N] [--model sonnet] [--effort medium] [--no-escalate] [--mcp-config <path>] [--loop-dir <dir>] [--decompose] [--max-children 4] [--child-cap 3] [--scorer-allow <paths>] [--forge --forge-store <path OUTSIDE scope> --confirm-scorer "<cmd>"]\n')
     process.exit(2)
   }
   const guard = cleanTreeGuard(cfg.scope)
@@ -146,8 +157,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.stderr.write('refusing to start: --decompose requires a spend ceiling — set --budget and/or --budget-tokens (fan-out multiplies spend across children)\n')
     process.exit(2)
   }
-  if (forgeUnsupportedOnScope(cfg)) {
-    process.stderr.write('refusing to start: --forge is not supported on --scope runs (the Verifier Forge is single-file only; scope-mode Forge is deferred)\n')
+  if (forgeNeedsStoreAndConfirm(cfg)) {
+    process.stderr.write('refusing to start: --forge on --scope requires --forge-store <path OUTSIDE the scope> and --confirm-scorer "<held-out cmd>"\n')
+    process.exit(2)
+  }
+  if (forgeStoreInsideScope(cfg)) {
+    process.stderr.write('refusing to start: --forge-store must be OUTSIDE --scope (the loop git-resets the scope; a store inside it would be clobbered and the editor could tamper with it)\n')
     process.exit(2)
   }
   const { state, verdict } = await runFromConfig(cfg, scopeDeps(cfg))

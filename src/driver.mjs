@@ -108,7 +108,9 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
   // cmd is already persisted in state.json (its manifest persists in loopDir), so re-composing would nest a
   // composite inside a composite. loop.mjs control flow is untouched.
   if (!skipBaseline && cfg.forge && cfg.forgeStorePath) {
-    const composed = composeConfirm({ baseConfirmCmd: state.confirm_scorer_cmd, storePath: cfg.forgeStorePath, loopDir })
+    // kind namespaces which stored checks compose: a scope (repo) run consumes only scope checks (per-file,
+    // --rel), a single-file run only file checks. cfg.scope is set only by the scope CLI.
+    const composed = composeConfirm({ baseConfirmCmd: state.confirm_scorer_cmd, storePath: cfg.forgeStorePath, loopDir, kind: cfg.scope ? 'scope' : 'file' })
     if (composed !== state.confirm_scorer_cmd) state = { ...state, confirm_scorer_cmd: composed }
   }
   saveState(loopDir, state)

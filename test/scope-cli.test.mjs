@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { parseScopeCli, cleanTreeGuard, buildAllowlist, decomposeNeedsConfirm, decomposeNeedsBudget, scopeDeps, forgeUnsupportedOnScope } from '../src/scope-cli.mjs'
+import { parseScopeCli, cleanTreeGuard, buildAllowlist, decomposeNeedsConfirm, decomposeNeedsBudget, scopeDeps, forgeStoreInsideScope, forgeNeedsStoreAndConfirm } from '../src/scope-cli.mjs'
 
 const git = (dir, ...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim()
 
@@ -85,9 +85,21 @@ test('buildAllowlist: excludes composite from the auto set AND refuses to re-add
   assert.equal(buildAllowlist(['/x/test-pass-rate.mjs']).has('test-pass-rate'), true)
 })
 
-test('forgeUnsupportedOnScope: --forge is rejected on scope runs (the Forge is single-file only)', () => {
-  // The Forge sources good/bad from file snapshots; on a scope run a snapshot is a git SHA, not a file,
-  // so the Forge would silently no-op. Reject it loudly until scope-mode Forge ships.
-  assert.equal(forgeUnsupportedOnScope({ forge: true }), true)
-  assert.equal(forgeUnsupportedOnScope({ forge: false }), false)
+test('forgeStoreInsideScope: refuses a --forge-store located inside --scope (trust boundary)', () => {
+  assert.equal(forgeStoreInsideScope({ forge: true, scope: '/r', forgeStorePath: '/r/.loop/checks.json' }), true)
+  assert.equal(forgeStoreInsideScope({ forge: true, scope: '/r', forgeStorePath: '/elsewhere/checks.json' }), false)
+  assert.equal(forgeStoreInsideScope({ forge: false, scope: '/r', forgeStorePath: '/r/checks.json' }), false) // no --forge
+  assert.equal(forgeStoreInsideScope({ forge: true, scope: '/r' }), false) // no store path
+})
+
+test('forgeNeedsStoreAndConfirm: --forge on scope requires --forge-store and --confirm-scorer', () => {
+  assert.equal(forgeNeedsStoreAndConfirm({ forge: true, forgeStorePath: '/s', confirmScorerCmd: 'c' }), false)
+  assert.equal(forgeNeedsStoreAndConfirm({ forge: true, forgeStorePath: '/s' }), true) // no confirm
+  assert.equal(forgeNeedsStoreAndConfirm({ forge: true, confirmScorerCmd: 'c' }), true) // no store
+  assert.equal(forgeNeedsStoreAndConfirm({ forge: false }), false)
+})
+
+test('scopeDeps injects the scope Forge hook (runForgeHook) so a recovered-veto scope run can learn', () => {
+  const deps = scopeDeps({ scope: '/r', readOnly: [], model: 'sonnet', effort: 'medium', escalateModel: 'opus', noEscalate: true, mcpConfig: null, decompose: false, scorerAllow: [], loopDir: '/r/.loop/x' })
+  assert.equal(typeof deps.runForgeHook, 'function')
 })

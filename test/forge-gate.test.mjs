@@ -94,6 +94,21 @@ test('a fresh --forge run composes confirm = base + stored checks', async () => 
   assert.equal(readFileSync(join(loopDir, 'gate-checks.txt'), 'utf8'), 'node base.mjs\nnode /x.mjs --needle Y\n')
 })
 
+test('a SCOPE --forge run composes the scope-kind checks only (kind derived from cfg.scope)', async () => {
+  const loopDir = mkdtempSync(join(tmpdir(), 'forge-scope-compose-'))
+  const storePath = checkStorePath(loopDir)
+  let s = addCheck(emptyStore(), { cmd: 'node /file.mjs', target: 100 }) // file check — must be ignored on a scope run
+  s = addCheck(s, { cmd: 'node /scope.mjs --rel x.mjs', target: 100, kind: 'scope' })
+  saveStore(storePath, s)
+  await runFromConfig(
+    { goal: 'g', artifactPath: join(loopDir, 'a.txt'), scope: '/some/repo', scorerCmd: 's', confirmScorerCmd: 'node base.mjs', targetScore: 90, hardCap: 3, loopDir, forge: true, forgeStorePath: storePath },
+    trivialDeps(),
+  )
+  const manifest = readFileSync(join(loopDir, 'gate-checks.txt'), 'utf8')
+  assert.ok(manifest.includes('node /scope.mjs --rel x.mjs')) // scope check composed
+  assert.equal(manifest.includes('node /file.mjs'), false) // file check NOT composed on a scope run
+})
+
 test('without --forge the confirm scorer is unchanged', async () => {
   const loopDir = mkdtempSync(join(tmpdir(), 'forge-consume-'))
   const { state } = await runFromConfig(
