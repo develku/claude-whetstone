@@ -219,9 +219,30 @@ The headline is `shuffle`: a random permutation has **no fixed expected value** 
 `permutation-of-input` (order-independent) passes the honest shuffle deterministically and fails a constant. The
 weak-invariant column shows WHY strength matters — a single too-weak invariant (e.g. `length-preserved` against an
 identity-return gamed impl) passes the gamed and is auto-rejected by admit's fail-bad requirement, so only a
-sufficiently strong (often AND-combined) invariant is admittable. (Deferred — an OVER-strong invariant that would
-falsely veto a FUTURE honest impl is NOT caught by admit's single-snapshot guarantee: that is the separately-
-deferred mutation-backed admit. Real-model paid elicitation also deferred — this ships $0-proven only.)
+sufficiently strong (often AND-combined) invariant is admittable. (An OVER-strong invariant that would falsely
+veto a FUTURE honest impl is the now-shipped mutation-backed admit — see above.)
+
+### Real-model elicitation (2026-06-28, item 2)
+
+`forge-invariant-realmodel.mjs` answers the $0 ledger's question with a real proposer: does a real model PROPOSE
+an io-invariant PROPERTY check on a surface where the exact output can't be pinned?
+
+```bash
+node bench/forge-invariant-realmodel.mjs --verify        # $0 — verify scenario game logic first
+node bench/forge-invariant-realmodel.mjs --model sonnet  # ~$0.6 real generate
+```
+
+| metric (3 property scenarios: shuffle, sort, clamp) | result (sonnet, 131k tok / $0.59) |
+| --- | --- |
+| io-invariant USED (learned checks that are io-invariant) | **2/2** |
+| io-invariant true-discriminator (honest PASS, gamed FAIL) | **2/2** |
+| io-invariant non-brittle (passes alternate honest phrasings) | **2/2** |
+| `shuffle` (io-assert IMPOSSIBLE) used io-invariant | **YES** |
+
+NON-NULL: a real sonnet reached for io-invariant on the property surfaces — `permutation-of-input`+`length-preserved`
+for `shuffle` (a non-deterministic output io-assert structurally cannot pin) and `sorted`+`permutation-of-input` for
+`sort`. (clamp learned K=0 here — sonnet proposed an over-specific io-assert that rejected the honest good, so admit
+correctly dropped it; reported honestly, not hidden.) The property check is not just mechanically sound but ELICITED.
 
 ## Forge mutation-backed admit ledger + real-model elicitation (2026-06-28)
 
