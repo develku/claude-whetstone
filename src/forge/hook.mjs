@@ -87,7 +87,13 @@ export async function runForgeHook({ cfg, state, loopDir }, deps = {}) {
   })
   // Auto-flaky retirement: tombstone any active file check now non-reproducible on the honest good artifact
   // (self-healing — a flaky gate would randomly veto honest runs). Only the unstable; stable-fail stays manual.
-  const pruned = await (deps.pruneFlaky ?? pruneFlaky)({ storePath: cfg.forgeStorePath, goodArtifact: good, kind: 'file', runCheck: scorerRunCheck })
-  if (pruned.length) r.retiredFlaky = pruned
+  // Skip prune on a corroboration decline (corroborated:false): the run learned nothing, so skip the store-
+  // maintenance replays too, and stay consistent with scope-hook.mjs. (prune retires only NON-reproducible
+  // checks — orthogonal to the label dispute — so this is cost + consistency, NOT a correctness fix.) corroborated
+  // is true on the no-oracle passthrough, so strict === false leaves the normal (no --forge-oracle) case untouched.
+  if (r.corroborated !== false) {
+    const pruned = await (deps.pruneFlaky ?? pruneFlaky)({ storePath: cfg.forgeStorePath, goodArtifact: good, kind: 'file', runCheck: scorerRunCheck })
+    if (pruned.length) r.retiredFlaky = pruned
+  }
   return r
 }

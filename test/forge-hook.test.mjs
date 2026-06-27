@@ -93,3 +93,28 @@ test('runForgeHook defaults oracleCmds to [] when cfg has none', async () => {
   await runForgeHook({ cfg, state, loopDir: '/run' }, { runForge: async (a) => { seen = a; return {} }, generate: async () => ({}), admit: async () => ({}) })
   assert.deepEqual(seen.oracleCmds, [])
 })
+
+test('runForgeHook skips pruneFlaky on a corroboration decline (corroborated:false), still prunes when corroborated', async () => {
+  const state = { goal: 'g', artifact_path: '/run/final.txt', last_critique: '', confirm_vetoed_at_pass: 0, history: [{ snapshot: 'snapshots/iter_000.txt' }] }
+  const cfg = { forge: true, confirmScorerCmd: 'x', forgeStorePath: '/run/checks.json', scorerAllow: [], model: 'sonnet' }
+
+  // Decline: runForge returned corroborated:false (an oracle disputed the labelling). The run learned nothing,
+  // so skip the store-maintenance prune too — consistent with scope-hook.mjs. (prune retires only NON-reproducible
+  // checks, orthogonal to the dispute, so this is cost+consistency, not a correctness fix — see commit body.)
+  let pruneCalls = 0
+  await runForgeHook({ cfg, state, loopDir: '/run' }, {
+    runForge: async () => ({ admitted: [], rejected: [], corroborated: false }),
+    pruneFlaky: async () => { pruneCalls++; return [] },
+    generate: async () => ({}), admit: async () => ({}),
+  })
+  assert.equal(pruneCalls, 0, 'pruneFlaky must NOT run when corroborated:false')
+
+  // Corroborated (incl. the no --forge-oracle passthrough, which also returns corroborated:true): prune runs.
+  let goodSeen = null
+  await runForgeHook({ cfg, state, loopDir: '/run' }, {
+    runForge: async () => ({ admitted: [], rejected: [], corroborated: true }),
+    pruneFlaky: async (a) => { goodSeen = a.goodArtifact; return [] },
+    generate: async () => ({}), admit: async () => ({}),
+  })
+  assert.equal(goodSeen, '/run/final.txt', 'pruneFlaky MUST run on the honest good when corroborated')
+})
