@@ -192,3 +192,29 @@ counter `[["value"],["inc"],["value"],["inc"],["inc"],["value"]] => [0,1,1,2,3,3
 which a gamed `value(){return 1}` fails at the first step). So io-trace is not only mechanically sound ($0
 ledger above) but **actually elicited by a real proposer** — the stateful analog of io-assert's proposal 5/5.
 (Single run, n=1 per scenario; 6/6 across the run is emphatic rather than marginal.)
+
+## Forge scope (multi-file/repo) — MVP ledger + real-model elicitation (2026-06-27)
+
+The single-file Forge learns/stores/consumes checks on ONE file; scope mode extends that to a git repo. A
+scope snapshot is a commit SHA (not a file) and the confirm is `gitVerifyAt` (a pristine worktree), so a scope
+check is a **per-file behavioural check**: it takes the worktree ROOT as `--output` plus a path-guarded `--rel`,
+so the existing `composite.mjs` (string, MIN) is reused unchanged (no function composer). Store records are
+namespaced by `kind` (`file`|`scope`) so a scope check never poisons a single-file gate. (Design: codex
+cross-model review, verdict proceed-with-changes — it replaced an originally-planned function-valued composer.)
+
+```bash
+node bench/forge-scope-ledger.mjs                       # $0 — produce + bite, deterministic stub proposer
+node bench/forge-scope-realmodel.mjs --stub             # $0 — harness check (deterministic)
+node bench/forge-scope-realmodel.mjs --model sonnet     # ~$0.5 — real proposer
+```
+
+**$0 ledger** (`forge-scope-ledger.mjs`, real git, deterministic editor + stub proposer): per a one-file
+gamed→honest recovery, the Forge **produces 2/2** a per-file scope check, it **bites 2/2** (vetoes the gamed
+tree, passes the honest tree on a pristine checkout) and is **non-brittle 2/2** (passes an alternate honest tree).
+
+**Real-model elicitation** (`forge-scope-realmodel.mjs`, sonnet, $0.49) — does a real model PROPOSE a usable
+per-file scope check? **NON-NULL:** proposal **3/3**, **5/5 behavioural** learned checks (io-assert for the pure
+`double`/`max`, **io-trace for the stateful `counter`** — the model chose the right check type per surface and
+used `--rel` correctly), **bite 3/3**, **non-brittle 3/3**. The scope Forge's learn→store→consume loop is both
+mechanically sound and elicited by a real proposer. (MVP: one changed file; multi-file / corroborate-on-scope /
+real CLI wiring are the next steps.)
