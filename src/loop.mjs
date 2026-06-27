@@ -53,7 +53,12 @@ export async function runLoop({ state, evaluate, act, persist, save = null, log 
     // Stamp the veto on the pass and persist it NOW: the on-disk state from the prior `persist` has a
     // primary score >= target, so a kill during the next (post-veto) editor spawn would otherwise make
     // --resume see `done` and refuse. The marker (== this pass) tells prepareResume it is still running.
-    const ns = { ...st, last_critique: c.critique, confirm_vetoed_at_pass: st.pass }
+    // veto_source records WHICH check vetoed (here: 'confirm' = a held-out scorer caught gaming). It is the
+    // PROVENANCE of the LAST veto stamp (written with confirm_vetoed_at_pass, shares its set-at-veto/never-
+    // cleared lifecycle), NOT a live "currently vetoed" status — read it only as "the marker was last written
+    // by X". Record-only today (no gate/resume path reads it); a future consumer needs its own DCA. (DCA
+    // 20260628T012212; codex gpt-5.5 thread 019f09ad: RECORD-ONLY, provenance-not-status.)
+    const ns = { ...st, last_critique: c.critique, confirm_vetoed_at_pass: st.pass, veto_source: 'confirm' }
     if (save) save(ns)
     const v2 =
       ns.pass >= ns.hard_cap
@@ -86,7 +91,9 @@ export async function runLoop({ state, evaluate, act, persist, save = null, log 
     // Veto like confirmDone: reuse the SAME done-edge marker so a kill during the next editor spawn is
     // not mistaken for done on --resume (prepareResume treats confirm_vetoed_at_pass == pass as running).
     const critique = `score not reproducible: min ${min} over ${st.stability_runs} runs is below target ${st.target_score} — make the solution deterministic, not luck-dependent`
-    const ns = { ...st, last_critique: critique, confirm_vetoed_at_pass: st.pass }
+    // veto_source: 'stability' = a flaky/non-reproducible primary (NOT gaming). Same provenance semantics as the
+    // confirm site (last-write provenance, not live status). See the confirmDone comment + DCA 20260628T012212.
+    const ns = { ...st, last_critique: critique, confirm_vetoed_at_pass: st.pass, veto_source: 'stability' }
     if (save) save(ns)
     const v2 =
       ns.pass >= ns.hard_cap

@@ -226,6 +226,7 @@ test('a confirm veto records confirm_vetoed_at_pass so a kill mid-rescue is not 
     log: () => {},
   })
   assert.equal(state.confirm_vetoed_at_pass, state.pass) // marker stamped on the vetoed pass
+  assert.equal(state.veto_source, 'confirm') // per-veto-source marker: a held-out confirm veto (gaming)
 })
 
 test('a confirm veto PERSISTS the marker via save() — durable on disk, not just on the returned state', async () => {
@@ -275,6 +276,7 @@ test('a flaky primary (min over K runs below target) vetoes done', async () => {
   })
   assert.equal(verdict.status, 'capped') // NOT done — a one-off spike never finishes
   assert.match(state.last_critique, /reproducible|stability/i) // steers the next edit toward determinism
+  assert.equal(state.veto_source, 'stability') // per-veto-source marker: a flaky stability veto (not gaming)
 })
 
 test('a stable primary (all K runs clear target) finishes done', async () => {
