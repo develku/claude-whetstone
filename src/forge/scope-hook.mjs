@@ -8,6 +8,7 @@
 import { gitMaterialize, gitCleanup, gitDiffNames, gitHead, isSha } from '../git-snapshot.mjs'
 import { admitCheck, scorerRunCheck } from './admit.mjs'
 import { scopeGenerateCandidates } from './scope-generate.mjs'
+import { pruneFlaky } from './prune.mjs'
 import { loadStore, saveStore, addCheck } from './store.mjs'
 import { runForge } from './run.mjs'
 import { forgeAllowlist, forgeCatalog } from './hook.mjs'
@@ -33,7 +34,7 @@ export async function runScopeForgeHook({ cfg, state }, deps = {}) {
   try {
     const generate = deps.generate ?? ((a) => scopeGenerateCandidates({ ...a, rel, model: cfg.model, propose: deps.propose }))
     const admit = deps.admit ?? ((a) => admitCheck({ ...a, runCheck: scorerRunCheck }))
-    return await (deps.runForge ?? runForge)({
+    const r = await (deps.runForge ?? runForge)({
       goal: state.goal,
       goodArtifact: wtGood,
       badArtifact: wtBad,
@@ -48,6 +49,11 @@ export async function runScopeForgeHook({ cfg, state }, deps = {}) {
       addCheck,
       kind: 'scope',
     })
+    // Auto-flaky retirement (scope kind): prune any active scope check now non-reproducible on the honest
+    // worktree. Runs before the finally cleanup, while wtGood is still materialized.
+    const pruned = await (deps.pruneFlaky ?? pruneFlaky)({ storePath: cfg.forgeStorePath, goodArtifact: wtGood, kind: 'scope', runCheck: scorerRunCheck })
+    if (pruned.length) r.retiredFlaky = pruned
+    return r
   } finally {
     cleanup(scopeDir, wtGood)
     cleanup(scopeDir, wtBad)

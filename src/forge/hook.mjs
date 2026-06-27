@@ -11,6 +11,7 @@ import { isUnsafeScorer } from '../scorer-safety.mjs'
 import { generateCandidates, claudePropose } from './generate.mjs'
 import { admitCheck, scorerRunCheck } from './admit.mjs'
 import { corroborateLabels } from './corroborate.mjs'
+import { pruneFlaky } from './prune.mjs'
 import { loadStore, saveStore, addCheck } from './store.mjs'
 import { runForge } from './run.mjs'
 
@@ -68,7 +69,7 @@ export async function runForgeHook({ cfg, state, loopDir }, deps = {}) {
   // Oracles run VERBATIM via scorerRunCheck (operator-authored, NOT through forgeAllowlist). Empty oracleCmds
   // => corroborateLabels is a $0 passthrough, so this is inert unless --forge-oracle is set.
   const corroborate = deps.corroborate ?? ((a) => corroborateLabels({ ...a, runCheck: scorerRunCheck }))
-  return (deps.runForge ?? runForge)({
+  const r = await (deps.runForge ?? runForge)({
     goal: state.goal,
     goodArtifact: good,
     badArtifact: bad,
@@ -84,4 +85,9 @@ export async function runForgeHook({ cfg, state, loopDir }, deps = {}) {
     saveStore,
     addCheck,
   })
+  // Auto-flaky retirement: tombstone any active file check now non-reproducible on the honest good artifact
+  // (self-healing — a flaky gate would randomly veto honest runs). Only the unstable; stable-fail stays manual.
+  const pruned = await (deps.pruneFlaky ?? pruneFlaky)({ storePath: cfg.forgeStorePath, goodArtifact: good, kind: 'file', runCheck: scorerRunCheck })
+  if (pruned.length) r.retiredFlaky = pruned
+  return r
 }
