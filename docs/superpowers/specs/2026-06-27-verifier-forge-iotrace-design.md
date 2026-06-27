@@ -78,5 +78,7 @@ structurally inapplicable (a single `IN=>OUT` call cannot carry state across a m
   writes output — needs a trace form that asserts the mutated input/output, not just return values), and
   **non-deterministic** surfaces (random/time — exact `--expect` is wrong; needs a fixed vocabulary of named
   **invariants** like sorted / permutation-of / in-range, a separate `io-invariant`-style scorer).
-- **Real-model elicitation** (does a real model *propose* io-trace for a stateful artifact, à la the io-assert
-  ledger's proposal 5/5?) is the natural paid follow-up; this spec proves the *mechanism* at $0.
+- **Real-model elicitation — DONE, NON-NULL** (`bench/forge-iotrace-realmodel.mjs`, sonnet, $0.53): proposal
+  3/3, **io-trace used 6/6** learned checks, non-brittle 6/6, true-discriminator 6/6. A real model reaches for
+  io-trace on every stateful surface and writes multi-step traces that probe state evolution — the stateful
+  analog of io-assert's proposal 5/5.

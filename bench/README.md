@@ -172,6 +172,23 @@ io-trace is a non-brittle behavioural discriminator on every stateful scenario �
 phrasings, failing only the gamed impl — exactly as io-assert does for pure functions, where io-assert is
 structurally inapplicable (a single call can't carry state across a sequence). **Deferred** (further frontier):
 argument-mutation / IO surfaces (needs a mutated-input/output trace form) and **non-deterministic** surfaces
-(needs invariant assertions — sorted / permutation-of / in-range — not an exact `--expect`). Real-model
-elicitation (does a model *propose* io-trace, à la io-assert's proposal 5/5?) is the natural paid follow-up;
-this ledger proves the mechanism at $0.
+(needs invariant assertions — sorted / permutation-of / in-range — not an exact `--expect`).
+
+### Real-model elicitation (2026-06-27) — NON-NULL
+
+`forge-iotrace-realmodel.mjs` answers the io-assert-ledger's question for stateful code: does a **real model
+PROPOSE** io-trace? It drives the full Forge (real `claude` generate) on the three stateful scenarios with a
+deterministic game-then-recover editor and io-trace allowlisted.
+
+```bash
+node bench/forge-iotrace-realmodel.mjs --verify        # $0 — verify scenario game logic first
+node bench/forge-iotrace-realmodel.mjs --model sonnet   # ~$0.5 real generate
+```
+
+**Result (model `sonnet`, $0.53):** proposal **3/3** · **io-trace used 6/6** learned checks · non-brittle
+**6/6** · true-discriminator **6/6** · brittle **0/6**. The model reached for io-trace *every* time on a
+stateful surface (never falling back to `contains`/`io-assert`) and wrote genuinely multi-step traces — e.g.
+counter `[["value"],["inc"],["value"],["inc"],["inc"],["value"]] => [0,1,1,2,3,3]` (probing state *evolution*,
+which a gamed `value(){return 1}` fails at the first step). So io-trace is not only mechanically sound ($0
+ledger above) but **actually elicited by a real proposer** — the stateful analog of io-assert's proposal 5/5.
+(Single run, n=1 per scenario; 6/6 across the run is emphatic rather than marginal.)
