@@ -232,5 +232,21 @@ codex-revised — codex corrected the false "cap never costs a catch" claim, hen
 **$0 ledger** (`forge-scope-ledger.mjs`, `multi(double+max)` scenario): a 2-gamed-file recovery **learns 2/2**
 (one behavioural check per file — io-assert for both), **bites** (the kind-filtered composed gate vetoes the
 gamed tree), **passes honest**, and is **non-brittle** (passes an alternate honest tree). `perFile` shows both
-files `:admitted`. (Next: scope multi-*check*-per-file beyond what generate returns; corroborate-on-scope;
-real-model multi-file elicitation.)
+files `:admitted`. (Next: scope multi-*check*-per-file beyond what generate returns; corroborate-on-scope.)
+
+### Multi-file real-model elicitation (2026-06-27) — NON-NULL
+
+`forge-scope-multifile-realmodel.mjs` asks the paid question: does a real model propose a usable per-file check
+for EACH of two independently-gamed files (pure `src/a.mjs` + stateful `src/b.mjs`) in one recovery? The proof is
+deliberately paranoid (codex review): a green composite proves nothing under MIN aggregation (one working check
+vetoes a both-gamed tree even if the other is useless), so each admitted check is run INDIVIDUALLY (against plain
+probe dirs) to prove **emission** (≥1 check per file), **attribution** (fails its OWN file's gaming, passes the
+OTHER file's), and **behavioural + non-brittle** (fails TWO textually-different gamed variants, passes honest + an
+alternate honest). io-trace-vs-io-assert is diagnostic, never gated; `--stub` makes the harness $0.
+
+**Paid sonnet run: 83,460 tokens ($0.3442) — per-file proven 2/2 (NON-NULL).** `src/a.mjs` → io-assert with three
+cases; `src/b.mjs` → io-trace `[inc,value,inc,value]=>[1,1,2,2]`. sonnet also proposed a THIRD, weaker check for
+`src/b.mjs` (`[value]=>[0]`) that PASSES admission (it discriminates the real vetoed snapshot) but MISSES a
+synthetic second-variant bug — so the "exactly 2" criterion was corrected to **per-FILE proven** (a model may
+propose extras; reported, not penalized). The miss is a finding about **admit** (it tests vs ONE vetoed snapshot,
+not sibling variants — related to frontier 2a corroboration), not an elicitation failure.

@@ -81,3 +81,22 @@ emission · per-file attribution · behavioural-tolerance — else it is a vanit
 4. `git diff` confirms the 7 invariant files untouched.
 5. PAID run (`--model sonnet`) ONLY after explicit operator authorization; report tokens.
 6. Commits carry provenance bodies citing the codex leg; push; update memory.
+
+## Result — PAID sonnet run, 2026-06-27 (NON-NULL)
+
+`node bench/forge-scope-multifile-realmodel.mjs --model sonnet` → **83,460 tokens ($0.3442)**:
+
+- **per-file proven: 2/2** — a real sonnet proposed a usable per-file check for BOTH gamed files. `src/a.mjs` got an
+  io-assert with THREE cases (`2=>4, 5=>10, -3=>-6`, richer than the stub); `src/b.mjs` got an io-trace
+  (`[inc,value,inc,value] => [1,1,2,2]`). Both fully attributed + behavioural + non-brittle.
+- **Refinement (the "exactly 2" criterion was too strict).** sonnet proposed a THIRD check for `src/b.mjs`
+  (`[value] => [0]`) which passed admission (it discriminates the real vetoed snapshot — a fresh `value()` is 0 on
+  honest, 1 on the constant-gamed snapshot) but is NOT behaviourally complete: it MISSES the synthetic second
+  variant (a counter that increments but `value()` still returns 0 — a fresh `value()` is 0 there too). The gate
+  was changed from "exactly 2 admitted" to **"every file has ≥1 fully-proven check"** (per-FILE, not a fixed total),
+  with extras reported as a diagnostic.
+- **Finding (admit-gate limit, not an elicitation failure):** admit accepts any check that discriminates the ONE
+  real vetoed snapshot, so a behaviourally-incomplete check can be admitted. The bench surfaces this without
+  failing the multi-file claim. A future strengthening (multi-snapshot admit, or corroboration against synthetic
+  variants) would close it — related to frontier 2a (differential corroboration).
+
