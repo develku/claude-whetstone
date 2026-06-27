@@ -244,6 +244,36 @@ for `shuffle` (a non-deterministic output io-assert structurally cannot pin) and
 `sort`. (clamp learned K=0 here — sonnet proposed an over-specific io-assert that rejected the honest good, so admit
 correctly dropped it; reported honestly, not hidden.) The property check is not just mechanically sound but ELICITED.
 
+## Forge io-effect ledger + real-model elicitation (2026-06-28) — argument-mutation / IO-side-effect (2b-extended trace form)
+
+io-assert/io-trace/io-invariant all observe RETURN VALUES; a whole class of correct behaviour is a SIDE EFFECT
+(in-place mutation `sortInPlace(arr)`, an accumulator/logger `logEvent(sink, e)` pushing to `sink`) where the
+return is `undefined`. `scorers/io-effect.mjs` asserts the POST-CALL STATE of a carried mutable first argument
+(the "sink") across a call sequence `fn(sink, ...args)` — `--fn ... --sink '<JSON>' --calls '<JSON [[...args],...]>'
+--expect-sink '<JSON>' [--expect-returns '<JSON [...]>']`. SECURITY: the artifact controls the sink, so the
+post-call state is read by a strict own-data-property walker (`canonicalData`), NOT `JSON.stringify` — it never
+invokes a getter or `toJSON` and rejects accessors / non-plain prototypes / symbols / BigInt / cycles, so a gamed
+artifact cannot forge the observed state. (Design: `docs/superpowers/specs/2026-06-28-verifier-forge-io-effect-design.md`;
+codex review folded the toJSON/getter forge defense; power-code-reviewer 0 CRITICAL/HIGH, 2 MEDIUM fixed.)
+
+```bash
+node bench/forge-effect-ledger.mjs            # always $0 — deterministic, no model spend
+node bench/forge-effect-ledger.mjs --verify   # terse; exit 1 if it regresses
+node bench/forge-effect-realmodel.mjs --verify        # $0 scenario sanity
+node bench/forge-effect-realmodel.mjs --model sonnet  # ~$0.6 real generate
+```
+
+| metric (3 side-effect scenarios: sortInPlace, logEvent, tally) | $0 ledger | paid (sonnet, 130k tok / $0.58) |
+| --- | --- | --- |
+| io-effect true-discriminator (honest mutator PASS, gamed non-mutator FAIL) | **3/3** | **7/7** learned checks |
+| io-effect brittleness (rejects a valid alternate honest impl) | **0/3** | **0/7** |
+| io-effect USED by a real model | — | **7/7** learned checks |
+| returns-only gap (an io-assert returns-check CANNOT pass the honest impl) | **3/3** | — |
+
+NON-NULL: io-effect discriminates side-effect gaming non-brittly, on surfaces where a returns-only scorer can't
+even pass the honest impl (it returns undefined, not the sink) — and a real sonnet reaches for io-effect every
+time (7/7), writing sensible sink/calls/expect-sink checks (e.g. tally `[["a"],["b"],["a"]] => {a:2,b:1}`).
+
 ## Forge mutation-backed admit ledger + real-model elicitation (2026-06-28)
 
 `admitCheck` admits a candidate verifier-check iff it passes the ONE known-good artifact and fails the ONE
