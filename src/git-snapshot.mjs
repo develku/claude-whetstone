@@ -45,6 +45,31 @@ export function gitHead(dir) {
   return git(dir, ['rev-parse', 'HEAD'])
 }
 
+// The async counterpart to gitVerifyAt: materialize a committed ref into a throwaway worktree and RETURN
+// its path WITHOUT removing it, so the caller can HOLD it across an awaited cycle (gitVerifyAt's finally
+// would remove the tree mid-await). The caller MUST gitCleanup it (use try/finally). The scope-Forge admit
+// holds the good+bad trees across the awaited generate/admit cycle.
+export function gitMaterialize(scopeDir, ref) {
+  const wt = mkdtempSync(join(tmpdir(), 'whet-forge-'))
+  git(scopeDir, ['worktree', 'add', '--detach', '-q', wt, ref])
+  return wt
+}
+export function gitCleanup(scopeDir, wt) {
+  try { git(scopeDir, ['worktree', 'remove', '--force', wt]) } catch { /* fall through to rm */ }
+  rmSync(wt, { recursive: true, force: true })
+}
+
+// File paths whose content differs between two commits (name-only). scope-Forge finds the changed file(s)
+// of a gamed->honest recovery; the MVP learns only when exactly one file changed.
+export function gitDiffNames(scopeDir, fromSha, toSha) {
+  const out = git(scopeDir, ['diff', '--name-only', fromSha, toSha])
+  return out ? out.split('\n').map((s) => s.trim()).filter(Boolean) : []
+}
+
+// Trust-boundary guard: a stored "snapshot" must be a real commit id (hex), never a revision expression
+// (HEAD~1) or a path — validated before any reset/worktree on the operator repo.
+export const isSha = (s) => typeof s === 'string' && /^[0-9a-f]{7,40}$/.test(s)
+
 // True iff the tree CONTENT differs between fromSha and HEAD. Children commit --allow-empty baselines
 // so HEAD always moves; the fan-out's "changed" signal must compare trees, not commit ids, so an
 // all-empty-commit fan-out reads as an honest no-op. `git diff --quiet` exits 1 when a diff exists.

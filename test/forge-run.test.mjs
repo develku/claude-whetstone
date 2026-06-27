@@ -66,6 +66,13 @@ test('runForge: no corroborate injected -> unchanged behavior, return carries co
   assert.equal(out.admitted.length, 1)
 })
 
+test('runForge: kind is threaded to the stored record (scope checks are tagged)', async () => {
+  const m = memStore()
+  const generate = async () => ({ candidates: [{ scorerId: 'io-assert', args: [], cmd: 'node /io-assert.mjs --rel src/x.mjs --fn f --case 1=>2', rationale: '' }], rejected: [] })
+  await runForge(base({ generate, admit: async () => ({ admit: true, reason: 'ok' }), kind: 'scope', ...m }))
+  assert.equal(m.get().checks[0].kind, 'scope')
+})
+
 test('runForge: a re-proposed PREVIOUSLY-RETIRED check is classified rejected, not admitted (accurate accounting)', async () => {
   const cmd = 'node /contains.mjs --needle X'
   const retiredStore = { version: 1, checks: [], retired: [{ key: checkKey({ cmd, target: 100 }), reason: 'manually retired', ts: 't' }] }

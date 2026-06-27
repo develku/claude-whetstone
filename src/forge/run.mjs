@@ -14,7 +14,7 @@ export async function runForge({
   goal, goodArtifact, badArtifact, critique = '', scorerCatalog, allowlist, storePath,
   generate, admit, loadStore, saveStore, addCheck, checkKey = defaultCheckKey,
   corroborate, oracleCmds = [],
-  replayRuns = 2, target = 100, maxCandidates = 5,
+  replayRuns = 2, target = 100, maxCandidates = 5, kind = 'file',
 }) {
   let excluded = []
   if (corroborate) {
@@ -41,7 +41,7 @@ export async function runForge({
     admitted.push({ cmd: c.cmd, target, reason: v.reason })
   }
   if (admitted.length) {
-    for (const a of admitted) store = addCheck(store, a)
+    for (const a of admitted) store = addCheck(store, { ...a, kind })
     saveStore(storePath, store)
   }
   return { admitted, rejected, candidates: gen.candidates, costUsd: gen.costUsd ?? 0, tokens: gen.tokens ?? 0, conflicts: [], excluded, corroborated: true }
