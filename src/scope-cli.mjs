@@ -33,6 +33,7 @@ export function parseScopeCli(argv, defaults = {}) {
   cfg.maxChildren = get('--max-children') ? Number(get('--max-children')) : 4
   cfg.childCap = get('--child-cap') ? Number(get('--child-cap')) : 3
   cfg.scorerAllow = (get('--scorer-allow') || '').split(',').map((s) => s.trim()).filter(Boolean)
+  cfg.forgeMaxFiles = get('--forge-max-files') ? Number(get('--forge-max-files')) : undefined // scope multi-file learn cap (hook default 8)
   return cfg
 }
 
@@ -141,7 +142,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const argv = process.argv
   const cfg = parseScopeCli(argv, loadConfig())
   if (!cfg.goal || !cfg.scope || !cfg.scorerCmd) {
-    process.stderr.write('usage: scope-cli.mjs "<goal>" --scope <repo dir> --scorer "<project test/build cmd>" [--read-only test/,gate] [--confirm-scorer "<cmd>"] [--target 90] [--cap 10] [--budget X] [--budget-tokens N] [--stability-runs N] [--model sonnet] [--effort medium] [--no-escalate] [--mcp-config <path>] [--loop-dir <dir>] [--decompose] [--max-children 4] [--child-cap 3] [--scorer-allow <paths>] [--forge --forge-store <path OUTSIDE scope> --confirm-scorer "<cmd>"]\n')
+    process.stderr.write('usage: scope-cli.mjs "<goal>" --scope <repo dir> --scorer "<project test/build cmd>" [--read-only test/,gate] [--confirm-scorer "<cmd>"] [--target 90] [--cap 10] [--budget X] [--budget-tokens N] [--stability-runs N] [--model sonnet] [--effort medium] [--no-escalate] [--mcp-config <path>] [--loop-dir <dir>] [--decompose] [--max-children 4] [--child-cap 3] [--scorer-allow <paths>] [--forge --forge-store <path OUTSIDE scope> --confirm-scorer "<cmd>"] [--forge-max-files 8]\n')
     process.exit(2)
   }
   const guard = cleanTreeGuard(cfg.scope)

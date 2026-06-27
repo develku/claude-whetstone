@@ -103,3 +103,13 @@ test('scopeDeps injects the scope Forge hook (runForgeHook) so a recovered-veto 
   const deps = scopeDeps({ scope: '/r', readOnly: [], model: 'sonnet', effort: 'medium', escalateModel: 'opus', noEscalate: true, mcpConfig: null, decompose: false, scorerAllow: [], loopDir: '/r/.loop/x' })
   assert.equal(typeof deps.runForgeHook, 'function')
 })
+
+test('parseScopeCli parses --forge-max-files (scope multi-file learn cap)', () => {
+  const cfg = parseScopeCli(['node', 'scope-cli.mjs', 'g', '--scope', '/r', '--scorer', 'npm test', '--forge-max-files', '3'])
+  assert.equal(cfg.forgeMaxFiles, 3)
+})
+
+test('parseScopeCli leaves forgeMaxFiles undefined when --forge-max-files absent (hook default applies)', () => {
+  const cfg = parseScopeCli(['node', 'scope-cli.mjs', 'g', '--scope', '/r', '--scorer', 'npm test'])
+  assert.equal(cfg.forgeMaxFiles, undefined)
+})
