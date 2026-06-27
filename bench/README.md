@@ -250,3 +250,19 @@ cases; `src/b.mjs` → io-trace `[inc,value,inc,value]=>[1,1,2,2]`. sonnet also 
 synthetic second-variant bug — so the "exactly 2" criterion was corrected to **per-FILE proven** (a model may
 propose extras; reported, not penalized). The miss is a finding about **admit** (it tests vs ONE vetoed snapshot,
 not sibling variants — related to frontier 2a corroboration), not an elicitation failure.
+
+### Corroborate-on-scope (2026-06-27) — frontier 2a ported to repo mode
+
+`forge-scope-corroborate-ledger.mjs` ($0): before the scope Forge LEARNS per-file checks, optional operator
+oracles (`--forge-oracle`) independently confirm the recovery's good/bad labelling — **once at the repo level**
+(not per file), so a single dissent can't be diluted and oracles don't run `2*N` times. Decision granularity is
+the whole fire: a STABLE oracle that disputes the framing makes the Forge learn NOTHING (every per-file admission
+would otherwise inherit a suspect known-good/known-bad), and on decline it does NOT prune (auto-retirement also
+trusts the disputed good). A flaky oracle is excluded (surfaced, non-blocking). Empty `--forge-oracle` => $0
+passthrough, so existing scope runs are unaffected.
+
+The scope oracle runs with **cwd = the materialized worktree root** (unlike the file-mode adapter, which runs
+from the process cwd) — a project-test or repo-relative oracle must see the materialized SHA, not the live tree
+(codex caught this). Ledger ($0, stub proposer + real oracle scripts): **no-oracle learns 1 · RIGHT oracle (reads
+`src/m.mjs` repo-relative, agrees) learns 1 · WRONG oracle (rejects the honest good) declines the whole fire (0
+learned, conflict surfaced)**. The RIGHT-oracle case doubles as an end-to-end guard that cwd is the worktree.

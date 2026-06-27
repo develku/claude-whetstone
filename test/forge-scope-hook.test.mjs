@@ -117,3 +117,63 @@ test('rankChangedFiles orders code before non-code, then by path (stable, never 
   assert.deepEqual(out, ['src/a.mjs', 'src/b.mjs', 'a.json', 'z.md'])
   assert.equal(rankChangedFiles(['x.txt']).length, 1) // never drops
 })
+
+// --- frontier 2a on scope: corroborate-on-scope ---
+
+const writeOracle = (body) => { const p = join(mkdtempSync(join(tmpdir(), 'oracle-')), 'oracle.mjs'); writeFileSync(p, body); return `node ${p}` }
+
+test('corroborate-on-scope: a disputing oracle declines the WHOLE fire (no learning, no prune)', async () => {
+  const { dir, gamedSha } = setupRepo()
+  const storePath = join(mkdtempSync(join(tmpdir(), 'st-')), 'checks.json')
+  const cfg = { forge: true, forgeStorePath: storePath, scorerAllow: [IO_ASSERT], forgeOracleCmds: ['node oracle'] }
+  const state = { goal: 'g', artifact_path: dir, last_critique: '', confirm_vetoed_at_pass: 0, history: [{ snapshot: gamedSha }] }
+  let pruned = false
+  const corroborate = async () => ({ corroborated: false, conflicts: [{ oracleCmd: 'node oracle', reason: 'rejects good' }], excluded: [] })
+  const r = await runScopeForgeHook({ cfg, state }, { propose: stubPropose, corroborate, pruneFlaky: async () => { pruned = true; return [] }, log: () => {} })
+  assert.equal(r.corroborated, false)
+  assert.equal(r.admitted.length, 0)
+  assert.equal(r.conflicts.length, 1)
+  assert.equal(r.coverageComplete, false) // not "cap did not truncate" — learning never ran
+  assert.deepEqual(r.perFile, [])
+  assert.equal(pruned, false) // decline returns BEFORE prune (auto-retirement trusts goodArtifact — the disputed label)
+  assert.equal(loadStore(storePath).checks.length, 0)
+})
+
+test('corroborate-on-scope: a flaky oracle is excluded (non-blocking) — learning still proceeds', async () => {
+  const { dir, gamedSha } = setupRepo()
+  const storePath = join(mkdtempSync(join(tmpdir(), 'st-')), 'checks.json')
+  const cfg = { forge: true, forgeStorePath: storePath, scorerAllow: [IO_ASSERT] }
+  const state = { goal: 'g', artifact_path: dir, last_critique: '', confirm_vetoed_at_pass: 0, history: [{ snapshot: gamedSha }] }
+  const corroborate = async () => ({ corroborated: true, conflicts: [], excluded: [{ oracleCmd: 'node flaky', reason: 'not reproducible' }] })
+  const r = await runScopeForgeHook({ cfg, state }, { propose: stubPropose, corroborate, log: () => {} })
+  assert.equal(r.corroborated, true)
+  assert.equal(r.admitted.length, 1)
+  assert.deepEqual(r.excluded.map((e) => e.oracleCmd), ['node flaky']) // surfaced, non-blocking
+})
+
+test('corroborate-on-scope: a real repo-relative oracle runs with cwd=worktree (agrees -> learns)', async () => {
+  const { dir, gamedSha } = setupRepo()
+  // The oracle reads src/m.mjs RELATIVE TO CWD (not via --output). It only resolves correctly if the oracle
+  // runs with cwd = the materialized worktree — guarding the cwd fix. honest worktree -> 'n * 2' -> 100 (accepts
+  // good); gamed worktree -> 'n * 3' -> 0 (rejects bad) => the oracle AGREES with the veto => learning proceeds.
+  const oracle = writeOracle("import { readFileSync } from 'node:fs'\nlet s = -1\ntry { s = readFileSync('src/m.mjs', 'utf8').includes('* 2') ? 100 : 0 } catch {}\nprocess.stdout.write(JSON.stringify({ score: s, critique: '', findings: [] }))\n")
+  const storePath = join(mkdtempSync(join(tmpdir(), 'st-')), 'checks.json')
+  const cfg = { forge: true, forgeStorePath: storePath, scorerAllow: [IO_ASSERT], forgeOracleCmds: [oracle] }
+  const state = { goal: 'g', artifact_path: dir, last_critique: '', confirm_vetoed_at_pass: 0, history: [{ snapshot: gamedSha }] }
+  const r = await runScopeForgeHook({ cfg, state }, { propose: stubPropose, log: () => {} })
+  assert.equal(r.corroborated, true) // false here would mean the oracle read the wrong tree (cwd bug)
+  assert.equal(r.admitted.length, 1)
+})
+
+test('corroborate-on-scope: a real oracle that rejects the good artifact declines the fire', async () => {
+  const { dir, gamedSha } = setupRepo()
+  const oracle = writeOracle("process.stdout.write(JSON.stringify({ score: 0, critique: '', findings: [] }))\n") // always rejects
+  const storePath = join(mkdtempSync(join(tmpdir(), 'st-')), 'checks.json')
+  const cfg = { forge: true, forgeStorePath: storePath, scorerAllow: [IO_ASSERT], forgeOracleCmds: [oracle] }
+  const state = { goal: 'g', artifact_path: dir, last_critique: '', confirm_vetoed_at_pass: 0, history: [{ snapshot: gamedSha }] }
+  const r = await runScopeForgeHook({ cfg, state }, { propose: stubPropose, log: () => {} })
+  assert.equal(r.corroborated, false)
+  assert.equal(r.admitted.length, 0)
+  assert.equal(r.conflicts.length, 1)
+  assert.equal(loadStore(storePath).checks.length, 0)
+})
