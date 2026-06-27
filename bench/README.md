@@ -216,5 +216,21 @@ tree, passes the honest tree on a pristine checkout) and is **non-brittle 2/2** 
 per-file scope check? **NON-NULL:** proposal **3/3**, **5/5 behavioural** learned checks (io-assert for the pure
 `double`/`max`, **io-trace for the stateful `counter`** — the model chose the right check type per surface and
 used `--rel` correctly), **bite 3/3**, **non-brittle 3/3**. The scope Forge's learn→store→consume loop is both
-mechanically sound and elicited by a real proposer. (MVP: one changed file; multi-file / corroborate-on-scope /
-real CLI wiring are the next steps.)
+mechanically sound and elicited by a real proposer.
+
+### Multi-file produce (2026-06-27)
+
+The 1-changed-file MVP cap is lifted: a recovered scope veto spanning N files learns a per-file check for EACH
+genuinely-gamed file. `runScopeForgeHook` risk-orders the changed files (`rankChangedFiles`: code before
+non-code, then path — never excludes, only sets truncation priority), learns for the first `--forge-max-files`
+(default 8) and SURFACES the rest as a coverage gap (`coverageComplete`/`skippedFiles` + a `log()` line, not a
+silent drop). `admitCheck` is the correctness filter for free — a refactor-only file's candidates pass good AND
+bad, so it's rejected; only gamed files yield stored checks. A per-file `runForge` that throws is isolated to a
+`perFile` `status:'error'` entry without aborting the fire. (Design: `docs/superpowers/specs/2026-06-27-verifier-forge-scope-multifile-design.md`,
+codex-revised — codex corrected the false "cap never costs a catch" claim, hence the honest coverage signal.)
+
+**$0 ledger** (`forge-scope-ledger.mjs`, `multi(double+max)` scenario): a 2-gamed-file recovery **learns 2/2**
+(one behavioural check per file — io-assert for both), **bites** (the kind-filtered composed gate vetoes the
+gamed tree), **passes honest**, and is **non-brittle** (passes an alternate honest tree). `perFile` shows both
+files `:admitted`. (Next: scope multi-*check*-per-file beyond what generate returns; corroborate-on-scope;
+real-model multi-file elicitation.)
