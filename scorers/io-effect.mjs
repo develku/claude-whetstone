@@ -22,51 +22,21 @@
 // SECURITY (codex review): the artifact CONTROLS the sink object it mutates, so the post-call state must NOT be
 // read via JSON.stringify — that invokes a user-controlled `toJSON`/getters, letting a gamed artifact attach
 // `sink.toJSON = () => expectedSink` (or accessor properties) to FORGE the observed state and pass while the real
-// state is wrong. We read the sink with canonicalData: a strict OWN-DATA-property walker that rejects accessors,
-// toJSON-as-a-function, non-plain prototypes, symbols, BigInt, non-finite numbers, undefined, and cycles. An
-// artifact-produced non-JSON sink is an ARTIFACT failure (score 0), never a scorer crash.
+// state is wrong. We read the sink with canonicalData (src/canonical-data.mjs): a strict OWN-DATA-property walker
+// that never invokes a getter/toJSON and rejects accessors, non-plain prototypes, symbols, BigInt, non-finite
+// numbers, undefined, and cycles. An artifact-produced non-JSON sink is an ARTIFACT failure (score 0), never a
+// crash. The walker is SHARED with io-trace's returns normalization (which uses {undefinedToNull:true} for void
+// methods); io-effect's sink stays STRICT (default opts) — JSON input can never carry undefined.
 import { pathToFileURL } from 'node:url'
 import assert from 'node:assert/strict'
 import { resolveOutput } from '../src/safe-rel.mjs'
+import { canonicalData } from '../src/canonical-data.mjs'
 
 const arg = (name) => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined }
 const die = (msg) => { process.stderr.write(`io-effect: ${msg}\n`); process.exit(2) }
 
-// Structurally clone `v` into plain JSON data, THROWING on anything a gamed artifact could use to forge the
-// observed state or anything outside the JSON data contract. The forge defense: we never INVOKE a getter or a
-// `toJSON` — we walk own descriptors and reject accessors and non-plain prototypes (class instance / Map / Set /
-// Date) on sight. OBJECTS: enumerable own DATA props only (non-enumerable ignored, like JSON); a function/
-// undefined/BigInt/symbol/non-finite value, an accessor, or a symbol-keyed own prop throws. ARRAYS: indices
-// 0..length-1, with holes normalized to null (JSON array semantics — JSON.stringify([,,1]) is [null,null,1]);
-// a non-index array prop (a symbol key, or a `toJSON` function) is IGNORED, exactly as JSON does for arrays, so
-// it is NOT a forge vector (the real indexed state is what gets compared). An EXPLICIT undefined element still
-// throws. `seen` is the CURRENT PATH (post-order delete) so a shared sub-object (DAG/diamond) is allowed; only a
-// true cycle throws. Exported for test.
-export function canonicalData(v, seen = new Set()) {
-  if (v === null) return null
-  const t = typeof v
-  if (t === 'number') { if (!Number.isFinite(v)) throw new Error('non-finite number'); return v }
-  if (t === 'string' || t === 'boolean') return v
-  if (t !== 'object') throw new Error(`non-JSON value (${t})`) // undefined, function, symbol, bigint
-  if (seen.has(v)) throw new Error('cyclic reference')
-  seen.add(v)
-  let out
-  if (Array.isArray(v)) {
-    out = Array.from({ length: v.length }, (_, i) => (i in v ? canonicalData(v[i], seen) : null))
-  } else {
-    const proto = Object.getPrototypeOf(v)
-    if (proto !== Object.prototype && proto !== null) throw new Error('non-plain object (class instance / Map / Set / Date)')
-    if (Object.getOwnPropertySymbols(v).length) throw new Error('symbol-keyed property')
-    out = {}
-    for (const [k, d] of Object.entries(Object.getOwnPropertyDescriptors(v))) {
-      if (d.get || d.set) throw new Error(`accessor property "${k}"`) // forge defense — never read a getter
-      if (!d.enumerable) continue // JSON-visible state only
-      out[k] = canonicalData(d.value, seen)
-    }
-  }
-  seen.delete(v)
-  return out
-}
+// Re-export so existing importers (test/io-effect.test.mjs) keep resolving `canonicalData` from here.
+export { canonicalData }
 
 // Call fn(sink, ...args) for each entry in `calls`, mutating the carried `sink` in place, then strict-deep-equal
 // the canonicalized post-call sink against `expectSink` (and, if given, the per-call returns against

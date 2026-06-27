@@ -52,6 +52,35 @@ test('evaluateTrace: a missing export is a scorer error', () => {
   assert.match(r.failing.error, /export|constructor|Ghost/i)
 })
 
+// FORGE DEFENSE (the artifact controls its method return values): a returned object must NOT be able to forge
+// the expected value via toJSON / getters — canonicalData walks own data props and never invokes them.
+test('evaluateTrace: a return value with a forging toJSON does NOT pass (toJSON never invoked)', () => {
+  const mod = { make: () => ({ get: () => ({ real: 'WRONG', toJSON: () => 42 }) }) }
+  const r = evaluateTrace(mod, { factoryName: 'make', steps: [['get']], expect: [42] })
+  assert.equal(r.pass, false)
+  assert.match(r.failing.error ?? '', /not plain JSON|function/i)
+})
+
+test('evaluateTrace: a return value with a forging getter does NOT pass', () => {
+  const mod = { make: () => ({ get: () => { const o = {}; Object.defineProperty(o, 'v', { get: () => 1, enumerable: true }); return o } }) }
+  const r = evaluateTrace(mod, { factoryName: 'make', steps: [['get']], expect: [{ v: 1 }] })
+  assert.equal(r.pass, false)
+  assert.match(r.failing.error ?? '', /accessor|not plain JSON/i)
+})
+
+test('evaluateTrace: a cyclic return scores fail (artifact failure), never a scorer crash', () => {
+  const mod = { make: () => ({ get: () => { const o = {}; o.self = o; return o } }) }
+  const r = evaluateTrace(mod, { factoryName: 'make', steps: [['get']], expect: [{}] })
+  assert.equal(r.pass, false)
+  assert.match(r.failing.error ?? '', /cyclic|not plain JSON/i)
+})
+
+test('evaluateTrace: void-method returns still normalize undefined -> null (behaviour preserved)', () => {
+  class S { constructor() { this.a = [] } push(x) { this.a.push(x) } pop() { return this.a.pop() } }
+  const r = evaluateTrace({ S }, { newName: 'S', steps: [['push', 1], ['pop']], expect: [null, 1] })
+  assert.equal(r.pass, true) // push -> undefined -> null, exactly as the pre-hardening JSON.stringify did
+})
+
 // CLI end-to-end against a real stateful artifact (mirrors io-assert's contract).
 const SCORER = join(dirname(fileURLToPath(import.meta.url)), '..', 'scorers', 'io-trace.mjs')
 const runCli = (output, args) => {

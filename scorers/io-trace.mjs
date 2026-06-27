@@ -16,6 +16,7 @@
 import { pathToFileURL } from 'node:url'
 import assert from 'node:assert/strict'
 import { resolveOutput } from '../src/safe-rel.mjs'
+import { canonicalData } from '../src/canonical-data.mjs'
 
 const arg = (name) => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined }
 const die = (msg) => { process.stderr.write(`io-trace: ${msg}\n`); process.exit(2) }
@@ -41,7 +42,13 @@ export function evaluateTrace(mod, { newName, factoryName, init = [], steps, exp
     if (typeof fn !== 'function') return { pass: false, failing: { step, error: `subject has no method "${method}"` } }
     try { returns.push(fn.apply(subject, args)) } catch (e) { return { pass: false, failing: { step, error: e.message } } }
   }
-  const got = JSON.parse(JSON.stringify(returns)) // undefined -> null, DATA-comparable
+  // Normalize observed returns to plain JSON via the strict canonicalData walker — NOT JSON.stringify, which
+  // would invoke a gamed artifact's `toJSON`/getters and let it FORGE a return value. Only a TOP-LEVEL void
+  // return (undefined) is mapped to null (preserving the push->null semantics); every non-undefined return is
+  // walked STRICTLY (a NESTED undefined throws, matching the forge-defense, not JSON's silent drop). A non-JSON
+  // / forge-shaped return is an ARTIFACT failure (score 0), never a scorer crash.
+  let got
+  try { got = returns.map((r) => (r === undefined ? null : canonicalData(r))) } catch (e) { return { pass: false, failing: { error: `a return value is not plain JSON data (${e.message})` } } }
   try { assert.deepEqual(got, expect) } catch { return { pass: false, failing: { expected: expect, got } } }
   return { pass: true }
 }
