@@ -19,6 +19,7 @@ import { loadStore, listChecks } from '../src/forge/store.mjs'
 import { scorerRunCheck } from '../src/forge/admit.mjs'
 import { runForgeHook } from '../src/forge/hook.mjs'
 import { shq } from '../src/shq.mjs'
+import { formatSpend } from '../src/spend-format.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = join(HERE, '..')
@@ -137,6 +138,7 @@ async function runScenario(sc) {
     id: sc.id,
     recovered: verdict.status === 'done' && state.confirm_vetoed_at_pass != null,
     K: learned.length,
+    tokens: cap?.tokens ?? 0,
     costUsd: cap?.costUsd ?? 0,
     rejected: cap ? cap.rejected.map((r) => `${r.scorerId}: ${r.reason}`) : [],
     checks,
@@ -151,7 +153,7 @@ for (const sc of SCENARIOS) {
 }
 
 for (const r of rows) {
-  console.log(`[${r.id}] recovered=${r.recovered ? 'yes' : 'NO'} K=${r.K} cost=$${r.costUsd.toFixed(4)}`)
+  console.log(`[${r.id}] recovered=${r.recovered ? 'yes' : 'NO'} K=${r.K} spent=${formatSpend({ tokens: r.tokens, costUsd: r.costUsd })}`)
   for (const c of r.checks) {
     console.log(`   ${c.type.padEnd(9)} honest=${c.honest ? 'P' : 'F'} gamed=${c.gamed ? 'P' : 'F'} alts=[${c.alts.map((p) => (p ? 'P' : 'F')).join(',')}]${c.brittle ? ' ← BRITTLE' : ''}${c.trueDiscriminator ? '' : ' ← not a discriminator'}  ${c.cmd}`)
   }
@@ -165,13 +167,14 @@ const ioTrace = all.filter((c) => c.type === 'io-trace')
 const trueDisc = all.filter((c) => c.trueDiscriminator).length
 const brittle = all.filter((c) => c.brittle).length
 const cost = rows.reduce((s, r) => s + r.costUsd, 0)
+const totalTokens = rows.reduce((s, r) => s + r.tokens, 0)
 console.log(`\n=== aggregate ===`)
 console.log(`proposal success:    ${withCheck}/${n} scenarios learned >=1 admitted check`)
 console.log(`io-trace USED:       ${ioTrace.length}/${all.length} learned checks are io-trace (a real model reached for the stateful behavioural check)`)
 console.log(`io-trace non-brittle:${ioTrace.filter((c) => !c.brittle).length}/${ioTrace.length} io-trace checks pass all alternate honest phrasings`)
 console.log(`true-discriminator:  ${trueDisc}/${all.length} learned checks pass-honest/fail-gamed`)
 console.log(`brittleness:         ${brittle}/${all.length} learned checks reject a valid alternate phrasing`)
-console.log(`total generate cost: $${cost.toFixed(4)}`)
+console.log(`total generate spend: ${formatSpend({ tokens: totalTokens, costUsd: cost })}`)
 console.log(
   ioTrace.length > 0
     ? `\nreading: NON-NULL — a real ${model} reached for io-trace ${ioTrace.length}/${all.length} times on stateful surfaces, ${ioTrace.filter((c) => !c.brittle).length}/${ioTrace.length} non-brittle. The stateful behavioural check is not just mechanically sound ($0 ledger) but actually ELICITED by a real proposer.`

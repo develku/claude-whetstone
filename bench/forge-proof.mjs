@@ -18,6 +18,7 @@ import { loadStore, listChecks } from '../src/forge/store.mjs'
 import { scorerRunCheck } from '../src/forge/admit.mjs'
 import { runForgeHook } from '../src/forge/hook.mjs'
 import { shq } from '../src/shq.mjs'
+import { formatSpend } from '../src/spend-format.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = join(HERE, '..')
@@ -97,7 +98,7 @@ if (!cap) {
   console.log('  the Forge did not fire (no recovered veto) — scenario broken; aborting.')
   process.exit(1)
 }
-console.log(`  generate cost: $${(cap.costUsd ?? 0).toFixed(4)}  ·  allowlisted candidates: ${cap.candidates.length}  ·  admitted (K): ${cap.admitted.length}  ·  rejected: ${cap.rejected.length}`)
+console.log(`  generate spend: ${formatSpend({ tokens: cap.tokens, costUsd: cap.costUsd })}  ·  allowlisted candidates: ${cap.candidates.length}  ·  admitted (K): ${cap.admitted.length}  ·  rejected: ${cap.rejected.length}`)
 for (const c of cap.candidates) console.log(`    proposed: ${c.cmd}  (${c.rationale || ''})`)
 for (const r of cap.rejected) console.log(`    rejected: ${r.scorerId} — ${r.reason}`)
 for (const a of cap.admitted) console.log(`    ADMITTED: ${a.cmd}  (${a.reason})`)

@@ -20,6 +20,7 @@ import { loadStore, listChecks } from '../src/forge/store.mjs'
 import { scorerRunCheck } from '../src/forge/admit.mjs'
 import { runForgeHook } from '../src/forge/hook.mjs'
 import { shq } from '../src/shq.mjs'
+import { formatSpend } from '../src/spend-format.mjs'
 import { SCENARIOS } from './forge-fixtures/scenarios.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -88,6 +89,7 @@ async function runScenario(sc) {
     proposed: cap ? cap.candidates.length + cap.rejected.length : 0,
     admittedAllowlisted: cap ? cap.candidates.length : 0,
     K: learned.length,
+    tokens: cap?.tokens ?? 0,
     costUsd: cap?.costUsd ?? 0,
     rejected: cap ? cap.rejected.map((r) => `${r.scorerId}: ${r.reason}`) : [],
     checks,
@@ -123,12 +125,12 @@ for (const sc of SCENARIOS) {
 }
 
 // per-scenario table
-console.log('| scenario | recovered | proposed | admitted K | true-discrim | brittle | cost |')
+console.log('| scenario | recovered | proposed | admitted K | true-discrim | brittle | spend |')
 console.log('|---|---|---|---|---|---|---|')
 for (const r of rows) {
   const td = r.checks.filter((c) => c.trueDiscriminator).length
   const br = r.checks.filter((c) => c.brittle).length
-  console.log(`| ${r.id} | ${r.recovered ? 'yes' : 'NO'} | ${r.proposed} | ${r.K} | ${td}/${r.K} | ${br}/${r.K} | $${r.costUsd.toFixed(4)} |`)
+  console.log(`| ${r.id} | ${r.recovered ? 'yes' : 'NO'} | ${r.proposed} | ${r.K} | ${td}/${r.K} | ${br}/${r.K} | ${formatSpend({ tokens: r.tokens, costUsd: r.costUsd })} |`)
 }
 
 // learned checks detail
@@ -149,11 +151,12 @@ const brittle = allChecks.filter((c) => c.brittle).length
 const altPairs = allChecks.flatMap((c) => c.alts)
 const altRejected = altPairs.filter((p) => !p).length
 const cost = rows.reduce((s, r) => s + r.costUsd, 0)
+const totalTokens = rows.reduce((s, r) => s + r.tokens, 0)
 console.log(`\n=== aggregate ===`)
 console.log(`proposal success:   ${withCheck}/${n} scenarios learned >=1 admitted check`)
 console.log(`true-discriminator: ${trueDisc}/${allChecks.length} learned checks pass-honest/fail-gamed`)
 console.log(`BRITTLENESS:        ${brittle}/${allChecks.length} learned checks reject a valid alternate phrasing  ·  ${altRejected}/${altPairs.length} (check,alt) pairs wrongly rejected`)
-console.log(`total generate cost: $${cost.toFixed(4)}`)
+console.log(`total generate spend: ${formatSpend({ tokens: totalTokens, costUsd: cost })}`)
 if (brittle > 0) {
   console.log(`\nreading: ${brittle}/${allChecks.length} learned checks are BRITTLE — they over-fit one honest phrasing and reject`)
   console.log(`equally-correct alternate implementations. Textual (contains) guards fossilize a phrasing, not the`)

@@ -18,6 +18,7 @@ import { composeConfirm } from '../src/forge/gate.mjs'
 import { loadStore, checkStorePath } from '../src/forge/store.mjs'
 import { scopeBuildContext } from '../src/scope-context.mjs'
 import { shq } from '../src/shq.mjs'
+import { formatSpend } from '../src/spend-format.mjs'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..')
 const IO_ASSERT = join(REPO, 'scorers', 'io-assert.mjs')
@@ -74,14 +75,14 @@ async function runScenario(sc) {
   const passesHonest = learned.length > 0 && (await verdict(honestSha)) === 100
   const nonBrittle = learned.length > 0 && (await verdict(altSha)) === 100
 
-  return { id: sc.id, admitted: r.admitted.length, types: learned.map((c) => typeOf(c.cmd)), bites, passesHonest, nonBrittle, costUsd: r.costUsd ?? 0, rejected: (r.rejected || []).map((x) => `${x.scorerId}: ${x.reason}`) }
+  return { id: sc.id, admitted: r.admitted.length, types: learned.map((c) => typeOf(c.cmd)), bites, passesHonest, nonBrittle, tokens: r.tokens ?? 0, costUsd: r.costUsd ?? 0, rejected: (r.rejected || []).map((x) => `${x.scorerId}: ${x.reason}`) }
 }
 
 console.log(`\n=== Forge scope real-model elicitation (${STUB ? 'STUB $0 harness check' : `model=${model}`}, ${SCENARIOS.length} scenarios) ===\n`)
 const rows = []
 for (const sc of SCENARIOS) { process.stderr.write(`running ${sc.id}...\n`); rows.push(await runScenario(sc)) }
 for (const r of rows) {
-  console.log(`[${r.id}] admitted=${r.admitted} types=[${r.types.join(',')}] bite=${r.bites ? 'VETO' : 'no'} honest=${r.passesHonest ? 'pass' : 'FAIL'} alt=${r.nonBrittle ? 'pass' : 'FAIL'} cost=$${r.costUsd.toFixed(4)}`)
+  console.log(`[${r.id}] admitted=${r.admitted} types=[${r.types.join(',')}] bite=${r.bites ? 'VETO' : 'no'} honest=${r.passesHonest ? 'pass' : 'FAIL'} alt=${r.nonBrittle ? 'pass' : 'FAIL'} spent=${formatSpend({ tokens: r.tokens, costUsd: r.costUsd })}`)
   if (r.admitted === 0) console.log(`   admitted 0 — rejected: ${r.rejected.join(' | ') || '(none)'}`)
 }
 const n = rows.length
@@ -91,12 +92,13 @@ const allTypes = rows.flatMap((r) => r.types)
 const bites = rows.filter((r) => r.bites && r.passesHonest).length
 const nonBrittle = rows.filter((r) => r.nonBrittle).length
 const cost = rows.reduce((s, r) => s + r.costUsd, 0)
+const totalTokens = rows.reduce((s, r) => s + r.tokens, 0)
 console.log('\n=== aggregate ===')
 console.log(`proposal success:        ${proposed}/${n} scenarios learned >=1 scope check`)
 console.log(`behavioural (io-assert/io-trace) vs total: ${behavioural}/${allTypes.length} learned checks`)
 console.log(`bite (vetoes gamed, passes honest):  ${bites}/${n}`)
 console.log(`non-brittle (passes an alt honest tree): ${nonBrittle}/${n}`)
-console.log(`total generate cost: $${cost.toFixed(4)}`)
+console.log(`total generate spend: ${formatSpend({ tokens: totalTokens, costUsd: cost })}`)
 console.log(
   proposed === n && bites === n && nonBrittle === n
     ? `\nreading: ${STUB ? '(stub) harness OK' : `NON-NULL — a real ${model}`} proposes a usable per-file scope check on ${proposed}/${n} repo gamings;\nevery learned check bites (vetoes gamed, passes honest) and is non-brittle. The scope Forge is${STUB ? ' ready for the paid run.' : ' elicited by a real proposer, not just mechanically sound.'}`
