@@ -30,11 +30,14 @@ export function gateManifestLines(baseConfirmCmd, checks) {
 // to <loopDir>/gate-checks.txt and return a composite over it. loadStore/listChecks/writeManifest are injected
 // for testing; they default to the real store ops + fs.
 export function composeConfirm(
-  { baseConfirmCmd, storePath, loopDir, compositePath = COMPOSITE },
+  { baseConfirmCmd, storePath, loopDir, compositePath = COMPOSITE, kind = 'file' },
   { loadStore = defaultLoadStore, listChecks = defaultListChecks, writeManifest = (p, body) => writeFileSync(p, body) } = {},
 ) {
   if (!baseConfirmCmd) return baseConfirmCmd
-  const lines = gateManifestLines(baseConfirmCmd, listChecks(loadStore(storePath)))
+  // kind namespaces consumption: a file gate composes only file checks, a scope gate only scope checks —
+  // so a per-file scope check (--output root + --rel) never runs in a single-file gate (where it would
+  // resolve against the wrong --output) and vice versa.
+  const lines = gateManifestLines(baseConfirmCmd, listChecks(loadStore(storePath), kind))
   if (!lines.length) return baseConfirmCmd
   const manifest = join(loopDir, 'gate-checks.txt')
   writeManifest(manifest, lines.join('\n') + '\n')

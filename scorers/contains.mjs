@@ -5,6 +5,7 @@
 // Contract: read --output/--needle, print {score, critique, findings} JSON to
 // stdout, exit 0 on success, exit 2 on scorer error.
 import { readFileSync } from 'node:fs'
+import { resolveOutput } from '../src/safe-rel.mjs'
 
 const arg = (name, def) => {
   const i = process.argv.indexOf(name)
@@ -16,9 +17,10 @@ const die = (msg) => {
 }
 
 const needle = arg('--needle')
-const output = arg('--output')
+let output = arg('--output')
 if (!needle) die('--needle <string> is required')
 if (!output) die('--output <path> is required')
+try { output = resolveOutput(output, arg('--rel')) } catch (e) { die(e.message) } // scope mode: --output root + --rel file
 
 let text = ''
 try {

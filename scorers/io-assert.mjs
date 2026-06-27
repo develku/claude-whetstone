@@ -10,6 +10,7 @@
 // {score, critique, findings} JSON, exit 0; exit 2 on scorer error (missing export, bad case, bad import).
 import { pathToFileURL } from 'node:url'
 import assert from 'node:assert/strict'
+import { resolveOutput } from '../src/safe-rel.mjs'
 
 const arg = (name) => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined }
 const allArgs = (name) => process.argv.reduce((a, v, i) => (process.argv[i - 1] === name ? [...a, v] : a), [])
@@ -35,9 +36,10 @@ export function evaluateCases(fn, cases) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const output = arg('--output')
+  let output = arg('--output')
   const fnName = arg('--fn')
   if (!output) die('--output <path> is required')
+  try { output = resolveOutput(output, arg('--rel')) } catch (e) { die(e.message) } // scope mode: --output root + --rel file
   if (!fnName) die('--fn <exported function name> is required')
   let cases
   try { cases = allArgs('--case').map(parseCase) } catch (e) { die(e.message) }

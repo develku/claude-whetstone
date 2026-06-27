@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { emptyStore, checkKey, addCheck, listChecks, checkStorePath, loadStore, saveStore } from '../src/forge/store.mjs'
+import { emptyStore, checkKey, addCheck, listChecks, listActiveChecks, checkStorePath, loadStore, saveStore } from '../src/forge/store.mjs'
 
 const TS = '2026-01-01T00:00:00.000Z' // fixed ts so round-trips deep-equal deterministically
 
@@ -71,6 +71,24 @@ test('listChecks yields {cmd,target,reason} in admission order and is a defensiv
   assert.equal(s.checks.length, 2)
 })
 
+// --- scope namespacing (kind) ---
+
+test('addCheck tags a scope check with kind; a file check carries no kind (back-compat)', () => {
+  const f = addCheck(emptyStore(), { cmd: 'node a.mjs', target: 100, ts: TS })
+  assert.equal('kind' in f.checks[0], false) // file record byte-identical to before
+  const s = addCheck(emptyStore(), { cmd: 'node io-assert.mjs --rel src/x.mjs --fn f --case 1=>2', kind: 'scope', ts: TS })
+  assert.equal(s.checks[0].kind, 'scope')
+})
+
+test('listActiveChecks filters by kind so file and scope gates never cross-consume', () => {
+  let s = addCheck(emptyStore(), { cmd: 'node a.mjs', target: 100, reason: 'f', ts: TS }) // file (no kind)
+  s = addCheck(s, { cmd: 'node io-assert.mjs --rel src/x.mjs --fn f --case 1=>2', target: 100, reason: 's', kind: 'scope', ts: TS })
+  assert.deepEqual(listActiveChecks(s, 'file'), [{ cmd: 'node a.mjs', target: 100, reason: 'f' }])
+  assert.equal(listActiveChecks(s, 'scope').length, 1)
+  assert.match(listActiveChecks(s, 'scope')[0].cmd, /--rel src\/x\.mjs/)
+  assert.equal(listActiveChecks(s).length, 2) // no kind arg => all (back-compat)
+})
+
 // --- thin file I/O ---
 
 test('loadStore on an absent file returns an empty store', () => {
@@ -86,6 +104,14 @@ test('saveStore + loadStore round-trips, leaving no .tmp behind', () => {
   saveStore(path, s)
   assert.deepEqual(loadStore(path), s)
   assert.equal(existsSync(path + '.tmp'), false)
+})
+
+test('loadStore round-trips a scope check (kind preserved)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-store-'))
+  const path = checkStorePath(dir)
+  const s = addCheck(emptyStore(), { cmd: 'node io-trace.mjs --rel a.mjs --new S --trace [] --expect []', kind: 'scope', ts: TS })
+  saveStore(path, s)
+  assert.deepEqual(loadStore(path), s)
 })
 
 test('loadStore throws loud (naming the path) on a malformed store', () => {

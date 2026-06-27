@@ -52,6 +52,20 @@ test('composeConfirm passes through a null base confirm (nothing to compose onto
   assert.equal(cmd, null)
 })
 
+test('composeConfirm consumes only checks of the run kind (no file/scope cross-poison)', () => {
+  let store = addCheck(emptyStore(), { cmd: 'node f.mjs', target: 100 })
+  store = addCheck(store, { cmd: 'node io-assert.mjs --rel x.mjs --fn f --case 1=>2', target: 100, kind: 'scope' })
+  let body = null
+  // default kind 'file' -> only the file check (the no-kind one), never the scope check
+  composeConfirm({ baseConfirmCmd: 'node base.mjs', storePath: '/s', loopDir: '/run' }, { loadStore: () => store, writeManifest: (_p, b) => { body = b } })
+  assert.equal(body, 'node base.mjs\nnode f.mjs\n')
+  // kind 'scope' -> only the scope check
+  body = null
+  composeConfirm({ baseConfirmCmd: 'node base.mjs', storePath: '/s', loopDir: '/run', kind: 'scope' }, { loadStore: () => store, writeManifest: (_p, b) => { body = b } })
+  assert.match(body, /--rel x\.mjs/)
+  assert.equal(body.includes('node f.mjs\n'), false)
+})
+
 // --- driver integration ---
 
 const trivialDeps = (extra = {}) => ({

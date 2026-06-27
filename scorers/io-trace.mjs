@@ -15,6 +15,7 @@
 // '<JSON [returnValue,...]>'. Prints {score,critique,findings} JSON, exit 0; exit 2 on scorer error.
 import { pathToFileURL } from 'node:url'
 import assert from 'node:assert/strict'
+import { resolveOutput } from '../src/safe-rel.mjs'
 
 const arg = (name) => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined }
 const die = (msg) => { process.stderr.write(`io-trace: ${msg}\n`); process.exit(2) }
@@ -46,10 +47,11 @@ export function evaluateTrace(mod, { newName, factoryName, init = [], steps, exp
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const output = arg('--output')
+  let output = arg('--output')
   const newName = arg('--new')
   const factoryName = arg('--factory')
   if (!output) die('--output <path> is required')
+  try { output = resolveOutput(output, arg('--rel')) } catch (e) { die(e.message) } // scope mode: --output root + --rel file
   if (!newName && !factoryName) die('one of --new <ClassExport> or --factory <fnExport> is required')
   if (newName && factoryName) die('pass only one of --new / --factory')
   let init = []

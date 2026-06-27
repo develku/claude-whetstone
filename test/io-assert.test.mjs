@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -45,4 +45,18 @@ test('io-assert scores 0 for a gamed artifact that fails a held-out case', () =>
 test('io-assert exits 2 when the named export is missing', () => {
   const a = artifact('export const g = 1\n')
   assert.equal(run(a, ['--fn', 'f', '--case', '5=>1']).status, 2)
+})
+
+test('io-assert --rel targets a file inside the --output root (scope mode)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'io-rel-'))
+  mkdirSync(join(root, 'src'))
+  writeFileSync(join(root, 'src', 'm.mjs'), 'export const f = (n) => n * 2\n')
+  const r = run(root, ['--rel', 'src/m.mjs', '--fn', 'f', '--case', '3=>6'])
+  assert.equal(r.status, 0)
+  assert.equal(JSON.parse(r.stdout).score, 100)
+})
+
+test('io-assert --rel rejects a path escaping the root (exit 2)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'io-rel-'))
+  assert.equal(run(root, ['--rel', '../evil.mjs', '--fn', 'f', '--case', '1=>1']).status, 2)
 })
