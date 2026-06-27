@@ -223,6 +223,41 @@ sufficiently strong (often AND-combined) invariant is admittable. (Deferred — 
 falsely veto a FUTURE honest impl is NOT caught by admit's single-snapshot guarantee: that is the separately-
 deferred mutation-backed admit. Real-model paid elicitation also deferred — this ships $0-proven only.)
 
+## Forge mutation-backed admit ledger + real-model elicitation (2026-06-28)
+
+`admitCheck` admits a candidate verifier-check iff it passes the ONE known-good artifact and fails the ONE
+known-bad one — so a check can fail the bad for a non-generalizing reason (**pointwise overfitting**, e.g.
+`value()===0` on a fresh counter passes good and fails the constant-1 bad yet misses an increment-no-op sibling).
+`src/forge/mutation-admit.mjs` `mutationAdmit` is a WRAPPER over `admitCheck` (admit.mjs UNTOUCHED): it calls the
+base gate first (so it can never be MORE permissive) and then also requires the candidate to kill `>= threshold`
+(default 0.75) of an **oracle-confirmed mutant neighbourhood** of the good artifact (`src/forge/mutate.mjs`).
+Equivalent/non-parsing mutants are excluded by the 2a oracle-filter, NOT by candidate I/O. A candidate CRASH is
+NOT a kill (codex finding 3). Opt-in: `--forge-mutation-admit` (requires `--forge-oracle`) `[--forge-mutation-threshold 0.75]`.
+(Design: `docs/superpowers/specs/2026-06-28-verifier-forge-mutation-backed-admit-design.md`; codex cross-model
+review, verdict directionally-good — 9 findings folded: classify pass|reject|error|flaky, crash≠kill, reproducible
+oracle usability, FILE-mode guard enforced, no-oracle config error, etc.)
+
+```bash
+node bench/forge-mutation-ledger.mjs            # always $0 — deterministic, no model spend
+node bench/forge-mutation-ledger.mjs --verify   # terse; exit 1 if it regresses
+node bench/forge-mutation-realmodel.mjs --verify         # $0 scenario sanity
+node bench/forge-mutation-realmodel.mjs --model sonnet   # ~$0.4 real generate
+```
+
+| metric (2 stateful scenarios: counter, toggle) | result |
+| --- | --- |
+| weak overfit caught (admitCheck ADMITS, mutationAdmit REJECTS) | **2/2** |
+| strong preserved (admitted by BOTH — no false rejection of a generalizing check) | **2/2** |
+| non-brittle (strong still admitted when good = an alternate honest impl) | **2/2** |
+
+Paid (`forge-mutation-realmodel.mjs`, sonnet 84.5k tok / haiku 87k tok): **NO-HARM** — a real model (both
+sonnet AND haiku) proposed only generalizing io-trace checks here, so mutationAdmit admitted them on their REAL
+kill-ratio (4/4, 7/7 against a real oracle-confirmed neighbourhood) and rejected nothing. This is the desired
+inert-when-strong property: the strengthening is insurance that scales with proposal-quality degradation (the
+overfit-catch itself is proven NON-NULL at $0 in the ledger), mirroring the fence-NULL philosophy. Honest limit
+(codex finding 4): the kill-ratio threshold is a heuristic dial, not a generalization proof — a narrow-but-valid
+check can be over-rejected when the oracle is broader than the check's surface; ratios are reported, not hidden.
+
 ## Forge scope (multi-file/repo) — MVP ledger + real-model elicitation (2026-06-27)
 
 The single-file Forge learns/stores/consumes checks on ONE file; scope mode extends that to a git repo. A

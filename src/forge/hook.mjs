@@ -10,6 +10,7 @@ import { safeSnapshotPath } from '../state.mjs'
 import { isUnsafeScorer } from '../scorer-safety.mjs'
 import { generateCandidates, claudePropose } from './generate.mjs'
 import { admitCheck, scorerRunCheck } from './admit.mjs'
+import { mutationAdmit } from './mutation-admit.mjs'
 import { corroborateLabels } from './corroborate.mjs'
 import { pruneFlaky } from './prune.mjs'
 import { loadStore, saveStore, addCheck } from './store.mjs'
@@ -65,7 +66,12 @@ export async function runForgeHook({ cfg, state, loopDir }, deps = {}) {
   const good = deps.goodArtifact ?? state.artifact_path
   const allowlist = forgeAllowlist(cfg.scorerAllow)
   const generate = deps.generate ?? ((a) => generateCandidates({ ...a, propose: (p) => claudePropose(p, { model: cfg.model }) }))
-  const admit = deps.admit ?? ((a) => admitCheck({ ...a, runCheck: scorerRunCheck }))
+  // Item 1: when --forge-mutation-admit is set, the default admit becomes the mutation-backed WRAPPER (it calls
+  // admitCheck first and only ever ADDS a rejection — never more permissive). It reuses cfg.forgeOracleCmds (the
+  // same 2a oracles corroborate uses) to oracle-filter the mutant neighbourhood. deps.admit still overrides in tests.
+  const admit = deps.admit ?? (cfg.forgeMutationAdmit
+    ? (a) => mutationAdmit({ ...a, runCheck: scorerRunCheck, oracleCmds: cfg.forgeOracleCmds ?? [], mutationKillThreshold: cfg.forgeMutationThreshold })
+    : (a) => admitCheck({ ...a, runCheck: scorerRunCheck }))
   // Frontier 2a: corroborate the veto's good/bad labelling with independent operator oracles before learning.
   // Oracles run VERBATIM via scorerRunCheck (operator-authored, NOT through forgeAllowlist). Empty oracleCmds
   // => corroborateLabels is a $0 passthrough, so this is inert unless --forge-oracle is set.

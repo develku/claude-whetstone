@@ -253,6 +253,10 @@ export function parseCli(argv, defaults = {}) {
     // Forge learns from it (repeatable). Empty => single-oracle behavior (today's). Run verbatim, NOT
     // through forgeAllowlist (operator-authored, same trust class as --confirm-scorer).
     forgeOracleCmds: getAll('--forge-oracle'),
+    // Mutation-backed admit (item 1): strengthen admission from "fails the one observed bad" to "kills an
+    // oracle-confirmed mutant neighbourhood". Requires --forge-oracle (the entry guard refuses it otherwise).
+    forgeMutationAdmit: argv.includes('--forge-mutation-admit'),
+    forgeMutationThreshold: get('--forge-mutation-threshold') ? Number(get('--forge-mutation-threshold')) : defaults.forgeMutationThreshold,
   }
 }
 
@@ -335,7 +339,19 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
   const cfg = parseCli(argv, loadConfig())
   if (!cfg.goal || !cfg.artifactPath || !cfg.scorerCmd) {
-    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--budget-tokens N] [--stability-runs N] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>] [--forge --forge-store <path> --scorer-allow <scorer.mjs,...> [--forge-oracle "<scorer cmd>" ...]]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--stability-runs N] [--target T] [--model M]\n')
+    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--budget-tokens N] [--stability-runs N] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>] [--forge --forge-store <path> --scorer-allow <scorer.mjs,...> [--forge-oracle "<scorer cmd>" ...] [--forge-mutation-admit [--forge-mutation-threshold 0.75]]]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--stability-runs N] [--target T] [--model M]\n')
+    process.exit(2)
+  }
+  // Mutation-backed admit needs an independent oracle (codex finding 7): refuse the explicit flag without one
+  // rather than silently admitting via the base gate (which would create false "hardened" confidence).
+  if (cfg.forgeMutationAdmit && (cfg.forgeOracleCmds ?? []).length === 0) {
+    process.stderr.write('--forge-mutation-admit requires at least one --forge-oracle "<scorer cmd>" (the independent oracle that filters equivalent mutants)\n')
+    process.exit(2)
+  }
+  // A malformed --forge-mutation-threshold coerces to NaN, and `ratio >= NaN` is always false — which would
+  // silently reject EVERY proposal with no warning. Fail loud on a non-[0,1] value instead.
+  if (cfg.forgeMutationThreshold !== undefined && !(Number.isFinite(cfg.forgeMutationThreshold) && cfg.forgeMutationThreshold >= 0 && cfg.forgeMutationThreshold <= 1)) {
+    process.stderr.write('--forge-mutation-threshold must be a number in [0,1]\n')
     process.exit(2)
   }
   const { state, verdict } = await runFromConfig(cfg)

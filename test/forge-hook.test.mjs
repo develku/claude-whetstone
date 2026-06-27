@@ -1,7 +1,14 @@
 // test/forge-hook.test.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { shq } from '../src/shq.mjs'
 import { forgeShouldFire, forgeAllowlist, forgeCatalog, runForgeHook } from '../src/forge/hook.mjs'
+
+const CONTENT_SCORER = `node ${shq(join(dirname(fileURLToPath(import.meta.url)), 'fixtures/content-scorer.mjs'))} --needle FORGE_OK`
 
 const CFG = { forge: true, confirmScorerCmd: 'x', forgeStorePath: '/s/checks.json' }
 const DONE = { status: 'done' }
@@ -117,4 +124,42 @@ test('runForgeHook skips pruneFlaky on a corroboration decline (corroborated:fal
     generate: async () => ({}), admit: async () => ({}),
   })
   assert.equal(goodSeen, '/run/final.txt', 'pruneFlaky MUST run on the honest good when corroborated')
+})
+
+test('runForgeHook routes the admit seam to mutationAdmit when cfg.forgeMutationAdmit is set (item 1)', async () => {
+  // No deps.admit override -> the REAL wiring selects the admit fn. mutationAdmit returns a `.mutation` field;
+  // plain admitCheck never does — so the field's presence proves the route. good='FORGE_OK' has no mutable
+  // site, so the neighbourhood is empty -> base verdict preserved (admit true) + a below-floor note.
+  const dir = mkdtempSync(join(tmpdir(), 'forge-hook-mut-'))
+  const good = join(dir, 'good.txt'); writeFileSync(good, 'FORGE_OK')
+  const bad = join(dir, 'bad.txt'); writeFileSync(bad, 'broken')
+  const state = { goal: 'g', artifact_path: good, last_critique: '', confirm_vetoed_at_pass: 0, history: [{ snapshot: 'snap' }] }
+  const cfg = { forge: true, confirmScorerCmd: 'x', forgeStorePath: join(dir, 'checks.json'), scorerAllow: [], model: 'sonnet', forgeMutationAdmit: true, forgeOracleCmds: [CONTENT_SCORER] }
+  let captured = null
+  await runForgeHook({ cfg, state, loopDir: dir }, {
+    goodArtifact: good, badArtifact: bad,
+    generate: async () => ({ candidates: [], rejected: [] }),
+    pruneFlaky: async () => [],
+    runForge: async (args) => { captured = await args.admit({ candidateCmd: CONTENT_SCORER, goodArtifact: good, badArtifact: bad, replayRuns: 2 }); return { admitted: [], rejected: [], corroborated: true } },
+  })
+  assert.ok(captured.mutation, 'admit must be mutationAdmit (returns a .mutation field)')
+  assert.equal(captured.admit, true)
+  assert.equal(captured.mutation.confirmedMutants, 0)
+})
+
+test('runForgeHook uses plain admitCheck (no .mutation field) when forgeMutationAdmit is unset', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-hook-plain-'))
+  const good = join(dir, 'good.txt'); writeFileSync(good, 'FORGE_OK')
+  const bad = join(dir, 'bad.txt'); writeFileSync(bad, 'broken')
+  const state = { goal: 'g', artifact_path: good, last_critique: '', confirm_vetoed_at_pass: 0, history: [{ snapshot: 'snap' }] }
+  const cfg = { forge: true, confirmScorerCmd: 'x', forgeStorePath: join(dir, 'checks.json'), scorerAllow: [], model: 'sonnet' }
+  let captured = null
+  await runForgeHook({ cfg, state, loopDir: dir }, {
+    goodArtifact: good, badArtifact: bad,
+    generate: async () => ({ candidates: [], rejected: [] }),
+    pruneFlaky: async () => [],
+    runForge: async (args) => { captured = await args.admit({ candidateCmd: CONTENT_SCORER, goodArtifact: good, badArtifact: bad, replayRuns: 2 }); return { admitted: [], rejected: [], corroborated: true } },
+  })
+  assert.equal(captured.admit, true)
+  assert.equal(captured.mutation, undefined, 'plain admitCheck returns no .mutation field')
 })
