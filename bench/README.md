@@ -193,6 +193,36 @@ which a gamed `value(){return 1}` fails at the first step). So io-trace is not o
 ledger above) but **actually elicited by a real proposer** — the stateful analog of io-assert's proposal 5/5.
 (Single run, n=1 per scenario; 6/6 across the run is emphatic rather than marginal.)
 
+## Forge io-invariant ledger (2026-06-27) — property checks beyond exact outputs (frontier 2b-extended)
+
+`io-assert` needs the EXACT output for every case; many honest outputs can't be pinned exactly (non-deterministic
+order, input-dependent) yet still obey a structural **property**. `scorers/io-invariant.mjs` is the DATA-only
+property check: `--fn ... --case '<JSON arg-list>' --invariant '<name>'` (repeatable, AND-combined), with a
+fixed set — `sorted`, `permutation-of-input`, `length-preserved`, `unique`, `in-range:[min,max]`,
+`input-unchanged`. The input arg list is JSON-snapshotted BEFORE the call, so a destructive impl can't mutate
+its argument to fake an input-referencing invariant. (Design: codex cross-model review, verdict REVISE — 9
+changes folded in: input snapshot, explicit `--basis`, strict type semantics, canonical-key multiset instead of
+"sort both", `idempotent` cut, safe truncated reporting, `input-unchanged` added.)
+
+```bash
+node bench/forge-invariant-ledger.mjs            # always $0 — deterministic, no model spend
+node bench/forge-invariant-ledger.mjs --verify   # terse; exit 1 if it regresses
+```
+
+| metric (4 scenarios: shuffle, sort, dedupe, clamp) | result |
+| --- | --- |
+| io-invariant true-discriminator (strong invariant: honest PASS, gamed FAIL) | **4/4** |
+| io-invariant brittleness (rejects a valid alternate phrasing) | **0/4** |
+| weak-invariant demonstration (a single too-weak invariant PASSES the gamed → admit rejects) | **3/3** |
+
+The headline is `shuffle`: a random permutation has **no fixed expected value** for io-assert to pin, but
+`permutation-of-input` (order-independent) passes the honest shuffle deterministically and fails a constant. The
+weak-invariant column shows WHY strength matters — a single too-weak invariant (e.g. `length-preserved` against an
+identity-return gamed impl) passes the gamed and is auto-rejected by admit's fail-bad requirement, so only a
+sufficiently strong (often AND-combined) invariant is admittable. (Deferred — an OVER-strong invariant that would
+falsely veto a FUTURE honest impl is NOT caught by admit's single-snapshot guarantee: that is the separately-
+deferred mutation-backed admit. Real-model paid elicitation also deferred — this ships $0-proven only.)
+
 ## Forge scope (multi-file/repo) — MVP ledger + real-model elicitation (2026-06-27)
 
 The single-file Forge learns/stores/consumes checks on ONE file; scope mode extends that to a git repo. A

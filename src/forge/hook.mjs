@@ -51,6 +51,7 @@ export function forgeAllowlist(scorerAllow = []) {
 const SCORER_USAGE = {
   'io-assert': "--fn <exported function name> --case 'JSON_INPUT=>JSON_OUTPUT' (repeat --case for several inputs; a BEHAVIOURAL check for a PURE function that ANY correct implementation passes and the gamed one fails — PREFER this over a brittle textual contains)",
   'io-trace': "--new <ClassExport> | --factory <fnExport> [--init '<JSON args>'] --trace '<JSON [[method,...args],...]>' --expect '<JSON [return,...]>' (BEHAVIOURAL check for STATEFUL surfaces — construct a subject and assert a method-call SEQUENCE's returns; end the trace with a getter to assert final state; PREFER this over contains when the export is a class/factory rather than a pure function)",
+  'io-invariant': "--fn <exported function name> --case '<JSON arg-list>' (repeat; the arg LIST is SPREAD, so a UNARY array fn is DOUBLE-wrapped: '[[3,1,2]]' means f([3,1,2])) --invariant '<name>[:<JSON param>]' (repeat; ALL must hold) [--basis <argIndex>=0]. A PROPERTY check for a PURE function whose EXACT output can't be pinned (non-deterministic order, input-dependent) — use when io-assert can't. Invariants: sorted, permutation-of-input, length-preserved, unique, in-range:[min,max], input-unchanged (combine e.g. sorted+permutation-of-input for a real sort)",
   contains: '--needle <substring present only in an honest artifact> (brittle — rejects valid alternate phrasings; use only when a behavioural check is impossible)',
 }
 export function forgeCatalog(allowlist) {
