@@ -18,7 +18,11 @@ import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { selectPatchForFiles } from './test-patch.mjs'
+import { fileOfNode } from './split.mjs'
+
+// SWE-bench images keep pytest in a conda env (named `testbed`), not on the base PATH; activate it before
+// the run. Overridable per instance (instance.setup) for non-SWE-bench layouts.
+const DEFAULT_SETUP = 'source /opt/miniconda3/bin/activate testbed'
 
 // SWE-bench TestStatus keywords pytest -rA summary lines start with (constants/__init__.py).
 const TEST_STATUS = ['FAILED', 'PASSED', 'SKIPPED', 'ERROR', 'XFAIL']
@@ -51,9 +55,10 @@ export function toResultsMap(statusMap) {
 // base_commit, apply the editor's CODE patch (skipped on the first pass when there's no diff yet), apply
 // the arm's TEST files, then run test_cmds. `git apply` is whitespace-tolerant; collection errors are
 // surfaced (test_cmds carries --continue-on-collection-errors) rather than aborting the run.
-export function buildContainerScript({ repoDir = '/testbed', baseCommit, codePatch, testPatch, testCmds }) {
+export function buildContainerScript({ repoDir = '/testbed', baseCommit, codePatch, testPatch, testCmds, setup = DEFAULT_SETUP }) {
   const lines = [
     'set -o pipefail',
+    setup, // activate the conda env so `pytest` resolves
     `cd ${repoDir}`,
     'git config --global --add safe.directory "*" 2>/dev/null || true',
     `git reset --hard ${baseCommit} >/dev/null 2>&1 && git clean -fdxq >/dev/null 2>&1 || true`,
@@ -62,6 +67,13 @@ export function buildContainerScript({ repoDir = '/testbed', baseCommit, codePat
   if (testPatch) lines.push(`git apply --whitespace=nowarn ${testPatch} || patch -p1 < ${testPatch}`)
   lines.push(testCmds)
   return lines.join('\n')
+}
+
+// Which test files to RUN: the arm's applied F2P test files UNION the PASS_TO_PASS test files. Scoping
+// `pytest` to these (instead of the whole repo suite) is a big speed win and still runs every graded node
+// — P2P regressions live in P2P files, F2P nodes in the applied files. De-duped, stable order.
+export function runFileSet(applyFiles = [], passToPass = []) {
+  return [...new Set([...applyFiles, ...passToPass.map(fileOfNode)])]
 }
 
 // Capture the editor's full change vs base_commit — incl. new/deleted files — without disturbing the
@@ -79,13 +91,20 @@ export function editorCodePatch(treeDir, baseCommit) {
 export function dockerRun({ instance, treeDir, testFiles }) {
   const work = mkdtempSync(join(tmpdir(), 'swe-run-'))
   const codePatch = editorCodePatch(treeDir, instance.baseCommit)
-  const testPatch = selectPatchForFiles(instance.testPatch || '', testFiles || [])
+  // Design B: the EPHEMERAL container applies the FULL gold test_patch — F2P and P2P routinely share a
+  // parametrized test file, so a per-arm slice would strip the gold test code a P2P node needs and forge a
+  // false regression. Source isolation is enforced at the EDITOR's tree (base only, no gold tests), not
+  // here. `testFiles` now only SCOPES the run (which files pytest executes), it does not gate the apply.
+  const testPatch = instance.testPatch || ''
   let codeArg = null
   let testArg = null
   if (codePatch) { writeFileSync(join(work, 'code.patch'), codePatch); codeArg = '/whetstone/code.patch' }
   if (testPatch) { writeFileSync(join(work, 'test.patch'), testPatch); testArg = '/whetstone/test.patch' }
-  const script = buildContainerScript({ repoDir: instance.repoDir || '/testbed', baseCommit: instance.baseCommit, codePatch: codeArg, testPatch: testArg, testCmds: instance.testCmds })
-  const res = spawnSync('docker', ['run', '--rm', '--network', 'none', '-v', `${work}:/whetstone:ro`, instance.image, 'bash', '-c', script], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 })
+  // scope the run to the arm's test files + the P2P files (regression), not the whole repo suite
+  const runFiles = runFileSet(testFiles || [], instance.passToPass || [])
+  const testCmds = runFiles.length ? `${instance.testCmds} ${runFiles.join(' ')}` : instance.testCmds
+  const script = buildContainerScript({ repoDir: instance.repoDir || '/testbed', baseCommit: instance.baseCommit, codePatch: codeArg, testPatch: testArg, testCmds, setup: instance.setup })
+  const res = spawnSync('docker', ['run', '--rm', '--platform', 'linux/amd64', '--network', 'none', '-v', `${work}:/whetstone:ro`, instance.image, 'bash', '-c', script], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 })
   if (res.error) throw new Error(`docker run failed to start: ${res.error.message}`)
   const log = `${res.stdout || ''}${res.stderr || ''}`
   const map = toResultsMap(parseLogPytest(log))

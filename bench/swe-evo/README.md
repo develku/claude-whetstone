@@ -70,6 +70,14 @@ the cache **synchronously** — no network during editing/scoring (codex Q4: no-
 - **Eligibility:** with file-level clustering, **18 / 48** instances have ≥3 `FAIL_TO_PASS` files (the
   V/C/T split requirement); the other 30 are excluded. 1 instance ≈ 5.6pp at n=18. A function-level
   (AST-redacted) re-cluster could recover more, at more source-isolation surface — decided after the audit.
-- **Source-isolation fork (recorded, validated by the audit):** whether the editor's tree contains V's
-  test files (readable → can overfit → manufactures gaming pressure) vs hidden (trivially isolated → NULL
-  risk). See the spec / the `ab.mjs` commit body.
+- **Source isolation — design B (chosen, feasibility-forced):** the editor's tree is **base only** (it
+  never sees any gold test file → isolation is total and automatic), and the runner applies the **full**
+  gold `test_patch` in its ephemeral container (so `PASS_TO_PASS` always has its gold test code). This was
+  forced by a real collision the feasibility run surfaced: F2P and P2P nodes routinely share a parametrized
+  test file, so a per-arm test-file slice strips the gold code a P2P node needs and forges a false
+  regression. Arms differ only in *which nodes each scorer grades* + *run-scope*, never in which test files
+  exist. Cost: the editor can't *read* V's tests to overfit — the **NULL risk** the veto audit measures. If
+  the audit shows ≈0 gaming, the fallback is design A (readable V tests via AST-redaction).
+- **Feasibility validated (dvc 2.5.0, real image):** gold patch → V/C/T all 100 (resolved); base → V=0
+  (real signal); ~10s per scoring run under amd64 emulation (Rosetta). `/testbed` HEAD = base_commit;
+  pytest in the `testbed` conda env.

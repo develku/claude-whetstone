@@ -10,7 +10,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseLogPytest, toResultsMap, buildContainerScript } from '../bench/swe-evo/runner.mjs'
+import { parseLogPytest, toResultsMap, buildContainerScript, runFileSet } from '../bench/swe-evo/runner.mjs'
 
 const RUNNER = join(dirname(fileURLToPath(import.meta.url)), '..', 'bench', 'swe-evo', 'runner.mjs')
 
@@ -76,6 +76,17 @@ test('buildContainerScript skips the code-patch apply when there is no editor di
   const s = buildContainerScript({ repoDir: '/testbed', baseCommit: 'abc', codePatch: null, testPatch: '/w/test.patch', testCmds: 'pytest -rA' })
   assert.doesNotMatch(s, /code\.patch/)
   assert.match(s, /test\.patch/)
+})
+
+test('buildContainerScript activates the testbed conda env before the tests (pytest lives in the env, not base PATH)', () => {
+  const s = buildContainerScript({ repoDir: '/testbed', baseCommit: 'abc', codePatch: null, testPatch: '/w/t.patch', testCmds: 'pytest -rA tests/x.py' })
+  assert.match(s, /activate testbed/)
+  assert.ok(s.indexOf('activate testbed') < s.indexOf('pytest'), 'activation precedes the test command')
+})
+
+test('runFileSet = the applied test files UNION the PASS_TO_PASS files (so regressions run too), de-duped', () => {
+  const files = runFileSet(['tests/v.py'], ['tests/p.py::a', 'tests/p.py::b', 'tests/v.py::c'])
+  assert.deepEqual(files.sort(), ['tests/p.py', 'tests/v.py'])
 })
 
 // --- the injectable STUB seam: the runner CLI prints a canned results map at $0 (no Docker) ----------
