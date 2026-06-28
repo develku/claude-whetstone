@@ -6,9 +6,14 @@
 // The manifest is the META-GATE: operator-authored, lives OUTSIDE --scope, never model-editable. Every
 // unsafe shape is REFUSED at start (exit 2), never silently coerced — the gate's integrity starts here.
 import { readFileSync } from 'node:fs'
-import { resolve, relative, dirname, join, normalize, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { resolve, dirname, join, sep } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { isUnsafeScorer } from './scorer-safety.mjs'
+// Path/footprint helpers live in a leaf module so converge / converge-cli / converge-state do not import
+// each other in a cycle (which would deadlock the CLI entry's top-level await). Re-exported here so existing
+// consumers/tests can keep importing them from converge-cli.
+import { pathsIntersect, scriptTokens, isJudgeClass, globalReadOnly } from './converge-shared.mjs'
+export { pathsIntersect, isJudgeClass, globalReadOnly } from './converge-shared.mjs'
 
 const SCORERS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'scorers')
 // A command-executing scorer (composite/floor: its contract is "run my --cmd/--scorers argument" via a
@@ -16,63 +21,6 @@ const SCORERS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'scor
 // into it would reach a shell. Same denylist + shared canonicalization as scope-cli/the Forge.
 const SUBGATE_UNSAFE = new Set(['composite', 'floor'])
 const SUBGATE_UNSAFE_PATHS = [join(SCORERS_DIR, 'composite.mjs'), join(SCORERS_DIR, 'floor.mjs')]
-
-// --- path helpers (canonical repo-relative; the `base + sep` boundary kills the src/a vs src/app trap) ---
-
-function canonRel(p) {
-  let s = normalize(String(p).trim()).replace(/\/+$/, '')
-  if (s.startsWith('./')) s = s.slice(2)
-  return s === '.' ? '' : s
-}
-
-// Two repo-relative paths intersect iff equal, or one is an ancestor DIRECTORY of the other. '' (the repo
-// root) intersects everything. Ancestry uses the trailing separator so 'src/a' does NOT contain 'src/app'.
-export function pathsIntersect(a, b) {
-  const x = canonRel(a)
-  const y = canonRel(b)
-  if (x === '' || y === '') return true
-  if (x === y) return true
-  return x.startsWith(y + '/') || y.startsWith(x + '/')
-}
-
-// Script-like tokens of a scorer command (operator-authored, space-separated).
-function scriptTokens(cmd) {
-  return String(cmd ?? '').split(/\s+/).filter((t) => /\.(mjs|cjs|js|ts)$/.test(t))
-}
-
-// Project-LOCAL scorer scripts: script tokens that resolve INSIDE --scope (relative to the scope, where the
-// scorer runs). These must be read-only or the editor could game its own scorer by editing the script. An
-// absolute whetstone scorer (outside scope) is NOT model-reachable and is not added.
-function scorerScriptPaths(cmd, scope) {
-  const base = resolve(scope)
-  const out = []
-  for (const t of scriptTokens(cmd)) {
-    const abs = resolve(base, t)
-    if (abs === base || abs.startsWith(base + sep)) out.push(relative(base, abs))
-  }
-  return out
-}
-
-// A judge-class objective is operator-flagged OR has a scorer/confirm that resolves to llm-judge.
-export function isJudgeClass(o) {
-  if (o.judgeClass === true) return true
-  return /llm-judge/.test(`${o.scorer ?? ''} ${o.confirmScorer ?? ''}`)
-}
-
-// The union read-only set: every objective's own readOnly, the floor's declared footprint, and every
-// project-local scorer/confirm SCRIPT. The denylist enforced (by the orchestrator) AFTER the editScope
-// allowlist — so a footprint file inside an editScope is still reverted. manifestEditScopeReadOnlyCollision
-// additionally forces these OUT of every editScope.
-export function globalReadOnly(manifest, scope) {
-  const set = new Set()
-  for (const ro of manifest?.floor?.readOnly ?? []) set.add(canonRel(ro))
-  for (const o of manifest?.objectives ?? []) {
-    for (const ro of o.readOnly ?? []) set.add(canonRel(ro))
-    for (const s of scorerScriptPaths(o.scorer ?? '', scope)) set.add(canonRel(s))
-    if (o.confirmScorer) for (const s of scorerScriptPaths(o.confirmScorer, scope)) set.add(canonRel(s))
-  }
-  return [...set].filter(Boolean)
-}
 
 // --- structural validation (absorbs convergeNeedsFloor + convergeObjectivesNeedEditScope as required fields) ---
 
@@ -249,5 +197,49 @@ export function parseConvergeCli(argv, defaults = {}) {
     noEscalate: argv.includes('--no-escalate'),
     mcpConfig: get('--mcp-config', defaults.mcpConfig ?? null),
     resume: argv.includes('--resume'),
+  }
+}
+
+// --- CLI entry. Dynamic imports of converge.mjs / scope-cli.mjs / driver.mjs keep this file's TOP-LEVEL
+// imports cycle-free (converge.mjs statically imports THIS module). The per-objective child IS the
+// unmodified scope loop: runFromConfig(childCfg, scopeDeps(childCfg)) — the same seam decompose uses.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const argv = process.argv
+  const cfg = parseConvergeCli(argv)
+  if (!cfg.scope || !cfg.objectivesPath) {
+    process.stderr.write('usage: converge-cli.mjs --scope <repo dir> --objectives <manifest.json OUTSIDE the scope> [--converge-dir <dir>] [--global-budget-tokens N | --global-budget X] [--global-cap 20] [--global-stability-runs 2] [--objective-retries 1] [--model sonnet] [--effort medium] [--no-escalate] [--mcp-config <path>]\n  resume: converge-cli.mjs --scope <dir> --objectives <manifest> --converge-dir <existing run dir> --resume\n')
+    process.exit(2)
+  }
+  const { cleanTreeGuard, scopeDeps } = await import('./scope-cli.mjs')
+  const { runFromConfig } = await import('./driver.mjs')
+  const { runConverge, prepareGlobalResume } = await import('./converge.mjs')
+
+  const guard = cleanTreeGuard(cfg.scope)
+  if (!guard.ok) {
+    process.stderr.write(`refusing to start: ${guard.reason}\n`)
+    process.exit(2)
+  }
+  // The objectives manifest is the meta-gate; it must live OUTSIDE the scope (checked here AND by the
+  // refusal suite) so the editor cannot rewrite it.
+  const runChild = (childCfg) => runFromConfig(childCfg, scopeDeps(childCfg))
+
+  try {
+    let result
+    if (cfg.resume) {
+      result = await prepareGlobalResume(cfg, { runChild })
+    } else {
+      const manifest = loadManifest(cfg.objectivesPath)
+      const reason = convergeRefusal({ scope: cfg.scope, objectivesPath: cfg.objectivesPath, manifest })
+      if (reason) {
+        process.stderr.write(`refusing to start: ${reason}\n`)
+        process.exit(2)
+      }
+      result = await runConverge(cfg, manifest, { runChild })
+    }
+    process.stdout.write(`\n${result.verdict.reason}\n`)
+    process.exit(result.verdict.status === 'done' ? 0 : 1)
+  } catch (e) {
+    process.stderr.write(`${e.message}\n`)
+    process.exit(2)
   }
 }

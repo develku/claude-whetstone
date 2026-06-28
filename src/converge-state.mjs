@@ -8,7 +8,7 @@ import { writeFileSync, readFileSync, renameSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { isoNow } from './state.mjs'
 import { redactSecrets } from './redact.mjs'
-import { isJudgeClass } from './converge-cli.mjs'
+import { isJudgeClass } from './converge-shared.mjs'
 
 // The honesty constant: Track C proves the DECLARED objective set is met, NEVER that the set is SUFFICIENT
 // for the repo goal (that is Track A). Hard-coded here so NO code path can flip it (the gate cannot

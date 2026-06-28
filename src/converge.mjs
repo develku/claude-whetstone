@@ -13,9 +13,9 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gitMaterialize, gitCleanup, gitHead, isSha } from './git-snapshot.mjs'
-import { pathsIntersect, globalReadOnly } from './converge-cli.mjs'
+import { pathsIntersect, globalReadOnly } from './converge-shared.mjs'
 import { objectiveScore, objectiveMet, globalVerdict, globalRegressed } from './converge-gate.mjs'
-import { initConvergeState, ensureConvergeDir, saveConvergeState, globalBudgetExhausted } from './converge-state.mjs'
+import { initConvergeState, ensureConvergeDir, saveConvergeState, loadConvergeState, globalBudgetExhausted } from './converge-state.mjs'
 import { shq } from './shq.mjs'
 
 const git = (dir, args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim()
@@ -293,21 +293,21 @@ function finalize(state, verdict) {
   state.global_reason = verdict.reason
 }
 
-// runConverge: the sequential global convergence loop. CODE owns decompose-target (pickNextObjective), the
-// measured stop (globalVerdict), budget (globalBudgetExhausted + pre-launch reservation), keep-best
-// (advance/rollback the last-good anchor), and the honesty boundary (objectives_sufficiency stays
-// 'unproven'). deps.runChild is the per-objective loop (runFromConfig + scopeDeps) — injected so the whole
-// orchestrator is $0-testable with a stub child that makes git commits.
+// runConverge: a FRESH global convergence run. CODE owns decompose-target (pickNextObjective), the measured
+// stop (globalVerdict), budget (globalBudgetExhausted + pre-launch reservation), keep-best (advance/rollback
+// the last-good anchor), and the honesty boundary (objectives_sufficiency stays 'unproven'). deps.runChild is
+// the per-objective loop (runFromConfig + scopeDeps) — injected so the whole orchestrator is $0-testable with
+// a stub child that makes git commits.
 export async function runConverge(cfg, manifest, deps = {}) {
   const scopeDir = resolve(cfg.scope)
-  const log = deps.log ?? (() => {})
   const reMeasure = deps.reMeasure ?? reMeasureAll
-  const runChild = deps.runChild
-  if (typeof runChild !== 'function') throw new Error('runConverge requires deps.runChild (the per-objective loop)')
+  if (typeof deps.runChild !== 'function') throw new Error('runConverge requires deps.runChild (the per-objective loop)')
 
   const state = initConvergeState(cfg, manifest)
   ensureConvergeDir(cfg.convergeDir)
-  const globalRO = globalReadOnly(manifest, scopeDir)
+  // globalReadOnly reads the same shape from `state` as from the manifest (initConvergeState copies
+  // floor.readOnly + each objective's readOnly/scorer/confirmScorer), so resume can reconstruct it identically.
+  const globalRO = globalReadOnly(state, scopeDir)
 
   // The current branch IS the gc-safe last-good anchor: children run in isolated worktrees, so a child's
   // reset --hard never moves it. Baseline-measure the starting tree before any edit.
@@ -318,13 +318,54 @@ export async function runConverge(cfg, manifest, deps = {}) {
     const v = { status: 'blocked', reason: `deterministic floor failed at baseline (${state.floor.cmd}) — fix the repo before converging` }
     finalize(state, v)
     saveConvergeState(cfg.convergeDir, state)
-    log({ cycle: 0, ...v })
+    ;(deps.log ?? (() => {}))({ cycle: 0, ...v })
     return { state, verdict: v }
   }
   applyFloor(state, baseline.floor)
   applyVector(state, baseline.vector, state.last_good_sha)
   pushBinding(state)
   saveConvergeState(cfg.convergeDir, state)
+  return convergeLoop(state, cfg, scopeDir, globalRO, deps)
+}
+
+// resumeConverge: continue a crashed/paused run from converge-state.json — the durable-control-plane half.
+// HARD-RESET the tree to last_good_sha UNCONDITIONALLY (a committed-but-unrecorded HEAD>last_good is
+// indistinguishable from a killed-mid-revert gate-tampered tree, so unrecorded == discard+redo), then
+// RE-DERIVE met by re-measuring the SHA (the recorded vector is evidence, not authority). Refuse if the
+// budget is already spent.
+export async function prepareGlobalResume(cfg, deps = {}) {
+  const scopeDir = resolve(cfg.scope)
+  const reMeasure = deps.reMeasure ?? reMeasureAll
+  if (typeof deps.runChild !== 'function') throw new Error('prepareGlobalResume requires deps.runChild')
+  const state = loadConvergeState(cfg.convergeDir)
+  if (!isSha(state.last_good_sha)) throw new Error(`cannot resume: corrupt last_good_sha (${state.last_good_sha})`)
+
+  rollbackToLastGood(scopeDir, state.last_good_sha) // discard ALL of HEAD>last_good
+  const rm = reMeasure(scopeDir, state.last_good_sha, state.objectives, state.floor)
+  if (rm.blocked) {
+    applyFloor(state, rm.floor)
+    const v = { status: 'blocked', reason: `deterministic floor fails at last-good on resume (${state.floor.cmd})` }
+    finalize(state, v)
+    saveConvergeState(cfg.convergeDir, state)
+    return { state, verdict: v }
+  }
+  applyFloor(state, rm.floor)
+  applyVector(state, rm.vector, state.last_good_sha) // re-derive met from the SHA; recorded vector untrusted
+  const over = globalBudgetExhausted(state)
+  if (over) throw new Error(`cannot resume: ${over} — raise the global budget above what was already spent`)
+  state.inflight = null
+  state.global_status = 'running'
+  state.global_reason = null
+  const globalRO = globalReadOnly(state, scopeDir)
+  return convergeLoop(state, cfg, scopeDir, globalRO, deps)
+}
+
+// The shared loop body for a fresh run and a resume. Both arrive with `state` already baseline-measured and
+// last_good_sha set; this owns only the convergence iteration.
+async function convergeLoop(state, cfg, scopeDir, globalRO, deps = {}) {
+  const log = deps.log ?? (() => {})
+  const reMeasure = deps.reMeasure ?? reMeasureAll
+  const runChild = deps.runChild
 
   let v = globalVerdict(state)
   log({ cycle: state.cycle, status: v.status, reason: v.reason })
