@@ -10,10 +10,12 @@
 // converge-parallel.mjs reuses the IDENTICAL gate path (the report's highest-risk integration seam): the
 // sequential candidate-producer is the only B-replaceable part.
 import { execFileSync, spawnSync } from 'node:child_process'
-import { resolve, dirname } from 'node:path'
+import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gitMaterialize, gitCleanup, gitHead, isSha } from './git-snapshot.mjs'
-import { pathsIntersect } from './converge-cli.mjs'
+import { pathsIntersect, globalReadOnly } from './converge-cli.mjs'
+import { objectiveScore, objectiveMet, globalVerdict, globalRegressed } from './converge-gate.mjs'
+import { initConvergeState, ensureConvergeDir, saveConvergeState, globalBudgetExhausted } from './converge-state.mjs'
 import { shq } from './shq.mjs'
 
 const git = (dir, args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim()
@@ -144,4 +146,259 @@ export function reMeasureAll(scopeDir, candidateSha, objectives, floor, deps = {
     }
   })
   return { floor: floorRes, vector, blocked: false }
+}
+
+// --- the ORCHESTRATOR loop (runConverge) and its helpers ---
+
+// The documented per-pass token floor (act-claude's ~150K context-reload tax) — the pre-launch reservation
+// uses it so an objective that cannot afford one pass is not launched (it would overshoot, report §6-a).
+const ONE_PASS_TOKENS = 150_000
+
+// Highest-priority UNMET, non-skipped objective; ties broken by manifest order (stable).
+export function pickNextObjective(state) {
+  const live = state.objectives.filter((o) => o.status === 'unmet')
+  if (!live.length) return null
+  return live.reduce((best, o) => (o.priority > best.priority ? o : best), live[0])
+}
+
+// Each objective's fair share of the REMAINING pool, denominator = objectives still with budget (a starved
+// objective's share is reclaimed by siblings). null pool dial => unbounded on that dial.
+export function objectiveBudgetSlice(state) {
+  const live = Math.max(1, state.objectives.filter((o) => o.status === 'unmet').length)
+  const remUsd = state.global_budget_usd == null ? null : Math.max(0, state.global_budget_usd - state.spent_usd)
+  const remTok = state.global_budget_tokens == null ? null : Math.max(0, state.global_budget_tokens - (state.spent_tokens ?? 0))
+  return { usd: remUsd == null ? null : remUsd / live, tokens: remTok == null ? null : Math.floor(remTok / live) }
+}
+
+// Pre-launch reservation: refuse to launch when the slice cannot fund one expected pass (not merely <=0).
+export function canAffordObjective(state) {
+  const s = objectiveBudgetSlice(state)
+  if (s.tokens != null && s.tokens < ONE_PASS_TOKENS) return false
+  if (s.tokens == null && s.usd != null && s.usd <= 0) return false
+  return true
+}
+
+const valid = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 100
+
+function applyFloor(state, floorRes) {
+  state.floor = { ...state.floor, last_score: floorRes.score, last_replicas: floorRes.replicas ?? null }
+}
+
+// Stamp the re-measured vector onto the objective records and recompute met/status (met uses the held-out
+// confirm for a judge, the primary for a deterministic — objectiveMet owns that choice).
+function applyVector(state, vector, atSha) {
+  for (const o of state.objectives) {
+    const v = vector.find((x) => x.id === o.id)
+    if (!v) continue
+    o.primaryScore = v.primaryScore
+    o.confirmScore = v.confirmScore
+    o.last_critique = v.critique
+    o.met = objectiveMet(o)
+    o.status = o.met ? 'met' : 'unmet'
+    if (o.met) o.met_at_sha = atSha
+    const sc = objectiveScore(o)
+    if (valid(sc) && (o.best_confirm == null || sc > o.best_confirm)) o.best_confirm = sc
+  }
+}
+
+// Did the candidate regress vs the pre-integration vector? Reuses the tested globalRegressed by feeding it
+// the NEW scores + each objective's PRIOR met flag and PRIOR score as pre_integration_score.
+function regressionCheck(preObjectives, rmVector, floorScore, minDelta) {
+  const objs = preObjectives.map((pre) => {
+    const v = rmVector?.find((x) => x.id === pre.id) ?? {}
+    return {
+      id: pre.id,
+      target: pre.target,
+      judgeClass: pre.judgeClass,
+      primaryScore: v.primaryScore ?? null,
+      confirmScore: v.confirmScore ?? null,
+      met: pre.met,
+      pre_integration_score: objectiveScore(pre),
+    }
+  })
+  return globalRegressed(objs, floorScore, minDelta)
+}
+
+// The binding (worst-unmet) score this cycle, for the global plateau signal; 100 when all met.
+function pushBinding(state) {
+  const unmet = state.objectives.filter((o) => !objectiveMet(o))
+  const binding = unmet.length ? Math.min(...unmet.map((o) => objectiveScore(o)).filter(valid)) : 100
+  state.binding_history = [...state.binding_history, Number.isFinite(binding) ? binding : 0]
+}
+
+function chargeSpend(state, obj, spentUsd, spentTokens) {
+  state.spent_usd += spentUsd
+  state.spent_tokens = (state.spent_tokens ?? 0) + spentTokens
+  obj.spent_usd += spentUsd
+  obj.spent_tokens += spentTokens
+  obj.lifetime_spent_usd += spentUsd
+  obj.lifetime_spent_tokens += spentTokens
+}
+
+function bumpRetryOrSkip(state, obj) {
+  obj.retries += 1
+  if (obj.retries > state.objective_retries) obj.status = 'skipped'
+}
+
+const advanceLastGood = (scopeDir, candidateSha) => {
+  git(scopeDir, ['reset', '--hard', candidateSha])
+  git(scopeDir, ['clean', '-fdq'])
+  return candidateSha
+}
+const rollbackToLastGood = (scopeDir, lastGoodSha) => {
+  git(scopeDir, ['reset', '--hard', lastGoodSha])
+  git(scopeDir, ['clean', '-fdq'])
+}
+
+function buildObjectiveCfg(obj, state, cfg, wt, globalRO, slice) {
+  return {
+    goal: obj.goal,
+    scope: wt,
+    artifactPath: wt,
+    scorerCmd: obj.scorer,
+    confirmScorerCmd: obj.confirmScorer ?? null,
+    editScope: obj.editScope,
+    readOnly: globalRO,
+    targetScore: obj.target,
+    hardCap: obj.cap ?? 4,
+    budgetUsd: slice.usd,
+    budgetTokens: slice.tokens,
+    model: cfg.model,
+    effort: cfg.effort,
+    escalateModel: cfg.escalateModel,
+    noEscalate: cfg.noEscalate ?? true, // a converge child is already an objective unit; no second opus escalation inside
+    mcpConfig: cfg.mcpConfig,
+    loopDir: join(cfg.convergeDir, 'children', `${obj.id}-${state.cycle}`),
+  }
+}
+
+// The done-edge STABILITY gate (DCA refinement #6, the concrete "stable"): re-run the FULL vector + floor at
+// last-good (global_stability_runs total readings); done stands only if EVERY reading keeps all objectives
+// met and the floor passing. A flaky deterministic-labelled scorer that spiked to target once does not certify.
+function stabilityHolds(scopeDir, state, reMeasure) {
+  for (let i = 1; i < (state.global_stability_runs ?? 1); i++) {
+    const rm = reMeasure(scopeDir, state.last_good_sha, state.objectives, state.floor)
+    if (rm.blocked) return false
+    for (const o of state.objectives) {
+      const v = rm.vector.find((x) => x.id === o.id)
+      const probe = { ...o, primaryScore: v?.primaryScore ?? null, confirmScore: v?.confirmScore ?? null }
+      if (!objectiveMet(probe)) return false
+    }
+  }
+  return true
+}
+
+function finalize(state, verdict) {
+  state.global_status = verdict.status
+  state.global_reason = verdict.reason
+}
+
+// runConverge: the sequential global convergence loop. CODE owns decompose-target (pickNextObjective), the
+// measured stop (globalVerdict), budget (globalBudgetExhausted + pre-launch reservation), keep-best
+// (advance/rollback the last-good anchor), and the honesty boundary (objectives_sufficiency stays
+// 'unproven'). deps.runChild is the per-objective loop (runFromConfig + scopeDeps) — injected so the whole
+// orchestrator is $0-testable with a stub child that makes git commits.
+export async function runConverge(cfg, manifest, deps = {}) {
+  const scopeDir = resolve(cfg.scope)
+  const log = deps.log ?? (() => {})
+  const reMeasure = deps.reMeasure ?? reMeasureAll
+  const runChild = deps.runChild
+  if (typeof runChild !== 'function') throw new Error('runConverge requires deps.runChild (the per-objective loop)')
+
+  const state = initConvergeState(cfg, manifest)
+  ensureConvergeDir(cfg.convergeDir)
+  const globalRO = globalReadOnly(manifest, scopeDir)
+
+  // The current branch IS the gc-safe last-good anchor: children run in isolated worktrees, so a child's
+  // reset --hard never moves it. Baseline-measure the starting tree before any edit.
+  state.last_good_sha = gitHead(scopeDir)
+  const baseline = reMeasure(scopeDir, state.last_good_sha, state.objectives, state.floor)
+  if (baseline.blocked) {
+    applyFloor(state, baseline.floor)
+    const v = { status: 'blocked', reason: `deterministic floor failed at baseline (${state.floor.cmd}) — fix the repo before converging` }
+    finalize(state, v)
+    saveConvergeState(cfg.convergeDir, state)
+    log({ cycle: 0, ...v })
+    return { state, verdict: v }
+  }
+  applyFloor(state, baseline.floor)
+  applyVector(state, baseline.vector, state.last_good_sha)
+  pushBinding(state)
+  saveConvergeState(cfg.convergeDir, state)
+
+  let v = globalVerdict(state)
+  log({ cycle: state.cycle, status: v.status, reason: v.reason })
+
+  while (v.status === 'running') {
+    const over = globalBudgetExhausted(state)
+    if (over) { v = { status: 'capped', reason: over }; break }
+    if (!canAffordObjective(state)) { v = { status: 'capped', reason: 'global budget cannot fund another objective pass' }; break }
+    const obj = pickNextObjective(state)
+    if (!obj) { v = { status: 'capped', reason: 'no further objective can be attempted (unmet objectives exhausted their retries)' }; break }
+
+    state.global_pass += 1
+    state.cycle += 1
+    state.inflight = { objectiveId: obj.id, child_loop_dir: join(cfg.convergeDir, 'children', `${obj.id}-${state.cycle}`) }
+    saveConvergeState(cfg.convergeDir, state)
+
+    const slice = objectiveBudgetSlice(state)
+    const wt = gitMaterialize(scopeDir, state.last_good_sha)
+    let integ
+    let spentUsd = 0
+    let spentTokens = 0
+    try {
+      const cs = await runChild(buildObjectiveCfg(obj, state, cfg, wt, globalRO, slice))
+      spentUsd = cs?.state?.spent_usd ?? cs?.spent_usd ?? 0
+      spentTokens = cs?.state?.spent_tokens ?? cs?.spent_tokens ?? 0
+      const childHead = gitHead(wt)
+      integ = squashIntegrate(scopeDir, state.last_good_sha, childHead, (p) => editScopeAllowed(p, obj.editScope, globalRO), obj.id)
+    } finally {
+      gitCleanup(scopeDir, wt)
+    }
+    chargeSpend(state, obj, spentUsd, spentTokens) // tokens burned regardless of accept/rollback
+    state.inflight = null
+
+    if (!integ.advanced) {
+      state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: state.last_good_sha, candidate_sha: null, accepted: false, reason: 'no in-scope change', spent_tokens: spentTokens }]
+      bumpRetryOrSkip(state, obj)
+      pushBinding(state)
+      saveConvergeState(cfg.convergeDir, state)
+      v = globalVerdict(state)
+      log({ cycle: state.cycle, objective: obj.id, status: v.status, reason: 'no in-scope change' })
+      continue
+    }
+
+    const candidateSha = integ.sha
+    const pre = state.objectives.map((o) => ({ ...o }))
+    const rm = reMeasure(scopeDir, candidateSha, state.objectives, state.floor)
+    const regressed = rm.blocked || regressionCheck(pre, rm.vector, rm.floor.score, state.min_delta)
+
+    if (regressed) {
+      rollbackToLastGood(scopeDir, state.last_good_sha)
+      state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: state.last_good_sha, candidate_sha: candidateSha, accepted: false, rolledBack: true, floor_score: rm.floor.score, spent_tokens: spentTokens }]
+      bumpRetryOrSkip(state, obj)
+      log({ cycle: state.cycle, objective: obj.id, status: 'rolled-back', reason: rm.blocked ? 'floor failed' : 'cross-file regression' })
+    } else {
+      state.last_good_sha = advanceLastGood(scopeDir, candidateSha)
+      applyFloor(state, rm.floor)
+      applyVector(state, rm.vector, state.last_good_sha)
+      state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: pre.length ? state.last_good_sha : null, candidate_sha: candidateSha, accepted: true, floor_score: rm.floor.score, spent_tokens: spentTokens }]
+      log({ cycle: state.cycle, objective: obj.id, status: 'integrated', reason: `score ${objectiveScore(state.objectives.find((o) => o.id === obj.id))}` })
+    }
+    pushBinding(state)
+    saveConvergeState(cfg.convergeDir, state)
+    v = globalVerdict(state)
+  }
+
+  // done-edge stability: certify the win is reproducible (the concrete "stable") before declaring done.
+  if (v.status === 'done' && (state.global_stability_runs ?? 1) > 1) {
+    if (!stabilityHolds(scopeDir, state, reMeasure)) {
+      v = { status: 'capped', reason: 'global stability re-measure unstable — the win did not reproduce over the done-edge re-measure' }
+    }
+  }
+
+  finalize(state, v)
+  saveConvergeState(cfg.convergeDir, state)
+  log({ cycle: state.cycle, status: v.status, reason: v.reason })
+  return { state, verdict: v }
 }
