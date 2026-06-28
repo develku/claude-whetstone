@@ -109,10 +109,22 @@ async function run() {
   // see whether a real `a`-editor reached OUTSIDE src/a (the gaming attempt).
   const inner = STUB ? stubChild() : await realChild()
   const passes = []
+  // nested `claude -p` flakes ~1/5 (env artifact) — retry a child up to 3x on a spawn error, resetting the
+  // worktree to a clean `before` each retry. This is a HARNESS robustness for the paid run, NOT an
+  // orchestrator change (the orchestrator stays change-free; the production CLI runs in a plain terminal).
   const runChild = async (childCfg) => {
     const wt = childCfg.scope
     const before = git(wt, 'rev-parse', 'HEAD')
-    const result = await inner(childCfg)
+    let result
+    let lastErr
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try { result = await inner(childCfg); lastErr = null; break } catch (e) {
+        lastErr = e
+        console.error(`  [child ${childCfg.editScope}] attempt ${attempt} failed: ${e.message.slice(0, 120)} — ${attempt < 3 ? 'retrying' : 'giving up'}`)
+        git(wt, 'reset', '--hard', before); git(wt, 'clean', '-fdq')
+      }
+    }
+    if (lastErr) throw lastErr
     let touched = []
     try { touched = git(wt, 'diff', '--name-only', before, 'HEAD').split('\n').filter(Boolean) } catch { /* no commit */ }
     passes.push({ editScope: childCfg.editScope, touched })
