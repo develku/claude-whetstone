@@ -50,6 +50,28 @@ function diffNameStatus(scopeDir, fromSha, toSha) {
   })
 }
 
+// A child's editScope-allowed and reverted changed paths off last-good (the selective-squash filter).
+// `allowed` keeps {status,path} (applyAllowedChanges needs the status to choose rm vs checkout); `reverted`
+// is the dropped paths (out-of-scope or gate files). Single-sourced so the single-child squashIntegrate and
+// the Track-B N-way squashIntegrateBatch make the IDENTICAL allow/deny decision.
+export function childAllowedChanges(scopeDir, lastGoodSha, childHeadSha, isAllowed) {
+  const changed = diffNameStatus(scopeDir, lastGoodSha, childHeadSha)
+  return {
+    allowed: changed.filter((c) => isAllowed(c.path)),
+    reverted: changed.filter((c) => !isAllowed(c.path)).map((c) => c.path),
+  }
+}
+
+// Apply one child's allowed changed paths into an ALREADY-materialized worktree (no commit). A delete is an
+// `rm`; any other status is a `checkout` of that path from the child's HEAD. Disjoint editScopes make N
+// children's applies non-interfering — squashIntegrateBatch applies many into one worktree, then commits once.
+export function applyAllowedChanges(wt, childHeadSha, allowed) {
+  for (const c of allowed) {
+    if (c.status === 'D') git(wt, ['rm', '-q', '--', c.path])
+    else git(wt, ['checkout', childHeadSha, '--', c.path])
+  }
+}
+
 // Reduce a child's net tree (lastGoodSha -> childHeadSha) to EXACTLY ONE squash commit on lastGoodSha,
 // carrying ONLY the paths isAllowed() admits (editScope-positive; gate files excluded). The candidate's
 // PARENT is lastGoodSha by construction (codex: parent-equality is stronger than merely-descendant). A
@@ -58,16 +80,11 @@ function diffNameStatus(scopeDir, fromSha, toSha) {
 // untouched until the gate accepts the candidate.
 export function squashIntegrate(scopeDir, lastGoodSha, childHeadSha, isAllowed, label = 'integrate') {
   if (!isSha(lastGoodSha) || !isSha(childHeadSha)) throw new Error('squashIntegrate requires commit SHAs')
-  const changed = diffNameStatus(scopeDir, lastGoodSha, childHeadSha)
-  const allowed = changed.filter((c) => isAllowed(c.path))
-  const reverted = changed.filter((c) => !isAllowed(c.path)).map((c) => c.path)
+  const { allowed, reverted } = childAllowedChanges(scopeDir, lastGoodSha, childHeadSha, isAllowed)
   if (!allowed.length) return { advanced: false, sha: lastGoodSha, reverted, integrated: [] }
   const wt = gitMaterialize(scopeDir, lastGoodSha)
   try {
-    for (const c of allowed) {
-      if (c.status === 'D') git(wt, ['rm', '-q', '--', c.path])
-      else git(wt, ['checkout', childHeadSha, '--', c.path])
-    }
+    applyAllowedChanges(wt, childHeadSha, allowed)
     git(wt, ['add', '-A'])
     git(wt, ['commit', '--quiet', '-m', `whetstone-converge: ${label}`])
     return { advanced: true, sha: gitHead(wt), reverted, integrated: allowed.map((c) => c.path) }
