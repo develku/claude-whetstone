@@ -3,7 +3,9 @@ title: Track B — Concurrent Fan-out Under the Durable Code-Owned Gate (design 
 date: 2026-06-28
 status: design — awaiting operator review before implementation
 provenance:
-  design_workflow: wf_5af4e8bc-a44 (6 lenses + 3 adversarial refuters; synthesis agent degraded → hardened by the driver with full context)
+  design_workflow: wf_5af4e8bc-a44 (6 lenses + 3 adversarial refuters incl. empirical git stress-tests; synthesis agent degraded → hardened by the driver with full context)
+  cross_model_dca: SKIPPED — codex timed out twice (killed, then 300s with zero completed events). Adversarial coverage rests on the 3 in-workflow refuters; the cross-MODEL blind-spot check is honestly absent and flagged here.
+  spec_correction: the v0 "parallel-accept ⊆ sequential-accept" tightening clause was found redundant (a net-positive batch masking an isolated drop is NOT caught by drop-vs-last-good, and is an OPTIMALITY residual, not a safety hole — the merged candidate is non-regressing vs last-good, and a met objective below target IS caught by regressionCheck). batchRegressed is therefore the IDENTICAL regressionCheck on the merged candidate; the masking residual is disclosed (§10).
   builds_on: Track C (docs/superpowers/specs/2026-06-28-track-c-global-convergence-design.md), HEAD c16c5f8
 ---
 

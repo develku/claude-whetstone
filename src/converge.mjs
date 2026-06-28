@@ -217,8 +217,10 @@ function applyVector(state, vector, atSha) {
 }
 
 // Did the candidate regress vs the pre-integration vector? Reuses the tested globalRegressed by feeding it
-// the NEW scores + each objective's PRIOR met flag and PRIOR score as pre_integration_score.
-function regressionCheck(preObjectives, rmVector, floorScore, minDelta) {
+// the NEW scores + each objective's PRIOR met flag and PRIOR score as pre_integration_score. Exported so the
+// parallel path (converge-parallel.mjs) judges the MERGED candidate with the IDENTICAL predicate — literal
+// gate reuse, no fork.
+export function regressionCheck(preObjectives, rmVector, floorScore, minDelta) {
   const objs = preObjectives.map((pre) => {
     const v = rmVector?.find((x) => x.id === pre.id) ?? {}
     return {
