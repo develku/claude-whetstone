@@ -64,6 +64,7 @@ export function initConvergeState(cfg, manifest) {
       lifetime_spent_usd: 0,
       lifetime_spent_tokens: 0,
       retries: 0,
+      attempts: 0, // times this objective has been picked — pickNextObjective round-robins on the minimum
     })),
     global_budget_usd: cfg.globalBudgetUsd ?? null,
     global_budget_tokens: cfg.globalBudgetTokens ?? null,

@@ -92,6 +92,35 @@ test('runConverge drives two objectives to done and leaves both at target on the
   }
 })
 
+test('runConverge round-robins so a sibling is not starved when one objective depends on another', async () => {
+  // objective a is scored on MIN(a/val, b/val) -> it cannot progress until b runs. A naive "always pick the
+  // highest-priority unmet" would loop on a forever (plateau); round-robin gives b its turn, b raises b/val,
+  // and the next full-vector re-measure lifts a to met for free.
+  const sc = writeScorer()
+  const scoreMin = mkdtempSync(join(tmpdir(), 'whet-min-'))
+  const minPath = join(scoreMin, 'min.mjs')
+  writeFileSync(minPath, "import { readFileSync } from 'node:fs'\nconst r = (f) => { try { return Number(readFileSync(f, 'utf8').trim()) } catch { return 0 } }\nprocess.stdout.write(JSON.stringify({ score: Math.min(r('a/val.txt'), r('b/val.txt')), critique: 'raise the min of a and b' }))\n")
+  const scope = tempRepo({ 'a/val.txt': '0', 'b/val.txt': '0' })
+  try {
+    const manifest = {
+      goal: 'raise a, which is gated on b',
+      floor: { cmd: 'true' },
+      global_budget_tokens: 100_000_000,
+      objective_cap: 4,
+      objectives: [
+        { id: 'a', goal: 'raise a (scored on min of a and b)', scorer: `node ${minPath}`, target: 90, editScope: 'a', priority: 1 },
+        { id: 'b', goal: 'raise b', scorer: `node ${sc.path} b/val.txt`, target: 90, editScope: 'b', priority: 0 },
+      ],
+    }
+    const child = makeStubChild({ a: { 'a/val.txt': 100 }, b: { 'b/val.txt': 100 } })
+    const { state, verdict } = await runConverge(baseCfg(scope, sc.dir), manifest, { runChild: child, log: () => {} })
+    assert.equal(verdict.status, 'done') // converged despite a depending on b (b was NOT starved)
+    assert.ok(state.objectives.every((o) => o.met))
+  } finally {
+    rmSync(scope, { recursive: true, force: true }); rmSync(sc.dir, { recursive: true, force: true }); rmSync(scoreMin, { recursive: true, force: true })
+  }
+})
+
 test('runConverge ROLLS BACK a cross-file regression: an in-scope edit that breaks a sibling is reverted', async () => {
   const sc = writeScorer()
   // objective A depends on b/api.txt (a real cross-file dependency); B owns the whole b/ scope.

@@ -160,11 +160,20 @@ export function reMeasureAll(scopeDir, candidateSha, objectives, floor, deps = {
 // uses it so an objective that cannot afford one pass is not launched (it would overshoot, report §6-a).
 const ONE_PASS_TOKENS = 150_000
 
-// Highest-priority UNMET, non-skipped objective; ties broken by manifest order (stable).
+// The next UNMET, non-skipped objective to attempt. ROUND-ROBIN by attempt count first (the least-attempted
+// objective gets the turn) so a sibling cannot be starved — critical when one objective's score is gated on
+// another's file (a cannot progress until b runs; without fairness a would be picked forever). Ties: higher
+// priority, then stable manifest order.
 export function pickNextObjective(state) {
   const live = state.objectives.filter((o) => o.status === 'unmet')
   if (!live.length) return null
-  return live.reduce((best, o) => (o.priority > best.priority ? o : best), live[0])
+  return live.reduce((best, o) => {
+    const ao = o.attempts ?? 0
+    const ab = best.attempts ?? 0
+    if (ao !== ab) return ao < ab ? o : best
+    if ((o.priority ?? 0) !== (best.priority ?? 0)) return (o.priority ?? 0) > (best.priority ?? 0) ? o : best
+    return best
+  }, live[0])
 }
 
 // Each objective's fair share of the REMAINING pool, denominator = objectives still with budget (a starved
@@ -393,6 +402,7 @@ async function convergeLoop(state, cfg, scopeDir, globalRO, deps = {}) {
     if (!canAffordObjective(state)) { v = { status: 'capped', reason: 'global budget cannot fund another objective pass' }; break }
     const obj = pickNextObjective(state)
     if (!obj) { v = { status: 'capped', reason: 'no further objective can be attempted (unmet objectives exhausted their retries)' }; break }
+    obj.attempts = (obj.attempts ?? 0) + 1 // round-robin fairness signal (pickNextObjective reads it)
 
     state.global_pass += 1
     state.cycle += 1
