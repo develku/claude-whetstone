@@ -5,7 +5,7 @@
 //
 // The manifest is the META-GATE: operator-authored, lives OUTSIDE --scope, never model-editable. Every
 // unsafe shape is REFUSED at start (exit 2), never silently coerced — the gate's integrity starts here.
-import { readFileSync } from 'node:fs'
+import { readFileSync, openSync, writeSync, closeSync, unlinkSync, mkdirSync } from 'node:fs'
 import { resolve, dirname, join, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { isUnsafeScorer } from './scorer-safety.mjs'
@@ -213,7 +213,39 @@ export function parseConvergeCli(argv, defaults = {}) {
     noEscalate: argv.includes('--no-escalate'),
     mcpConfig: get('--mcp-config', defaults.mcpConfig ?? null),
     resume: argv.includes('--resume'),
+    // Track B: concurrent fan-out under the IDENTICAL gate. Sequential stays the DEFAULT; --parallel selects
+    // it. The gate path is the same across both backends (runConvergeParallel reuses the verbatim gate).
+    parallel: argv.includes('--parallel'),
+    maxParallel: num('--max-parallel', defaults.maxParallel ?? 2),
+    maxBatchRegressions: num('--max-batch-regressions', defaults.maxBatchRegressions ?? 2),
+    flakeCap: num('--flake-cap', defaults.flakeCap ?? 3),
   }
+}
+
+// A per-run ADVISORY lock (spec §5): two `whetstone-converge` invocations on the same convergeDir must REFUSE
+// rather than double-write the ledger. O_EXCL ('wx') is the atomic create-or-fail. A crashed run leaves a
+// STALE lock; rather than block resume forever, we read the recorded pid and STEAL the lock only when its
+// owner is dead (process.kill(pid,0) → ESRCH). A live owner → refuse. Returns a release() that unlinks it.
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' } // EPERM = alive, not ours
+}
+
+export function acquireRunLock(convergeDir) {
+  mkdirSync(convergeDir, { recursive: true })
+  const lockPath = join(convergeDir, 'converge.lock')
+  const claim = () => { const fd = openSync(lockPath, 'wx'); writeSync(fd, String(process.pid)); closeSync(fd) }
+  try {
+    claim()
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e
+    let owner = null
+    try { owner = Number(readFileSync(lockPath, 'utf8').trim()) } catch { /* unreadable -> treat as stale */ }
+    if (pidAlive(owner)) throw new Error(`another converge run holds ${lockPath} (pid ${owner}) — refusing to double-write this scope`)
+    try { unlinkSync(lockPath) } catch { /* raced away */ }
+    claim()
+  }
+  return () => { try { unlinkSync(lockPath) } catch { /* already gone */ } }
 }
 
 // --- CLI entry. Dynamic imports of converge.mjs / scope-cli.mjs / driver.mjs keep this file's TOP-LEVEL
@@ -223,12 +255,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const argv = process.argv
   const cfg = parseConvergeCli(argv)
   if (!cfg.scope || !cfg.objectivesPath) {
-    process.stderr.write('usage: converge-cli.mjs --scope <repo dir> --objectives <manifest.json OUTSIDE the scope> [--converge-dir <dir>] [--global-budget-tokens N | --global-budget X] [--global-cap 20] [--global-stability-runs 2] [--objective-retries 1] [--model sonnet] [--effort medium] [--no-escalate] [--mcp-config <path>]\n  resume: converge-cli.mjs --scope <dir> --objectives <manifest> --converge-dir <existing run dir> --resume\n')
+    process.stderr.write('usage: converge-cli.mjs --scope <repo dir> --objectives <manifest.json OUTSIDE the scope> [--converge-dir <dir>] [--global-budget-tokens N | --global-budget X] [--global-cap 20] [--global-stability-runs 2] [--objective-retries 1] [--parallel [--max-parallel 2] [--max-batch-regressions 2] [--flake-cap 3]] [--model sonnet] [--effort medium] [--no-escalate] [--mcp-config <path>]\n  resume: converge-cli.mjs --scope <dir> --objectives <manifest> --converge-dir <existing run dir> --resume [--parallel]\n')
     process.exit(2)
   }
   const { cleanTreeGuard, scopeDeps } = await import('./scope-cli.mjs')
   const { runFromConfig } = await import('./driver.mjs')
   const { runConverge, prepareGlobalResume } = await import('./converge.mjs')
+  // The parallel backend lives in converge-parallel.mjs; loaded only when --parallel selects it (the gate path
+  // is identical — runConvergeParallel reuses the verbatim reMeasureAll/globalVerdict).
+  const { runConvergeParallel, prepareGlobalResumeParallel } = await import('./converge-parallel.mjs')
 
   const guard = cleanTreeGuard(cfg.scope)
   if (!guard.ok) {
@@ -239,23 +274,41 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // refusal suite) so the editor cannot rewrite it.
   const runChild = (childCfg) => runFromConfig(childCfg, scopeDeps(childCfg))
 
+  // A FRESH run validates the manifest BEFORE taking the lock (refuse fast, no lock churn); a resume reads the
+  // ledger instead. Then a per-run advisory lock guards the convergeDir against a concurrent second invocation.
+  let manifest = null
+  if (!cfg.resume) {
+    manifest = loadManifest(cfg.objectivesPath)
+    const reason = convergeRefusal({ scope: cfg.scope, objectivesPath: cfg.objectivesPath, manifest })
+    if (reason) {
+      process.stderr.write(`refusing to start: ${reason}\n`)
+      process.exit(2)
+    }
+  }
+
+  let release
+  try {
+    release = acquireRunLock(cfg.convergeDir)
+  } catch (e) {
+    process.stderr.write(`refusing to start: ${e.message}\n`)
+    process.exit(2)
+  }
+
+  let code = 2
   try {
     let result
     if (cfg.resume) {
-      result = await prepareGlobalResume(cfg, { runChild })
+      result = cfg.parallel ? await prepareGlobalResumeParallel(cfg, { runChild }) : await prepareGlobalResume(cfg, { runChild })
     } else {
-      const manifest = loadManifest(cfg.objectivesPath)
-      const reason = convergeRefusal({ scope: cfg.scope, objectivesPath: cfg.objectivesPath, manifest })
-      if (reason) {
-        process.stderr.write(`refusing to start: ${reason}\n`)
-        process.exit(2)
-      }
-      result = await runConverge(cfg, manifest, { runChild })
+      result = cfg.parallel ? await runConvergeParallel(cfg, manifest, { runChild }) : await runConverge(cfg, manifest, { runChild })
     }
     process.stdout.write(`\n${result.verdict.reason}\n`)
-    process.exit(result.verdict.status === 'done' ? 0 : 1)
+    code = result.verdict.status === 'done' ? 0 : 1
   } catch (e) {
     process.stderr.write(`${e.message}\n`)
-    process.exit(2)
+    code = 2
+  } finally {
+    release() // process.exit() skips finally of the caller, so release BEFORE exiting
   }
+  process.exit(code)
 }
