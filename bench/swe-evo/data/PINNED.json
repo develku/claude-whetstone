@@ -1,0 +1,8 @@
+{
+  "datasetId": "Fsoft-AIC/SWE-EVO",
+  "config": "default",
+  "split": "test",
+  "sha": "77310c70d3648d6815f6a7555ecc492bc28c44ec",
+  "count": 48,
+  "fetchedAt": "2026-06-28T02:44:28.022Z"
+}
