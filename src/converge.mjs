@@ -10,12 +10,13 @@
 // converge-parallel.mjs reuses the IDENTICAL gate path (the report's highest-risk integration seam): the
 // sequential candidate-producer is the only B-replaceable part.
 import { execFileSync, spawnSync } from 'node:child_process'
-import { resolve, dirname, join } from 'node:path'
+import { rmSync } from 'node:fs'
+import { resolve, dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gitMaterialize, gitCleanup, gitHead, isSha } from './git-snapshot.mjs'
 import { pathsIntersect, globalReadOnly } from './converge-shared.mjs'
 import { objectiveScore, objectiveMet, globalVerdict, globalRegressed } from './converge-gate.mjs'
-import { initConvergeState, ensureConvergeDir, saveConvergeState, loadConvergeState, globalBudgetExhausted, LAST_GOOD_REF } from './converge-state.mjs'
+import { initConvergeState, ensureConvergeDir, saveConvergeState, loadConvergeState, globalBudgetExhausted, inflightList, LAST_GOOD_REF } from './converge-state.mjs'
 import { shq } from './shq.mjs'
 
 const git = (dir, args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim()
@@ -386,22 +387,56 @@ export async function runConverge(cfg, manifest, deps = {}) {
 // indistinguishable from a killed-mid-revert gate-tampered tree, so unrecorded == discard+redo), then
 // RE-DERIVE met by re-measuring the SHA (the recorded vector is evidence, not authority). Refuse if the
 // budget is already spent.
-export async function prepareGlobalResume(cfg, deps = {}) {
-  const scopeDir = resolve(cfg.scope)
+// The shared resume recipe (single-sourced like setupConvergeRun): load the ledger, HARD-RESET to last_good
+// UNCONDITIONALLY (a committed-but-unrecorded HEAD>last_good is indistinguishable from a killed-mid-revert
+// gate-tampered tree, so unrecorded == discard+redo), reclaim crashed children, RE-DERIVE met by re-measuring
+// the SHA (recorded vector is evidence, not authority), and refuse if the (biased-up) budget is already spent.
+// Returns { state, globalRO, blockedVerdict }; throws on a budget refusal. Track B inc 5 adds the inflight-SET
+// crash recovery. Used by BOTH prepareGlobalResume (sequential) and prepareGlobalResumeParallel.
+export function prepareResumeState(cfg, scopeDir, deps = {}) {
   const reMeasure = deps.reMeasure ?? reMeasureAll
-  if (typeof deps.runChild !== 'function') throw new Error('prepareGlobalResume requires deps.runChild')
   const state = loadConvergeState(cfg.convergeDir)
   if (!isSha(state.last_good_sha)) throw new Error(`cannot resume: corrupt last_good_sha (${state.last_good_sha})`)
 
   rollbackToLastGood(scopeDir, state.last_good_sha) // discard ALL of HEAD>last_good
   git(scopeDir, ['branch', '-f', LAST_GOOD_REF, state.last_good_sha]) // re-pin the durable named anchor
+
+  // Crash recovery (Track B inc 5): a run killed MID-BATCH left an inflight SET whose children's ACTUAL spend
+  // was never charged (the round crashed before its accounting tail). Reclaim leaked worktree admin entries,
+  // clean each recorded child tmp dir, and conservatively charge each child's RESERVED tokens to spent
+  // (bias UP) so the budget re-check below never under-counts. The inflight SET's PRESENCE is the
+  // crash/complete discriminator: a completed round cleared inflight AND charged its actual spend, so there is
+  // NO double-count here. inflightList tolerates a singleton (sequential, no reservation → charge 0) or a SET.
+  try { git(scopeDir, ['worktree', 'prune']) } catch { /* best-effort admin reclaim */ }
+  const convergeRoot = resolve(cfg.convergeDir)
+  for (const entry of inflightList(state)) {
+    // CONTAIN the destructive recursive rmSync to convergeDir — childTmpDir is read from the (gitignored,
+    // but still on-disk) state file, so a garbage/tampered path must never delete outside the run dir. Same
+    // trust-boundary discipline as isSha guarding reset/worktree on real SHAs.
+    const dir = entry.childTmpDir ?? entry.child_loop_dir
+    if (dir) {
+      const abs = resolve(dir)
+      if (abs === convergeRoot || abs.startsWith(convergeRoot + sep)) { try { rmSync(abs, { recursive: true, force: true }) } catch { /* may already be gone */ } }
+    }
+    // bias UP: charge the reservation to the GLOBAL pool ALWAYS (never under-count the budget), plus the
+    // per-objective ledger when the objective still exists (a manifest edited between crash and resume may
+    // have dropped or renamed it; the global pool charge must not be lost in that case).
+    const reserved = entry.reservedTokens ?? 0
+    if (reserved > 0) {
+      state.spent_tokens = (state.spent_tokens ?? 0) + reserved
+      const obj = state.objectives.find((o) => o.id === entry.objectiveId)
+      if (obj) { obj.spent_tokens += reserved; obj.lifetime_spent_tokens += reserved }
+    }
+  }
+  state.reserved_tokens = 0 // the in-flight reservation is now resolved into spent (bias up)
+
   const rm = reMeasure(scopeDir, state.last_good_sha, state.objectives, state.floor)
   if (rm.blocked) {
     applyFloor(state, rm.floor)
-    const v = { status: 'blocked', reason: `deterministic floor fails at last-good on resume (${state.floor.cmd})` }
-    finalize(state, v)
+    const blockedVerdict = { status: 'blocked', reason: `deterministic floor fails at last-good on resume (${state.floor.cmd})` }
+    finalize(state, blockedVerdict)
     saveConvergeState(cfg.convergeDir, state)
-    return { state, verdict: v }
+    return { state, globalRO: globalReadOnly(state, scopeDir), blockedVerdict }
   }
   applyFloor(state, rm.floor)
   applyVector(state, rm.vector, state.last_good_sha) // re-derive met from the SHA; recorded vector untrusted
@@ -410,7 +445,14 @@ export async function prepareGlobalResume(cfg, deps = {}) {
   state.inflight = null
   state.global_status = 'running'
   state.global_reason = null
-  const globalRO = globalReadOnly(state, scopeDir)
+  return { state, globalRO: globalReadOnly(state, scopeDir), blockedVerdict: null }
+}
+
+export async function prepareGlobalResume(cfg, deps = {}) {
+  const scopeDir = resolve(cfg.scope)
+  if (typeof deps.runChild !== 'function') throw new Error('prepareGlobalResume requires deps.runChild')
+  const { state, globalRO, blockedVerdict } = prepareResumeState(cfg, scopeDir, deps)
+  if (blockedVerdict) return { state, verdict: blockedVerdict }
   return convergeLoop(state, cfg, scopeDir, globalRO, deps)
 }
 

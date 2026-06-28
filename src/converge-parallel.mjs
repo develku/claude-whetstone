@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process'
 import { resolve, join } from 'node:path'
 import {
   ONE_PASS_TOKENS, regressionCheck, childAllowedChanges, applyAllowedChanges, editScopeAllowed,
-  reMeasureAll, runOneObjective, setupConvergeRun, buildObjectiveCfg, objectiveBudgetSlice,
+  reMeasureAll, runOneObjective, setupConvergeRun, prepareResumeState, buildObjectiveCfg, objectiveBudgetSlice,
   canAffordObjective, pickNextObjective, chargeSpend, bumpRetryOrSkip, pushBinding, applyFloor, applyVector,
   advanceLastGood, rollbackToLastGood, stabilityHolds, CANDIDATE_REF, delRef,
 } from './converge.mjs'
@@ -373,6 +373,18 @@ export async function runConvergeParallel(cfg, manifest, deps = {}) {
   const scopeDir = resolve(cfg.scope)
   if (typeof deps.runChild !== 'function') throw new Error('runConvergeParallel requires deps.runChild (the per-objective loop)')
   const { state, globalRO, blockedVerdict } = setupConvergeRun(cfg, manifest, scopeDir, deps)
+  if (blockedVerdict) return { state, verdict: blockedVerdict }
+  return convergeLoopParallel(state, cfg, scopeDir, globalRO, deps)
+}
+
+// Resume a crashed/paused PARALLEL run. Reuses the IDENTICAL crash-recovery recipe (prepareResumeState:
+// hard-reset to last-good, reclaim the inflight SET's worktrees + tmp dirs, bias-up charge crashed children's
+// reserved tokens, re-derive met, re-check budget) then continues in PARALLEL. last_good_sha advances ONLY on
+// a fully-gated merged accept, so the hard-reset can never lose a gated win.
+export async function prepareGlobalResumeParallel(cfg, deps = {}) {
+  const scopeDir = resolve(cfg.scope)
+  if (typeof deps.runChild !== 'function') throw new Error('prepareGlobalResumeParallel requires deps.runChild')
+  const { state, globalRO, blockedVerdict } = prepareResumeState(cfg, scopeDir, deps)
   if (blockedVerdict) return { state, verdict: blockedVerdict }
   return convergeLoopParallel(state, cfg, scopeDir, globalRO, deps)
 }

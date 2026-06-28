@@ -107,6 +107,16 @@ export function saveConvergeState(dir, state) {
   renameSync(tmp, convergeStatePath(dir))
 }
 
+// inflight is a SINGLETON for a sequential run (runOneObjective) and a SET for a parallel batch round. This
+// shape-tolerant reader lets BOTH resume through the same path: a Track-C singleton object, a Track-B array,
+// or null all normalize to an array (Track B inc 5). The sequential write sites are unchanged (they keep
+// writing singletons); only the reader is tolerant.
+export function inflightList(state) {
+  const f = state?.inflight
+  if (f == null) return []
+  return Array.isArray(f) ? f : [f]
+}
+
 // The global budget is enforced by the orchestrator (not the gate), mirroring loop.mjs's overBudgetVerdict.
 // Returns a reason when cumulative spend has exceeded the pool, else null.
 export function globalBudgetExhausted(state) {
