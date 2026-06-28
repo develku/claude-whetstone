@@ -65,6 +65,36 @@ the cache **synchronously** — no network during editing/scoring (codex Q4: no-
    spend 4×N.
 4. **Pilot** (~5 × 4 arms) → **full** (~N × 4 arms) with the official `evaluate_instance.py` cross-check.
 
+## Running the paid A/B (from a plain terminal)
+
+Launch from a normal shell, **not** nested inside another Claude Code session — nested `claude -p`
+intermittently exits non-zero (~1 in 5), a session/env artifact. `run-ab.mjs` retries an arm up to 3×
+on that transient error, but a terminal avoids it entirely and has no 10-min wrapper cap.
+
+```bash
+# 0. one-time: dataset cache + pull the images you'll touch (amd64, ~1-3GB each)
+node bench/swe-evo/dataset.mjs --fetch
+node bench/swe-evo/dataset.mjs --list                 # the 18 eligible instances
+
+# 1. veto-opportunity AUDIT (the firebreak) — baseline-only on ~5 instances
+node bench/swe-evo/run-ab.mjs --audit \
+  --instances <id1>,<id2>,<id3>,<id4>,<id5> \
+  --cap 15 --budget-tokens 2000000 --model sonnet \
+  --out .loop/swe-evo-work/audit.jsonl
+#   -> reports P(C or T fail | V pass). If ≈0  => UNDERPOWERED, do NOT run the full matrix.
+
+# 2. only if the audit shows real V-pass/(C|T)-fail cases: the full 4-arm A/B
+node bench/swe-evo/run-ab.mjs --run --cap 15 --budget-tokens 2000000 --model sonnet \
+  --out .loop/swe-evo-work/full.jsonl
+
+# 3. the headline
+node bench/swe-evo/report.mjs .loop/swe-evo-work/full.jsonl
+```
+
+Per-instance images must be pulled first (`docker pull --platform linux/amd64 <image>`); the run uses
+`--network none` for test execution and assumes the image is local. Rough cost: a scoring run ≈10s
+(emulated); an arm is `cap`×(editor + ~10s); the full matrix is 18 inst × 4 arms.
+
 ## Findings
 
 - **Eligibility:** with file-level clustering, **18 / 48** instances have ≥3 `FAIL_TO_PASS` files (the
