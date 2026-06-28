@@ -158,7 +158,7 @@ export function reMeasureAll(scopeDir, candidateSha, objectives, floor, deps = {
 
 // The documented per-pass token floor (act-claude's ~150K context-reload tax) — the pre-launch reservation
 // uses it so an objective that cannot afford one pass is not launched (it would overshoot, report §6-a).
-const ONE_PASS_TOKENS = 150_000
+export const ONE_PASS_TOKENS = 150_000
 
 // The next UNMET, non-skipped objective to attempt. ROUND-ROBIN by attempt count first (the least-attempted
 // objective gets the turn) so a sibling cannot be starved — critical when one objective's score is gated on
@@ -244,7 +244,7 @@ function pushBinding(state) {
   state.binding_history = [...state.binding_history, Number.isFinite(binding) ? binding : 0]
 }
 
-function chargeSpend(state, obj, spentUsd, spentTokens) {
+export function chargeSpend(state, obj, spentUsd, spentTokens) {
   state.spent_usd += spentUsd
   state.spent_tokens = (state.spent_tokens ?? 0) + spentTokens
   obj.spent_usd += spentUsd
@@ -386,12 +386,81 @@ export async function prepareGlobalResume(cfg, deps = {}) {
   return convergeLoop(state, cfg, scopeDir, globalRO, deps)
 }
 
-// The shared loop body for a fresh run and a resume. Both arrive with `state` already baseline-measured and
-// last_good_sha set; this owns only the convergence iteration.
-async function convergeLoop(state, cfg, scopeDir, globalRO, deps = {}) {
+// runOneObjective: the per-objective GATE STEP — materialize a worktree off last-good, run the child editor,
+// selectively integrate its editScope-allowed edits, strictly re-measure the candidate, and ACCEPT (advance
+// the anchor) or ROLLBACK. Mutates `state` in place and RETURNS the post-step global verdict. This is the
+// SINGLE-SOURCED gate path: convergeLoop's sequential loop AND Track B's sequential fallback both call it, so
+// a parallel run can never be less-gated than sequential. Extracted verbatim from the loop body (no behavior
+// change — the 691 tests are the proof). The caller owns budget guards + pickNextObjective + the attempts bump.
+export async function runOneObjective(state, cfg, scopeDir, globalRO, obj, deps = {}) {
   const log = deps.log ?? (() => {})
   const reMeasure = deps.reMeasure ?? reMeasureAll
   const runChild = deps.runChild
+
+  state.global_pass += 1
+  state.cycle += 1
+  state.inflight = { objectiveId: obj.id, child_loop_dir: join(cfg.convergeDir, 'children', `${obj.id}-${state.cycle}`) }
+  saveConvergeState(cfg.convergeDir, state)
+
+  const slice = objectiveBudgetSlice(state)
+  const wt = gitMaterialize(scopeDir, state.last_good_sha)
+  let integ
+  let spentUsd = 0
+  let spentTokens = 0
+  try {
+    const cs = await runChild(buildObjectiveCfg(obj, state, cfg, wt, globalRO, slice))
+    spentUsd = cs?.state?.spent_usd ?? cs?.spent_usd ?? 0
+    spentTokens = cs?.state?.spent_tokens ?? cs?.spent_tokens ?? 0
+    const childHead = gitHead(wt)
+    integ = squashIntegrate(scopeDir, state.last_good_sha, childHead, (p) => editScopeAllowed(p, obj.editScope, globalRO), obj.id)
+  } finally {
+    gitCleanup(scopeDir, wt)
+  }
+  chargeSpend(state, obj, spentUsd, spentTokens) // tokens burned regardless of accept/rollback
+  state.inflight = null
+
+  if (!integ.advanced) {
+    state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: state.last_good_sha, candidate_sha: null, accepted: false, reason: 'no in-scope change', spent_tokens: spentTokens }]
+    bumpRetryOrSkip(state, obj)
+    pushBinding(state)
+    saveConvergeState(cfg.convergeDir, state)
+    const v = globalVerdict(state)
+    log({ cycle: state.cycle, objective: obj.id, status: v.status, reason: 'no in-scope change' })
+    return v
+  }
+
+  const candidateSha = integ.sha
+  git(scopeDir, ['branch', '-f', CANDIDATE_REF, candidateSha]) // pin against gc while re-measuring (M4)
+  const preAdvanceSha = state.last_good_sha // capture BEFORE the advance, for the round's pre_sha (H1)
+  const pre = state.objectives.map((o) => ({ ...o }))
+  const rm = reMeasure(scopeDir, candidateSha, state.objectives, state.floor)
+  const regressed = rm.blocked || regressionCheck(pre, rm.vector, rm.floor.score, state.min_delta)
+
+  if (regressed) {
+    rollbackToLastGood(scopeDir, state.last_good_sha)
+    delRef(scopeDir, CANDIDATE_REF) // discard the rejected candidate's pin
+    state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: preAdvanceSha, candidate_sha: candidateSha, accepted: false, rolledBack: true, floor_score: rm.floor.score, spent_tokens: spentTokens }]
+    bumpRetryOrSkip(state, obj)
+    log({ cycle: state.cycle, objective: obj.id, status: 'rolled-back', reason: rm.blocked ? 'floor failed' : 'cross-file regression' })
+  } else {
+    state.last_good_sha = advanceLastGood(scopeDir, candidateSha)
+    delRef(scopeDir, CANDIDATE_REF) // the named anchor now references it; drop the temp pin
+    applyFloor(state, rm.floor)
+    applyVector(state, rm.vector, state.last_good_sha)
+    state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: preAdvanceSha, candidate_sha: candidateSha, accepted: true, floor_score: rm.floor.score, spent_tokens: spentTokens }]
+    log({ cycle: state.cycle, objective: obj.id, status: 'integrated', reason: `score ${objectiveScore(state.objectives.find((o) => o.id === obj.id))}` })
+  }
+  pushBinding(state)
+  saveConvergeState(cfg.convergeDir, state)
+  return globalVerdict(state)
+}
+
+// The shared loop body for a fresh run and a resume. Both arrive with `state` already baseline-measured and
+// last_good_sha set; this owns only the convergence iteration (guards + objective selection); the per-
+// objective gate step is runOneObjective (single-sourced with Track B's fallback).
+async function convergeLoop(state, cfg, scopeDir, globalRO, deps = {}) {
+  const log = deps.log ?? (() => {})
+  const reMeasure = deps.reMeasure ?? reMeasureAll
 
   let v = globalVerdict(state)
   log({ cycle: state.cycle, status: v.status, reason: v.reason })
@@ -403,63 +472,7 @@ async function convergeLoop(state, cfg, scopeDir, globalRO, deps = {}) {
     const obj = pickNextObjective(state)
     if (!obj) { v = { status: 'capped', reason: 'no further objective can be attempted (unmet objectives exhausted their retries)' }; break }
     obj.attempts = (obj.attempts ?? 0) + 1 // round-robin fairness signal (pickNextObjective reads it)
-
-    state.global_pass += 1
-    state.cycle += 1
-    state.inflight = { objectiveId: obj.id, child_loop_dir: join(cfg.convergeDir, 'children', `${obj.id}-${state.cycle}`) }
-    saveConvergeState(cfg.convergeDir, state)
-
-    const slice = objectiveBudgetSlice(state)
-    const wt = gitMaterialize(scopeDir, state.last_good_sha)
-    let integ
-    let spentUsd = 0
-    let spentTokens = 0
-    try {
-      const cs = await runChild(buildObjectiveCfg(obj, state, cfg, wt, globalRO, slice))
-      spentUsd = cs?.state?.spent_usd ?? cs?.spent_usd ?? 0
-      spentTokens = cs?.state?.spent_tokens ?? cs?.spent_tokens ?? 0
-      const childHead = gitHead(wt)
-      integ = squashIntegrate(scopeDir, state.last_good_sha, childHead, (p) => editScopeAllowed(p, obj.editScope, globalRO), obj.id)
-    } finally {
-      gitCleanup(scopeDir, wt)
-    }
-    chargeSpend(state, obj, spentUsd, spentTokens) // tokens burned regardless of accept/rollback
-    state.inflight = null
-
-    if (!integ.advanced) {
-      state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: state.last_good_sha, candidate_sha: null, accepted: false, reason: 'no in-scope change', spent_tokens: spentTokens }]
-      bumpRetryOrSkip(state, obj)
-      pushBinding(state)
-      saveConvergeState(cfg.convergeDir, state)
-      v = globalVerdict(state)
-      log({ cycle: state.cycle, objective: obj.id, status: v.status, reason: 'no in-scope change' })
-      continue
-    }
-
-    const candidateSha = integ.sha
-    git(scopeDir, ['branch', '-f', CANDIDATE_REF, candidateSha]) // pin against gc while re-measuring (M4)
-    const preAdvanceSha = state.last_good_sha // capture BEFORE the advance, for the round's pre_sha (H1)
-    const pre = state.objectives.map((o) => ({ ...o }))
-    const rm = reMeasure(scopeDir, candidateSha, state.objectives, state.floor)
-    const regressed = rm.blocked || regressionCheck(pre, rm.vector, rm.floor.score, state.min_delta)
-
-    if (regressed) {
-      rollbackToLastGood(scopeDir, state.last_good_sha)
-      delRef(scopeDir, CANDIDATE_REF) // discard the rejected candidate's pin
-      state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: preAdvanceSha, candidate_sha: candidateSha, accepted: false, rolledBack: true, floor_score: rm.floor.score, spent_tokens: spentTokens }]
-      bumpRetryOrSkip(state, obj)
-      log({ cycle: state.cycle, objective: obj.id, status: 'rolled-back', reason: rm.blocked ? 'floor failed' : 'cross-file regression' })
-    } else {
-      state.last_good_sha = advanceLastGood(scopeDir, candidateSha)
-      delRef(scopeDir, CANDIDATE_REF) // the named anchor now references it; drop the temp pin
-      applyFloor(state, rm.floor)
-      applyVector(state, rm.vector, state.last_good_sha)
-      state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: preAdvanceSha, candidate_sha: candidateSha, accepted: true, floor_score: rm.floor.score, spent_tokens: spentTokens }]
-      log({ cycle: state.cycle, objective: obj.id, status: 'integrated', reason: `score ${objectiveScore(state.objectives.find((o) => o.id === obj.id))}` })
-    }
-    pushBinding(state)
-    saveConvergeState(cfg.convergeDir, state)
-    v = globalVerdict(state)
+    v = await runOneObjective(state, cfg, scopeDir, globalRO, obj, deps)
   }
 
   // done-edge stability: certify the win is reproducible (the concrete "stable") before declaring done.
