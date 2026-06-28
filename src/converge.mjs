@@ -23,8 +23,8 @@ const git = (dir, args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8
 // A throwaway ref that PINS the candidate commit against gc while it is being re-measured (before the gate
 // accepts/rejects it) — a candidate lives only as a worktree HEAD during squashIntegrate, then as a loose
 // object until the round resolves. Deleting it on accept/rollback keeps no permanent garbage ref.
-const CANDIDATE_REF = 'whetstone/converge-candidate'
-const delRef = (dir, ref) => { try { git(dir, ['branch', '-D', ref]) } catch { /* not present */ } }
+export const CANDIDATE_REF = 'whetstone/converge-candidate'
+export const delRef = (dir, ref) => { try { git(dir, ['branch', '-D', ref]) } catch { /* not present */ } }
 
 // Hard wall-clock cap on every re-measure child (mirrors driver's CHILD_TIMEOUT_MS) so a hung scorer/floor
 // can't wedge an unattended converge run.
@@ -212,13 +212,13 @@ export function canAffordObjective(state) {
 
 const valid = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 100
 
-function applyFloor(state, floorRes) {
+export function applyFloor(state, floorRes) {
   state.floor = { ...state.floor, last_score: floorRes.score, last_replicas: floorRes.replicas ?? null }
 }
 
 // Stamp the re-measured vector onto the objective records and recompute met/status (met uses the held-out
 // confirm for a judge, the primary for a deterministic — objectiveMet owns that choice).
-function applyVector(state, vector, atSha) {
+export function applyVector(state, vector, atSha) {
   for (const o of state.objectives) {
     const v = vector.find((x) => x.id === o.id)
     if (!v) continue
@@ -257,7 +257,7 @@ export function regressionCheck(preObjectives, rmVector, floorScore, minDelta) {
 // fallback (all unmet scores invalid -> Math.min of [] -> Infinity -> 0) is unreachable in practice: an
 // invalid objective score makes globalVerdict return 'error' and the loop exits before the next pushBinding,
 // so a plateau is never driven off a synthetic 0.
-function pushBinding(state) {
+export function pushBinding(state) {
   const unmet = state.objectives.filter((o) => !objectiveMet(o))
   const binding = unmet.length ? Math.min(...unmet.map((o) => objectiveScore(o)).filter(valid)) : 100
   state.binding_history = [...state.binding_history, Number.isFinite(binding) ? binding : 0]
@@ -272,7 +272,7 @@ export function chargeSpend(state, obj, spentUsd, spentTokens) {
   obj.lifetime_spent_tokens += spentTokens
 }
 
-function bumpRetryOrSkip(state, obj) {
+export function bumpRetryOrSkip(state, obj) {
   obj.retries += 1
   if (obj.retries > state.objective_retries) obj.status = 'skipped'
 }
@@ -280,18 +280,18 @@ function bumpRetryOrSkip(state, obj) {
 // Advance the anchor: fast-forward the working branch to the candidate AND move the durable gc-safe named
 // ref (whetstone/converge-last-good) so it is rev-parse-able on resume / for diagnostics (the named ref is
 // the spec's "gc-safe anchor"; the working branch is the operator's checkout, kept in sync).
-const advanceLastGood = (scopeDir, candidateSha) => {
+export const advanceLastGood = (scopeDir, candidateSha) => {
   git(scopeDir, ['reset', '--hard', candidateSha])
   git(scopeDir, ['clean', '-fdq'])
   git(scopeDir, ['branch', '-f', LAST_GOOD_REF, candidateSha])
   return candidateSha
 }
-const rollbackToLastGood = (scopeDir, lastGoodSha) => {
+export const rollbackToLastGood = (scopeDir, lastGoodSha) => {
   git(scopeDir, ['reset', '--hard', lastGoodSha])
   git(scopeDir, ['clean', '-fdq'])
 }
 
-function buildObjectiveCfg(obj, state, cfg, wt, globalRO, slice) {
+export function buildObjectiveCfg(obj, state, cfg, wt, globalRO, slice) {
   return {
     goal: obj.goal,
     scope: wt,
@@ -316,7 +316,7 @@ function buildObjectiveCfg(obj, state, cfg, wt, globalRO, slice) {
 // The done-edge STABILITY gate (DCA refinement #6, the concrete "stable"): re-run the FULL vector + floor at
 // last-good (global_stability_runs total readings); done stands only if EVERY reading keeps all objectives
 // met and the floor passing. A flaky deterministic-labelled scorer that spiked to target once does not certify.
-function stabilityHolds(scopeDir, state, reMeasure) {
+export function stabilityHolds(scopeDir, state, reMeasure) {
   for (let i = 1; i < (state.global_stability_runs ?? 1); i++) {
     const rm = reMeasure(scopeDir, state.last_good_sha, state.objectives, state.floor)
     if (rm.blocked) return false
@@ -339,11 +339,13 @@ function finalize(state, verdict) {
 // the last-good anchor), and the honesty boundary (objectives_sufficiency stays 'unproven'). deps.runChild is
 // the per-objective loop (runFromConfig + scopeDeps) — injected so the whole orchestrator is $0-testable with
 // a stub child that makes git commits.
-export async function runConverge(cfg, manifest, deps = {}) {
-  const scopeDir = resolve(cfg.scope)
+// The shared FRESH-run setup: init the ledger, create the gc-safe last-good anchor at the starting tree, and
+// baseline-measure before any edit. Returns the baseline-measured state + globalRO; blockedVerdict is non-null
+// iff the deterministic floor failed at baseline (the caller returns it). Single-sourced so the sequential
+// runConverge AND Track B's runConvergeParallel start from the IDENTICAL baseline (the gate-identity guarantee
+// extended to the run's entry, not just the per-candidate re-measure).
+export function setupConvergeRun(cfg, manifest, scopeDir, deps = {}) {
   const reMeasure = deps.reMeasure ?? reMeasureAll
-  if (typeof deps.runChild !== 'function') throw new Error('runConverge requires deps.runChild (the per-objective loop)')
-
   const state = initConvergeState(cfg, manifest)
   ensureConvergeDir(cfg.convergeDir)
   // globalReadOnly reads the same shape from `state` as from the manifest (initConvergeState copies
@@ -352,23 +354,30 @@ export async function runConverge(cfg, manifest, deps = {}) {
 
   // The last-good anchor: the operator's working branch tracks it, AND a durable named ref
   // (whetstone/converge-last-good) is maintained so it is rev-parse-able on resume / diagnostics. Both are
-  // safe because children run in ISOLATED worktrees — a child's reset --hard never moves either. Create the
-  // named ref at the starting tree, then baseline-measure before any edit.
+  // safe because children run in ISOLATED worktrees — a child's reset --hard never moves either.
   state.last_good_sha = gitHead(scopeDir)
   git(scopeDir, ['branch', '-f', LAST_GOOD_REF, state.last_good_sha])
   const baseline = reMeasure(scopeDir, state.last_good_sha, state.objectives, state.floor)
   if (baseline.blocked) {
     applyFloor(state, baseline.floor)
-    const v = { status: 'blocked', reason: `deterministic floor failed at baseline (${state.floor.cmd}) — fix the repo before converging` }
-    finalize(state, v)
+    const blockedVerdict = { status: 'blocked', reason: `deterministic floor failed at baseline (${state.floor.cmd}) — fix the repo before converging` }
+    finalize(state, blockedVerdict)
     saveConvergeState(cfg.convergeDir, state)
-    ;(deps.log ?? (() => {}))({ cycle: 0, ...v })
-    return { state, verdict: v }
+    ;(deps.log ?? (() => {}))({ cycle: 0, ...blockedVerdict })
+    return { state, globalRO, blockedVerdict }
   }
   applyFloor(state, baseline.floor)
   applyVector(state, baseline.vector, state.last_good_sha)
   pushBinding(state)
   saveConvergeState(cfg.convergeDir, state)
+  return { state, globalRO, blockedVerdict: null }
+}
+
+export async function runConverge(cfg, manifest, deps = {}) {
+  const scopeDir = resolve(cfg.scope)
+  if (typeof deps.runChild !== 'function') throw new Error('runConverge requires deps.runChild (the per-objective loop)')
+  const { state, globalRO, blockedVerdict } = setupConvergeRun(cfg, manifest, scopeDir, deps)
+  if (blockedVerdict) return { state, verdict: blockedVerdict }
   return convergeLoop(state, cfg, scopeDir, globalRO, deps)
 }
 

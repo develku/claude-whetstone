@@ -5,10 +5,22 @@
 // merge (squashIntegrateBatch) and the worktree-admin mutex (withWorktreeLock); the orchestration round lands
 // in inc 4. Imports the squash apply primitives + ONE_PASS_TOKENS + regressionCheck from converge.mjs (no fork).
 import { execFileSync } from 'node:child_process'
-import { ONE_PASS_TOKENS, regressionCheck, childAllowedChanges, applyAllowedChanges, editScopeAllowed } from './converge.mjs'
+import { resolve, join } from 'node:path'
+import {
+  ONE_PASS_TOKENS, regressionCheck, childAllowedChanges, applyAllowedChanges, editScopeAllowed,
+  reMeasureAll, runOneObjective, setupConvergeRun, buildObjectiveCfg, objectiveBudgetSlice,
+  canAffordObjective, pickNextObjective, chargeSpend, bumpRetryOrSkip, pushBinding, applyFloor, applyVector,
+  advanceLastGood, rollbackToLastGood, stabilityHolds, CANDIDATE_REF, delRef,
+} from './converge.mjs'
+import { globalVerdict } from './converge-gate.mjs'
+import { globalBudgetExhausted, saveConvergeState } from './converge-state.mjs'
 import { gitMaterialize, gitCleanup, gitHead, isSha } from './git-snapshot.mjs'
 
 const git = (dir, args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim()
+
+// Hard wall-clock cap on a fan-out child (mirrors converge.mjs's re-measure timeout) so a hung nested
+// claude -p can't wedge the barrier (Promise.allSettled alone awaits a hung child forever, §3.5/§5 finding #6).
+const CHILD_TIMEOUT_MS = 5 * 60 * 1000
 
 // The next batch: the K least-attempted unmet objectives, sorted by pickNextObjective's EXACT comparator
 // (attempts asc → priority desc → stable manifest order), capped at maxParallel. Disjoint by the global
@@ -139,4 +151,228 @@ export function withWorktreeLock(fn) {
   const result = worktreeLockChain.then(() => fn())
   worktreeLockChain = result.then(() => {}, () => {})
   return result
+}
+
+// === the parallel round (convergeRoundParallel) ===
+
+// Race a child producer against a hard timeout. allSettled alone awaits a HUNG child forever; a hung nested
+// claude -p also keeps spending, so on timeout we fire onTimeout (the inc-6 detached-pgid SIGKILL hook) and
+// drop the child this round. The producer NEVER rejects (it catches internally), so the rejection arm is
+// defensive only. Returns { timedOut:true } | { timedOut:false, value }.
+function raceChild(producer, timeoutMs, onTimeout) {
+  let timer
+  const timeout = new Promise((res) => {
+    timer = setTimeout(() => { try { onTimeout?.() } catch { /* kill is best-effort */ } res({ timedOut: true }) }, timeoutMs)
+  })
+  const settled = producer.then(
+    (value) => ({ timedOut: false, value }),
+    (error) => ({ timedOut: false, value: { childHead: null, err: error } }),
+  )
+  return Promise.race([settled, timeout]).finally(() => clearTimeout(timer))
+}
+
+// One PURE-producer child: materialize a private worktree off last-good (under the worktree mutex), run the
+// injected editor, and capture childHead as a STRING before cleanup (the merge reads it from the object store,
+// so the worktree is freed immediately). Touches ONLY its own worktree HEAD — never a shared ref (the
+// single-writer invariant). NEVER rejects: any failure is returned as { err } so the partition can classify it.
+async function childProducer(obj, state, cfg, scopeDir, globalRO, lastGood, perChildSlice, deps) {
+  const runChild = deps.runChild
+  const materialize = deps.materialize ?? gitMaterialize
+  const cleanup = deps.cleanup ?? gitCleanup
+  let wt = null
+  let spentUsd = 0
+  let spentTokens = 0
+  let childHead = null
+  let err = null
+  try {
+    wt = await withWorktreeLock(() => materialize(scopeDir, lastGood))
+    const childCfg = buildObjectiveCfg(obj, state, cfg, wt, globalRO, perChildSlice)
+    const cs = await runChild(childCfg)
+    spentUsd = cs?.state?.spent_usd ?? cs?.spent_usd ?? 0
+    spentTokens = cs?.state?.spent_tokens ?? cs?.spent_tokens ?? 0
+    childHead = gitHead(wt) // STRING, before cleanup
+  } catch (e) {
+    err = e
+  } finally {
+    if (wt) await withWorktreeLock(() => cleanup(scopeDir, wt)).catch(() => {})
+  }
+  return { childHead, spentUsd, spentTokens, err }
+}
+
+// The sequential gate path (single-sourced): a parallel-disabled run, a one-round fallback pin, or a width-1
+// reservation all run ONE objective via the verbatim runOneObjective. Mirrors convergeLoop's body exactly
+// (budget guard + pickNextObjective + attempts bump) so a parallel run can never be LESS-gated than sequential.
+async function runOneFallback(state, cfg, scopeDir, globalRO, deps) {
+  if (!canAffordObjective(state)) return { status: 'capped', reason: 'global budget cannot fund another objective pass' }
+  const obj = pickNextObjective(state)
+  if (!obj) return { status: 'capped', reason: 'no further objective can be attempted (unmet objectives exhausted their retries)' }
+  obj.attempts = (obj.attempts ?? 0) + 1
+  return runOneObjective(state, cfg, scopeDir, globalRO, obj, deps)
+}
+
+// runBatchRound: the concurrent round. Reserve → write the inflight SET BEFORE spawning → fan out PURE
+// producers (each timeout-raced) → partition → single-commit N-way merge of the survivors → the IDENTICAL
+// single-writer gate (reMeasureAll + batchRegressed) → accept (advance) OR whole-batch rollback + quarantine +
+// sequential-fallback pin + consecutive→parallel_disabled. All ref/index ops run single-threaded post-barrier.
+async function runBatchRound(state, cfg, scopeDir, globalRO, batch, reservedTokens, deps) {
+  const log = deps.log ?? (() => {})
+  const reMeasure = deps.reMeasure ?? reMeasureAll
+  const timeoutMs = cfg.childTimeoutMs ?? CHILD_TIMEOUT_MS
+
+  state.cycle += 1
+  state.global_pass += batch.length // each launched child is one objective-pass (bounds the global cap)
+  const round = state.cycle
+  const lastGood = state.last_good_sha
+
+  // WRITE-INTENT-BEFORE-ACT (finding #9): persist the inflight SET + the reservation BEFORE spawning any child,
+  // so a crash mid-spawn is recoverable (resume cleans the recorded tmp dirs + charges the reserved tokens).
+  state.reserved_tokens = (state.reserved_tokens ?? 0) + reservedTokens
+  state.inflight = batch.map((o) => ({
+    objectiveId: o.id,
+    childTmpDir: join(cfg.convergeDir, 'children', `${o.id}-${round}`),
+    reservedTokens: (o.cap ?? 4) * ONE_PASS_TOKENS,
+  }))
+  saveConvergeState(cfg.convergeDir, state)
+
+  // CONCURRENT EXECUTION: children are pure producers; each races a hard timeout. Worktree materialize/cleanup
+  // is serialized by withWorktreeLock (inside childProducer); the runChild edits run concurrently.
+  const usdSlice = objectiveBudgetSlice(state).usd
+  const settled = await Promise.allSettled(batch.map((obj) => {
+    const perChildSlice = { tokens: (obj.cap ?? 4) * ONE_PASS_TOKENS, usd: usdSlice }
+    return raceChild(childProducer(obj, state, cfg, scopeDir, globalRO, lastGood, perChildSlice, deps), timeoutMs, () => deps.killChild?.(obj.id))
+  }))
+  try { git(scopeDir, ['worktree', 'prune']) } catch { /* reclaim any killed-mid-add admin entry */ }
+
+  // PARTITION + ACCOUNTING (findings #8/#11): charge spend for ALL (tokens burn regardless of accept/rollback).
+  // A child that RAN bumps attempts; a crash/timeout bumps the separate `flakes` counter (NOT attempts) and is
+  // charged its reserved share (bias up — a hung claude -p burned tokens we cannot read). flake_cap → skip.
+  const survivors = []
+  const failedIds = []
+  batch.forEach((obj, i) => {
+    const r = settled[i].status === 'fulfilled' ? settled[i].value : { timedOut: false, value: { childHead: null, err: settled[i].reason } }
+    const p = r.value
+    if (r.timedOut === false && p && p.childHead && !p.err) {
+      obj.attempts = (obj.attempts ?? 0) + 1
+      chargeSpend(state, obj, p.spentUsd, p.spentTokens)
+      survivors.push({ obj, childHead: p.childHead })
+    } else {
+      obj.flakes = (obj.flakes ?? 0) + 1
+      chargeSpend(state, obj, 0, (obj.cap ?? 4) * ONE_PASS_TOKENS) // bias up the unreadable burn
+      // skip after flakeCap flakes are TOLERATED (the flakeCap+1-th trips it) — same `>` ceiling convention as
+      // bumpRetryOrSkip's retries>objective_retries, so flake and retry exhaustion read consistently.
+      if (obj.flakes > (cfg.flakeCap ?? 3)) { obj.status = 'skipped'; obj.skip_reason = 'persistent child crash' }
+      failedIds.push(obj.id)
+    }
+  })
+
+  // SINGLE-COMMIT N-WAY MERGE of the survivors (post-barrier, single-threaded — all ref/index ops here).
+  const merged = squashIntegrateBatch(scopeDir, lastGood, survivors, globalRO, `batch-r${round}`)
+  for (const c of merged.perChild) {
+    if (!c.integrated.length) bumpRetryOrSkip(state, state.objectives.find((o) => o.id === c.objectiveId)) // a no-op survivor: genuine non-progress
+  }
+
+  const objectiveIds = batch.map((o) => o.id)
+  const survivorIds = survivors.map((s) => s.obj.id)
+  const tail = (verdict, record) => {
+    state.rounds = [...state.rounds, record]
+    state.reserved_tokens = Math.max(0, (state.reserved_tokens ?? 0) - reservedTokens) // release the reservation
+    state.inflight = null
+    pushBinding(state)
+    saveConvergeState(cfg.convergeDir, state)
+    return verdict
+  }
+
+  if (!merged.advanced) {
+    // every survivor was a no-op (or none ran) — nothing to gate, no advance, no rollback.
+    log({ cycle: round, batch: survivorIds, status: 'no-op', reason: 'no in-scope change' })
+    return tail(globalVerdict(state), { kind: 'batch', round, objectiveIds, pre_sha: lastGood, merged_sha: null, accepted: false, reason: 'no in-scope change', survivors: survivorIds, failed: failedIds })
+  }
+
+  const mergedSha = merged.sha
+  git(scopeDir, ['branch', '-f', CANDIDATE_REF, mergedSha]) // pin against gc while re-measuring (single-writer)
+  const pre = state.objectives.map((o) => ({ ...o }))
+  const rm = reMeasure(scopeDir, mergedSha, state.objectives, state.floor)
+  const regressed = batchRegressed(pre, rm, state.min_delta)
+
+  if (regressed) {
+    rollbackToLastGood(scopeDir, lastGood)
+    delRef(scopeDir, CANDIDATE_REF)
+    state.quarantined_batches = [...(state.quarantined_batches ?? []), survivorIds]
+    state.sequential_fallback_round = state.cycle // pin the NEXT round sequential (the fallback)
+    state.consecutive_batch_regressions = (state.consecutive_batch_regressions ?? 0) + 1
+    if (state.consecutive_batch_regressions >= (cfg.maxBatchRegressions ?? 2)) state.parallel_disabled = true
+    log({ cycle: round, batch: survivorIds, status: 'rolled-back', reason: rm.blocked ? 'floor failed' : 'cross-file batch regression' })
+    return tail(globalVerdict(state), { kind: 'batch', round, objectiveIds, pre_sha: lastGood, merged_sha: mergedSha, accepted: false, rolledBack: true, veto_cause: rm.blocked ? 'floor' : 'cross-file-batch', survivors: survivorIds, failed: failedIds, floor_score: rm.floor.score })
+  }
+
+  state.last_good_sha = advanceLastGood(scopeDir, mergedSha)
+  delRef(scopeDir, CANDIDATE_REF)
+  applyFloor(state, rm.floor)
+  applyVector(state, rm.vector, state.last_good_sha)
+  state.consecutive_batch_regressions = 0
+  log({ cycle: round, batch: survivorIds, status: 'integrated', reason: 'merged candidate gated clean' })
+  return tail(globalVerdict(state), { kind: 'batch', round, objectiveIds, pre_sha: lastGood, merged_sha: mergedSha, accepted: true, survivors: survivorIds, failed: failedIds, floor_score: rm.floor.score })
+}
+
+// convergeRoundParallel: one round of the parallel driver. A parallel-disabled run or a pinned fallback round
+// runs ONE objective sequentially; otherwise reserve the budget-bounded batch (affordBatch) — K=0 caps, K=1
+// degenerates to the sequential gate (no parallel apparatus for width 1), K>=2 runs the concurrent batch.
+export async function convergeRoundParallel(state, cfg, scopeDir, globalRO, deps = {}) {
+  const maxParallel = Math.max(1, cfg.maxParallel ?? 2)
+
+  const pinned = state.sequential_fallback_round != null && state.sequential_fallback_round === state.cycle
+  if (state.parallel_disabled || pinned) {
+    if (pinned) state.sequential_fallback_round = null
+    return runOneFallback(state, cfg, scopeDir, globalRO, deps)
+  }
+
+  if (pickBatch(state, maxParallel).length === 0) {
+    return { status: 'capped', reason: 'no further objective can be attempted (unmet objectives exhausted their retries)' }
+  }
+  const { batch, reservedTokens } = affordBatch(state, maxParallel)
+  if (batch.length === 0) return { status: 'capped', reason: 'global budget cannot fund another objective batch' }
+  if (batch.length === 1) return runOneFallback(state, cfg, scopeDir, globalRO, deps)
+
+  return runBatchRound(state, cfg, scopeDir, globalRO, batch, reservedTokens, deps)
+}
+
+// The parallel driver loop — mirrors convergeLoop EXACTLY (the same budget guard, the same done-edge stability,
+// the same finalize) but drives convergeRoundParallel instead of a single runOneObjective. The done verdict is
+// byte-identical to sequential (same globalVerdict + same stabilityHolds), so --parallel changes throughput,
+// never the gate.
+async function convergeLoopParallel(state, cfg, scopeDir, globalRO, deps = {}) {
+  const log = deps.log ?? (() => {})
+  const reMeasure = deps.reMeasure ?? reMeasureAll
+
+  let v = globalVerdict(state)
+  log({ cycle: state.cycle, status: v.status, reason: v.reason })
+
+  while (v.status === 'running') {
+    const over = globalBudgetExhausted(state)
+    if (over) { v = { status: 'capped', reason: over }; break }
+    v = await convergeRoundParallel(state, cfg, scopeDir, globalRO, deps)
+  }
+
+  if (v.status === 'done' && (state.global_stability_runs ?? 1) > 1) {
+    if (!stabilityHolds(scopeDir, state, reMeasure)) {
+      v = { status: 'capped', reason: 'global stability re-measure unstable — the win did not reproduce over the done-edge re-measure' }
+    }
+  }
+
+  state.global_status = v.status
+  state.global_reason = v.reason
+  saveConvergeState(cfg.convergeDir, state)
+  log({ cycle: state.cycle, status: v.status, reason: v.reason })
+  return { state, verdict: v }
+}
+
+// runConvergeParallel: a FRESH parallel convergence run. Reuses runConverge's IDENTICAL baseline setup
+// (setupConvergeRun) then drives parallel rounds. Same code-owned gate, same honesty boundary; only the
+// candidate-producer is fanned out.
+export async function runConvergeParallel(cfg, manifest, deps = {}) {
+  const scopeDir = resolve(cfg.scope)
+  if (typeof deps.runChild !== 'function') throw new Error('runConvergeParallel requires deps.runChild (the per-objective loop)')
+  const { state, globalRO, blockedVerdict } = setupConvergeRun(cfg, manifest, scopeDir, deps)
+  if (blockedVerdict) return { state, verdict: blockedVerdict }
+  return convergeLoopParallel(state, cfg, scopeDir, globalRO, deps)
 }
