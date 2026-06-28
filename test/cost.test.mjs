@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { extractCost, extractTokens } from '../src/act-claude.mjs'
+import { extractCost, extractTokens, editorFailureReason } from '../src/act-claude.mjs'
 
 // extractCost parses `claude -p --output-format json` into the per-call costUsd that feeds
 // spent_usd — the sole input to the budget stop. Pin every branch, including the best-effort
@@ -50,4 +50,53 @@ test('extractTokens returns 0 when usage is absent', () => {
 test('extractTokens returns 0 (best-effort) on unparseable output', () => {
   assert.equal(extractTokens('not json at all'), 0)
   assert.equal(extractTokens(''), 0)
+})
+
+// editorFailureReason turns a non-zero `claude -p --output-format json` exit into an ACTIONABLE reason.
+// The bug it fixes: the old head-slice grabbed the FIRST array element (the init message) and discarded
+// the real error (the LAST element, type:'result'), so every transient editor failure looked identical
+// and undiagnosable. Pin the surfacing order: stderr, then the result element, then the stdout tail.
+test('editorFailureReason surfaces the result element error, not the init message', () => {
+  const stdout = JSON.stringify([
+    { type: 'system', subtype: 'init', tools: ['Bash', 'Edit'] },
+    { type: 'result', is_error: true, subtype: 'error_during_execution', api_error_status: 'overloaded_error', result: 'Overloaded' },
+  ])
+  const r = editorFailureReason(stdout, '')
+  assert.match(r, /error_during_execution/)
+  assert.match(r, /overloaded_error/)
+  assert.doesNotMatch(r, /init/)
+})
+
+test('editorFailureReason prefers a non-empty (trimmed) stderr', () => {
+  assert.equal(editorFailureReason('[{"type":"result","is_error":true}]', '  rate limit reached  '), 'rate limit reached')
+})
+
+test('editorFailureReason reads a single result object too (not only arrays)', () => {
+  assert.match(editorFailureReason(JSON.stringify({ type: 'result', is_error: true, subtype: 'error_max_turns' }), ''), /error_max_turns/)
+})
+
+test('editorFailureReason uses the LAST result element when more than one is present', () => {
+  const stdout = JSON.stringify([
+    { type: 'result', is_error: false, subtype: 'success' }, // an earlier (success) result — must be skipped
+    { type: 'result', is_error: true, subtype: 'error_during_execution', api_error_status: 'overloaded_error' },
+  ])
+  const r = editorFailureReason(stdout, '')
+  assert.match(r, /overloaded_error/)
+})
+
+test('editorFailureReason: init-only truncation (no result element) -> stdout tail, not subtype=init', () => {
+  const initOnly = JSON.stringify([{ type: 'system', subtype: 'init', tools: ['Bash'] }])
+  const r = editorFailureReason(initOnly, '')
+  assert.doesNotMatch(r, /subtype=init/)
+  assert.match(r, /init/) // the tail still contains the raw text, honestly
+})
+
+test('editorFailureReason falls back to the stdout TAIL on a truncated/partial stream (no throw)', () => {
+  const partial = '[{"type":"system","subtype":"init"' // unterminated JSON
+  const r = editorFailureReason(partial, '')
+  assert.ok(typeof r === 'string' && r.length > 0)
+})
+
+test('editorFailureReason: empty in -> a generic marker, never empty', () => {
+  assert.equal(editorFailureReason('', ''), '(no editor output)')
 })

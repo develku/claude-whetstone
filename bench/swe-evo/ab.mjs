@@ -96,6 +96,8 @@ export async function runAB({ instances, arms = planArms(), setupInstance, runAr
         veto: armRes.veto ?? 0,
         tokens: armRes.tokens ?? 0,
         usd: armRes.usd ?? 0,
+        status: armRes.status ?? null, // a terminal 'error' marks an arm that produced no measurable result
+        error: armRes.error ?? null,
       }
       rows.push(row)
       write(JSON.stringify(row) + '\n')

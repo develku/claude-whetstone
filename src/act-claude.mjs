@@ -48,6 +48,37 @@ export function extractTokens(stdout) {
   }
 }
 
+// Turn a non-zero `claude -p --output-format json` exit into an ACTIONABLE reason. The output is a JSON
+// array whose LAST element (type:'result') carries the real error (is_error / subtype / api_error_status /
+// result text); a naive head-slice grabs the FIRST element (the init message) and discards it — which is
+// exactly why a transient editor failure (rate limit, API overload) was undiagnosable: every failure
+// looked identical. Surfacing order: stderr, then the parsed result element, then the stdout TAIL (a
+// truncated/partial stream), then a generic marker (never an empty string). Pure + exported for test.
+export function editorFailureReason(stdout, stderr) {
+  const err = String(stderr ?? '').trim()
+  if (err) return err.slice(0, 500)
+  try {
+    const parsed = JSON.parse(stdout)
+    const arr = Array.isArray(parsed) ? parsed : [parsed]
+    // The terminal result element is LAST (findLast, not find) — forward-proof against an intermediate
+    // result element. If there is no genuine type:'result' (extreme truncation: init-only), fall through
+    // to the tail rather than mislabelling the init element's subtype as the error.
+    const result = arr.findLast((e) => e?.type === 'result')
+    if (result) {
+      const status = result.api_error_status
+      const bits = [
+        result.subtype && result.subtype !== 'success' ? `subtype=${result.subtype}` : null,
+        status ? `api_error_status=${typeof status === 'string' ? status : JSON.stringify(status)}` : null,
+        result.is_error ? 'is_error' : null,
+        typeof result.result === 'string' && result.result ? result.result : null,
+      ].filter(Boolean)
+      if (bits.length) return bits.join(' ').slice(0, 500)
+    }
+  } catch { /* not parseable (partial/truncated stream) — fall through to the tail */ }
+  const tail = String(stdout ?? '').trim()
+  return tail ? tail.slice(-500) : '(no editor output)'
+}
+
 // The editor runs in the artifact's OWN directory (so the nested edit inherits that project's
 // config), but --mcp-config is given relative to the DRIVER's cwd. Resolve it to absolute up front:
 // left relative, the child looks for it in the artifact dir, doesn't find it, and exits without
@@ -127,7 +158,7 @@ export function makeClaudeAct({ artifactPath, maxTurns = 12, model = null, claud
     // A NON-ZERO EXIT (rate limit, unreadable --mcp-config, auth failure) is a real failure too — and
     // res.error is null for it. Without this, a failed call slips through as a {changed:false, $0}
     // no-op and the loop misreports it as "no artifact change". Surface it like the scorer path does.
-    if (res.status !== 0) throw new Error(`editor ${claudeBin} exited ${res.status}: ${String(res.stderr || res.stdout || '').slice(0, 300)}`)
+    if (res.status !== 0) throw new Error(`editor ${claudeBin} exited ${res.status}: ${editorFailureReason(res.stdout, res.stderr)}`)
 
     const after = hashFile(artifactPath)
     return { changed: before !== after, costUsd: extractCost(res.stdout), tokens: extractTokens(res.stdout) }

@@ -123,9 +123,10 @@ test('runAB orchestrates instances x arms and records one JSONL row per (instanc
   assert.equal(rows.length, 8) // 2 instances x 4 arms
   assert.equal(lines.length, 8)
   const r0 = JSON.parse(lines[0])
-  assert.deepEqual(Object.keys(r0).sort(), ['C', 'T', 'V', 'arm', 'instance_id', 'resolved', 'tokens', 'usd', 'veto'].sort())
+  assert.deepEqual(Object.keys(r0).sort(), ['C', 'T', 'V', 'arm', 'error', 'instance_id', 'resolved', 'status', 'tokens', 'usd', 'veto'].sort())
   assert.equal(r0.arm, 'baseline')
   assert.equal(r0.C, null) // baseline has no confirm
+  assert.equal(r0.status, null) // stub runArm reports no status -> null (only a terminal 'error' is acted on)
   assert.equal(JSON.parse(lines[1]).C, 60) // +confirm arm recorded its C
 })
 

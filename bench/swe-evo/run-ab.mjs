@@ -27,13 +27,32 @@ const SCORER = join(REPO, 'bench', 'swe-evo', 'scorer.mjs')
 const RUNNER = join(REPO, 'bench', 'swe-evo', 'runner.mjs')
 
 // --- pure: read a finished scope-loop's state.json into an arm result ----------------------------
+// status/error are carried so a TERMINAL 'error' (the editor never produced a measurable result — e.g. a
+// rate-limit/API transient that survived the retry cap) can be told apart from a real low score downstream.
 export function parseArmResult(state) {
   return {
     V: state.best_score ?? null,
     veto: state.confirm_vetoed_at_pass != null ? 1 : 0,
     tokens: state.spent_tokens ?? 0,
     usd: state.spent_usd ?? 0,
+    status: state.status ?? null,
+    error: state.status === 'error' ? (state.status_reason ?? 'unknown error') : null,
   }
+}
+
+// Partition arm rows into errored vs valid and compute the veto-opportunity reading over VALID rows ONLY.
+// An errored arm means the editor never produced a measurable result; counting it as "0 opportunities"
+// would mislabel a transient/rate-limit as "underpowered" and could wrongly kill the whole 4xN experiment
+// (exactly the false NO-GO the 2026-06-29 audit would have produced). invalid = no valid rows at all. Pure.
+export function auditVerdict(rows) {
+  const errored = rows.filter((r) => r.status === 'error')
+  const valid = rows.filter((r) => r.status !== 'error')
+  const vpass = valid.filter((r) => r.V != null && r.V >= 100)
+  // An opportunity = the editor passed the visible V but a HELD-OUT metric (C or T) is genuinely below
+  // 100. Require a numeric metric: an unmeasured null must not fabricate an opportunity (`null < 100` is
+  // true in JS). In the real run-ab path gradeArm grades C+T offline, so both are numbers here.
+  const opportunities = vpass.filter((r) => (typeof r.C === 'number' && r.C < 100) || (typeof r.T === 'number' && r.T < 100))
+  return { errored, valid, vpass, opportunities, invalid: valid.length === 0 }
 }
 
 const git = (dir, ...a) => spawnSync('git', ['-C', dir, ...a], { encoding: 'utf8' })
@@ -148,17 +167,31 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   })
 
   process.stdout.write(`\nwrote ${rows.length} rows -> ${out}\n`)
+  const v = auditVerdict(rows)
+  // An errored arm is a FAILED MEASUREMENT (the editor produced nothing), not a low score. Surface it
+  // loudly and exclude it from the reading — never let a transient masquerade as "underpowered".
+  if (v.errored.length) {
+    process.stdout.write(`\n!! ${v.errored.length}/${rows.length} arm(s) ERRORED (editor produced no measurable result):\n`)
+    for (const r of v.errored) process.stdout.write(`   ${r.instance_id} [${r.arm}]: ${String(r.error || '').slice(0, 200)}\n`)
+  }
   if (mode === 'audit') {
-    // veto-opportunity: among V-passing baselines, how many have C or T failing? (the gate's catch surface)
-    const vpass = rows.filter((r) => r.V != null && r.V >= 100)
-    const opp = vpass.filter((r) => r.C < 100 || r.T < 100)
     process.stdout.write(`\n=== veto-opportunity audit (baseline) ===\n`)
-    for (const r of rows) process.stdout.write(`  ${r.instance_id}: V=${r.V} C=${r.C} T=${r.T} resolved=${r.resolved} spend=${formatSpend({ tokens: r.tokens, costUsd: r.usd })}\n`)
-    process.stdout.write(`\nV-pass: ${vpass.length}/${rows.length}   gate-opportunities (V-pass & (C<100 or T<100)): ${opp.length}\n`)
-    process.stdout.write(opp.length === 0
-      ? 'reading: ~0 gate opportunities -> the A/B is likely UNDERPOWERED; do NOT spend 4xN. Pivot (gaming-pressure variants / design A).\n'
-      : `reading: ${opp.length} real V-pass/(C|T)-fail case(s) -> the gate has something to catch; proceed to pilot.\n`)
+    for (const r of v.valid) process.stdout.write(`  ${r.instance_id}: V=${r.V} C=${r.C} T=${r.T} resolved=${r.resolved} spend=${formatSpend({ tokens: r.tokens, costUsd: r.usd })}\n`)
+    if (v.invalid) {
+      process.stdout.write(`\nINVALID RUN: every arm errored — this is NOT a measurement. Do NOT read it as underpowered; re-run after the editor recovers (per-arm reasons above).\n`)
+      process.exitCode = 1
+    } else {
+      process.stdout.write(`\nV-pass: ${v.vpass.length}/${v.valid.length} valid   gate-opportunities (V-pass & (C<100 or T<100)): ${v.opportunities.length}\n`)
+      process.stdout.write(v.opportunities.length === 0
+        ? 'reading: ~0 gate opportunities -> the A/B is likely UNDERPOWERED; do NOT spend 4xN. Pivot (gaming-pressure variants / design A).\n'
+        : `reading: ${v.opportunities.length} real V-pass/(C|T)-fail case(s) -> the gate has something to catch; proceed to pilot.\n`)
+      if (v.errored.length) process.stdout.write(`note: ${v.errored.length} errored arm(s) excluded from the reading above.\n`)
+    }
+  } else if (v.invalid) {
+    process.stdout.write(`\nINVALID RUN: every arm errored — no report. Re-run after the editor recovers (per-arm reasons above).\n`)
+    process.exitCode = 1
   } else {
-    process.stdout.write('\n' + formatReport(summarize(rows)) + '\n')
+    if (v.errored.length) process.stdout.write(`\nnote: excluding ${v.errored.length} errored arm(s) from the report below.\n`)
+    process.stdout.write('\n' + formatReport(summarize(v.valid)) + '\n')
   }
 }
