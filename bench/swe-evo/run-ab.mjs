@@ -78,19 +78,29 @@ function setupInstance(instance, { workRoot }) {
   }
 }
 
-// Reset the checkout to a clean base, run one arm's scope-cli loop, read its state.json.
-function runArm({ inst, arm, ctx }, { cap, budgetTokens, model, effort, timeoutMs }) {
-  git(ctx.checkoutDir, 'reset', '--hard', ctx.baseCommit)
-  git(ctx.checkoutDir, 'clean', '-fdxq')
+// Reset the checkout to a clean base, run one arm's scope-cli loop, read its state.json. The loop's
+// status is 'error' only on a THROWN exception (e.g. a transient editor `claude` exit≠0 — more likely
+// when nested inside another Claude session). scope-act deliberately fail-fasts on that; we absorb the
+// transience at the BENCH level by retrying the whole arm (capped). A legitimate done/capped/plateau is
+// kept on the first try — we only retry the error case.
+function runArm({ inst, arm, ctx }, { cap, budgetTokens, model, effort, timeoutMs, attempts = 3, log = () => {} }) {
   const loopDir = join(ctx.dir, `loop-${arm.id}`)
-  rmSync(loopDir, { recursive: true, force: true })
-  rmSync(ctx.paths.storeDir, { recursive: true, force: true })
   const { argv } = buildArmCommand({ arm, paths: ctx.paths, split: ctx.split, goal: inst.problemStatement, model, effort, cap, budgetTokens })
   const full = [...argv, '--loop-dir', loopDir, '--mcp-config', join(REPO, 'empty-mcp.json')]
-  const res = spawnSync('node', full, { encoding: 'utf8', timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 })
-  const statePath = join(loopDir, 'state.json')
-  if (!existsSync(statePath)) throw new Error(`arm ${arm.id} produced no state.json (exit ${res.status}): ${(res.stderr || '').slice(-500)}`)
-  return parseArmResult(JSON.parse(readFileSync(statePath, 'utf8')))
+  let state
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    git(ctx.checkoutDir, 'reset', '--hard', ctx.baseCommit)
+    git(ctx.checkoutDir, 'clean', '-fdxq')
+    rmSync(loopDir, { recursive: true, force: true })
+    rmSync(ctx.paths.storeDir, { recursive: true, force: true })
+    const res = spawnSync('node', full, { encoding: 'utf8', timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 })
+    const statePath = join(loopDir, 'state.json')
+    if (!existsSync(statePath)) throw new Error(`arm ${arm.id} produced no state.json (exit ${res.status}): ${(res.stderr || '').slice(-500)}`)
+    state = JSON.parse(readFileSync(statePath, 'utf8'))
+    if (state.status !== 'error') break
+    log(`  ${inst.instanceId} arm ${arm.id}: transient loop error (${state.status_reason || ''}) attempt ${attempt}/${attempts}${attempt < attempts ? ' — retrying' : ' — giving up'}`)
+  }
+  return parseArmResult(state)
 }
 
 // Grade the final checkout code on the held-out C and T node-sets — ONE docker run over all the F2P files
@@ -131,7 +141,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     instances: all,
     arms,
     setupInstance: async (inst) => { const c = setupInstance(inst, { workRoot }); return c },
-    runArm: async (a) => runArm(a, { cap, budgetTokens, model, effort, timeoutMs }),
+    runArm: async (a) => runArm(a, { cap, budgetTokens, model, effort, timeoutMs, log: (m) => process.stderr.write(m + '\n') }),
     gradeTruthFn: async (a) => gradeArm(a),
     write: (line) => appendFileSync(out, line),
     log: (m) => process.stderr.write(m + '\n'),
