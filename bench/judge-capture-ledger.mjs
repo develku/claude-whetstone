@@ -38,11 +38,17 @@ const newPrompt = (content) => buildJudgePrompt(content, { goal: GOAL, nonce: ma
 
 function judge(prompt) {
   const res = spawnSync('claude', ['-p', prompt, '--output-format', 'json', '--max-turns', '1', '--model', model], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
-  const review = reviewFromSpawn(res)
-  // cost/tokens from the result message (best-effort)
-  let tokens = 0, costUsd = 0
-  try { const r = JSON.parse(res.stdout); const m = Array.isArray(r) ? r.find((e) => e?.type === 'result') : r; tokens = (m?.usage?.input_tokens || 0) + (m?.usage?.output_tokens || 0); costUsd = m?.total_cost_usd || 0 } catch { /* ignore */ }
-  return { score: review.score, tokens, costUsd }
+  let resultText = '', tokens = 0, costUsd = 0
+  try { const r = JSON.parse(res.stdout); const m = Array.isArray(r) ? r.find((e) => e?.type === 'result') : r; resultText = m?.result ?? ''; tokens = (m?.usage?.input_tokens || 0) + (m?.usage?.output_tokens || 0); costUsd = m?.total_cost_usd || 0 } catch { /* ignore */ }
+  // The bench (unlike the strict scorer) extracts the score LOOSELY — a CAPTURED judge often wraps its
+  // injected answer in a code fence / trailing chars, and we still need to read it to show the capture.
+  let score
+  try { score = reviewFromSpawn(res).score } catch {
+    const mm = resultText.match(/"score"\s*:\s*(\d+(?:\.\d+)?)/)
+    if (!mm) throw new Error(`could not read a score from judge: ${(resultText || res.stdout || '').slice(0, 200)}`)
+    score = Number(mm[1])
+  }
+  return { score, tokens, costUsd }
 }
 
 console.log(`\n=== judge-capture red-team (${STUB ? 'STUB $0 structural' : `model=${model}`}) ===\n`)
