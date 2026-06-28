@@ -135,6 +135,21 @@ export function manifestEditScopeReadOnlyCollision(cfg) {
   return null
 }
 
+// The floor's measurement footprint must be DECLARED read-only (DCA refinement #2 — the headline
+// `npm test -> echo ok` floor-evasion path). We cannot enumerate what an arbitrary `floor.cmd` reads, so we
+// enforce the operator CONTRACT: a floor with a command MUST declare a non-empty floor.readOnly listing the
+// config/script files it depends on (package.json, jest.config.js, Makefile, conftest.py, ...). Those then
+// join globalReadOnly and — via manifestEditScopeReadOnlyCollision — are forced outside every editScope, so
+// an editor can never rewrite what the floor measures. (Completeness of that list stays the operator's
+// responsibility, disclosed in the report; this guard makes the omission itself impossible.)
+export function convergeFloorFootprintReadOnly(cfg) {
+  const f = cfg.manifest?.floor
+  if (!f?.cmd) return null // a missing floor.cmd is caught by validateManifest
+  if (!Array.isArray(f.readOnly) || f.readOnly.length === 0)
+    return 'floor.readOnly must be a non-empty array — declare every config/script file the floor cmd reads (e.g. package.json, jest.config.js, Makefile) so an editor cannot rewrite what the floor measures'
+  return null
+}
+
 export const CONVERGE_REFUSALS = [
   convergeNeedsGlobalBudget,
   convergeObjectivesNeedCap,
@@ -142,6 +157,7 @@ export const CONVERGE_REFUSALS = [
   convergeJudgeObjectiveNeedsConfirm,
   manifestInsideScope,
   convergeUnsafeObjectiveScorer,
+  convergeFloorFootprintReadOnly,
   manifestEditScopeReadOnlyCollision,
 ]
 

@@ -132,6 +132,32 @@ test('squashIntegrate does NOT advance when the child changed nothing IN-SCOPE (
   }
 })
 
+test('squashIntegrate reverts a gate/measurement file even when it sits INSIDE the editScope (the floor-config-hijack path)', () => {
+  const dir = tempRepo()
+  try {
+    // floor runs `npm test`; package.json IS inside the objective's editScope but is a declared gate file
+    write(dir, 'app/src/x.txt', '1')
+    write(dir, 'app/package.json', '{"scripts":{"test":"jest"}}')
+    git(dir, 'add', '-A'); git(dir, 'commit', '-q', '-m', 'seed')
+    const lastGood = git(dir, 'rev-parse', 'HEAD')
+    // the editor "fixes" its feature AND rewrites the floor's package.json to auto-pass
+    write(dir, 'app/src/x.txt', '2')
+    write(dir, 'app/package.json', '{"scripts":{"test":"echo ok"}}')
+    git(dir, 'add', '-A'); git(dir, 'commit', '-q', '-m', 'child games the floor')
+    const childHead = git(dir, 'rev-parse', 'HEAD')
+    git(dir, 'reset', '--hard', lastGood)
+
+    // editScope = app, but app/package.json is in globalReadOnly (the floor footprint) -> denylist beats allowlist
+    const r = squashIntegrate(dir, lastGood, childHead, (p) => editScopeAllowed(p, 'app', ['app/package.json']))
+    assert.equal(r.advanced, true)
+    assert.equal(git(dir, 'diff', '--name-only', lastGood, r.sha), 'app/src/x.txt') // only the real edit
+    assert.ok(r.reverted.includes('app/package.json'))
+    assert.equal(git(dir, 'show', `${r.sha}:app/package.json`), '{"scripts":{"test":"jest"}}') // the hijack never landed
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('squashIntegrate does NOT advance for an all-empty (zero tree change) child', () => {
   const dir = tempRepo()
   try {

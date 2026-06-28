@@ -54,6 +54,8 @@ export function initConvergeState(cfg, manifest) {
       confirmScore: null,
       best_confirm: null,
       met_at_sha: null,
+      // diagnostic/reserved: the live regression check (converge.mjs regressionCheck) computes the
+      // pre-integration score from a fresh per-round snapshot of the vector, NOT from this field.
       pre_integration_score: null,
       child_loop_dir: null,
       status: 'unmet',

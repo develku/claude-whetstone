@@ -9,6 +9,7 @@ import {
   convergeJudgeObjectiveNeedsConfirm,
   manifestInsideScope,
   convergeUnsafeObjectiveScorer,
+  convergeFloorFootprintReadOnly,
   manifestEditScopeReadOnlyCollision,
   convergeRefusal,
 } from '../src/converge-cli.mjs'
@@ -169,6 +170,14 @@ test('manifestEditScopeReadOnlyCollision refuses an editScope that contains a ga
   assert.ok(manifestEditScopeReadOnlyCollision(cfg(m2)))
   // clean separation -> ok
   assert.equal(manifestEditScopeReadOnlyCollision(cfg(manifest())), null)
+})
+
+test('convergeFloorFootprintReadOnly refuses a floor with a cmd but no declared read-only footprint', () => {
+  // the headline floor-evasion path: floor runs `npm test` but package.json is not pinned read-only
+  assert.ok(convergeFloorFootprintReadOnly(cfg(manifest({ floor: { cmd: 'npm test' } }))))
+  assert.ok(convergeFloorFootprintReadOnly(cfg(manifest({ floor: { cmd: 'npm test', readOnly: [] } }))))
+  // a declared footprint -> ok
+  assert.equal(convergeFloorFootprintReadOnly(cfg(manifest({ floor: { cmd: 'npm test', readOnly: ['package.json'] } }))), null)
 })
 
 // --- the suite runner returns the FIRST refusal reason, or null ---

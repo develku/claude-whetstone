@@ -83,6 +83,10 @@ test('runConverge drives two objectives to done and leaves both at target on the
     assert.equal(readFileSync(join(scope, 'a/val.txt'), 'utf8'), '100')
     assert.equal(readFileSync(join(scope, 'b/val.txt'), 'utf8'), '100')
     assert.equal(state.objectives_sufficiency, 'unproven') // honesty constant holds on the done path
+    // the durable gc-safe named anchor exists and tracks the converged HEAD (C1)
+    assert.equal(git(scope, 'rev-parse', 'whetstone/converge-last-good'), state.last_good_sha)
+    assert.equal(git(scope, 'rev-parse', 'HEAD'), state.last_good_sha)
+    assert.throws(() => git(scope, 'rev-parse', '--verify', 'whetstone/converge-candidate')) // temp pin cleaned up
   } finally {
     rmSync(scope, { recursive: true, force: true }); rmSync(sc.dir, { recursive: true, force: true })
   }

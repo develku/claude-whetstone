@@ -15,10 +15,16 @@ import { fileURLToPath } from 'node:url'
 import { gitMaterialize, gitCleanup, gitHead, isSha } from './git-snapshot.mjs'
 import { pathsIntersect, globalReadOnly } from './converge-shared.mjs'
 import { objectiveScore, objectiveMet, globalVerdict, globalRegressed } from './converge-gate.mjs'
-import { initConvergeState, ensureConvergeDir, saveConvergeState, loadConvergeState, globalBudgetExhausted } from './converge-state.mjs'
+import { initConvergeState, ensureConvergeDir, saveConvergeState, loadConvergeState, globalBudgetExhausted, LAST_GOOD_REF } from './converge-state.mjs'
 import { shq } from './shq.mjs'
 
 const git = (dir, args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim()
+
+// A throwaway ref that PINS the candidate commit against gc while it is being re-measured (before the gate
+// accepts/rejects it) — a candidate lives only as a worktree HEAD during squashIntegrate, then as a loose
+// object until the round resolves. Deleting it on accept/rollback keeps no permanent garbage ref.
+const CANDIDATE_REF = 'whetstone/converge-candidate'
+const delRef = (dir, ref) => { try { git(dir, ['branch', '-D', ref]) } catch { /* not present */ } }
 
 // Hard wall-clock cap on every re-measure child (mirrors driver's CHILD_TIMEOUT_MS) so a hung scorer/floor
 // can't wedge an unattended converge run.
@@ -219,7 +225,10 @@ function regressionCheck(preObjectives, rmVector, floorScore, minDelta) {
   return globalRegressed(objs, floorScore, minDelta)
 }
 
-// The binding (worst-unmet) score this cycle, for the global plateau signal; 100 when all met.
+// The binding (worst-unmet) score this cycle, for the global plateau signal; 100 when all met. The 0
+// fallback (all unmet scores invalid -> Math.min of [] -> Infinity -> 0) is unreachable in practice: an
+// invalid objective score makes globalVerdict return 'error' and the loop exits before the next pushBinding,
+// so a plateau is never driven off a synthetic 0.
 function pushBinding(state) {
   const unmet = state.objectives.filter((o) => !objectiveMet(o))
   const binding = unmet.length ? Math.min(...unmet.map((o) => objectiveScore(o)).filter(valid)) : 100
@@ -240,9 +249,13 @@ function bumpRetryOrSkip(state, obj) {
   if (obj.retries > state.objective_retries) obj.status = 'skipped'
 }
 
+// Advance the anchor: fast-forward the working branch to the candidate AND move the durable gc-safe named
+// ref (whetstone/converge-last-good) so it is rev-parse-able on resume / for diagnostics (the named ref is
+// the spec's "gc-safe anchor"; the working branch is the operator's checkout, kept in sync).
 const advanceLastGood = (scopeDir, candidateSha) => {
   git(scopeDir, ['reset', '--hard', candidateSha])
   git(scopeDir, ['clean', '-fdq'])
+  git(scopeDir, ['branch', '-f', LAST_GOOD_REF, candidateSha])
   return candidateSha
 }
 const rollbackToLastGood = (scopeDir, lastGoodSha) => {
@@ -309,9 +322,12 @@ export async function runConverge(cfg, manifest, deps = {}) {
   // floor.readOnly + each objective's readOnly/scorer/confirmScorer), so resume can reconstruct it identically.
   const globalRO = globalReadOnly(state, scopeDir)
 
-  // The current branch IS the gc-safe last-good anchor: children run in isolated worktrees, so a child's
-  // reset --hard never moves it. Baseline-measure the starting tree before any edit.
+  // The last-good anchor: the operator's working branch tracks it, AND a durable named ref
+  // (whetstone/converge-last-good) is maintained so it is rev-parse-able on resume / diagnostics. Both are
+  // safe because children run in ISOLATED worktrees — a child's reset --hard never moves either. Create the
+  // named ref at the starting tree, then baseline-measure before any edit.
   state.last_good_sha = gitHead(scopeDir)
+  git(scopeDir, ['branch', '-f', LAST_GOOD_REF, state.last_good_sha])
   const baseline = reMeasure(scopeDir, state.last_good_sha, state.objectives, state.floor)
   if (baseline.blocked) {
     applyFloor(state, baseline.floor)
@@ -341,6 +357,7 @@ export async function prepareGlobalResume(cfg, deps = {}) {
   if (!isSha(state.last_good_sha)) throw new Error(`cannot resume: corrupt last_good_sha (${state.last_good_sha})`)
 
   rollbackToLastGood(scopeDir, state.last_good_sha) // discard ALL of HEAD>last_good
+  git(scopeDir, ['branch', '-f', LAST_GOOD_REF, state.last_good_sha]) // re-pin the durable named anchor
   const rm = reMeasure(scopeDir, state.last_good_sha, state.objectives, state.floor)
   if (rm.blocked) {
     applyFloor(state, rm.floor)
@@ -410,20 +427,24 @@ async function convergeLoop(state, cfg, scopeDir, globalRO, deps = {}) {
     }
 
     const candidateSha = integ.sha
+    git(scopeDir, ['branch', '-f', CANDIDATE_REF, candidateSha]) // pin against gc while re-measuring (M4)
+    const preAdvanceSha = state.last_good_sha // capture BEFORE the advance, for the round's pre_sha (H1)
     const pre = state.objectives.map((o) => ({ ...o }))
     const rm = reMeasure(scopeDir, candidateSha, state.objectives, state.floor)
     const regressed = rm.blocked || regressionCheck(pre, rm.vector, rm.floor.score, state.min_delta)
 
     if (regressed) {
       rollbackToLastGood(scopeDir, state.last_good_sha)
-      state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: state.last_good_sha, candidate_sha: candidateSha, accepted: false, rolledBack: true, floor_score: rm.floor.score, spent_tokens: spentTokens }]
+      delRef(scopeDir, CANDIDATE_REF) // discard the rejected candidate's pin
+      state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: preAdvanceSha, candidate_sha: candidateSha, accepted: false, rolledBack: true, floor_score: rm.floor.score, spent_tokens: spentTokens }]
       bumpRetryOrSkip(state, obj)
       log({ cycle: state.cycle, objective: obj.id, status: 'rolled-back', reason: rm.blocked ? 'floor failed' : 'cross-file regression' })
     } else {
       state.last_good_sha = advanceLastGood(scopeDir, candidateSha)
+      delRef(scopeDir, CANDIDATE_REF) // the named anchor now references it; drop the temp pin
       applyFloor(state, rm.floor)
       applyVector(state, rm.vector, state.last_good_sha)
-      state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: pre.length ? state.last_good_sha : null, candidate_sha: candidateSha, accepted: true, floor_score: rm.floor.score, spent_tokens: spentTokens }]
+      state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: preAdvanceSha, candidate_sha: candidateSha, accepted: true, floor_score: rm.floor.score, spent_tokens: spentTokens }]
       log({ cycle: state.cycle, objective: obj.id, status: 'integrated', reason: `score ${objectiveScore(state.objectives.find((o) => o.id === obj.id))}` })
     }
     pushBinding(state)
