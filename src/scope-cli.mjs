@@ -16,6 +16,7 @@ import { formatReport } from './summary.mjs'
 import { makeDecomposeAct } from './decompose.mjs'
 import { isUnsafeScorer } from './scorer-safety.mjs'
 import { runScopeForgeHook } from './forge/scope-hook.mjs'
+import { floorConfirmCmd } from '../scorers/floor.mjs'
 
 // driver's parseCli plus --scope (becomes the artifact) and --read-only (comma list of gate paths
 // the editor may not touch — the tests/scorer it is graded by).
@@ -35,6 +36,14 @@ export function parseScopeCli(argv, defaults = {}) {
   cfg.scorerAllow = (get('--scorer-allow') || '').split(',').map((s) => s.trim()).filter(Boolean)
   const fmf = get('--forge-max-files') // scope multi-file learn cap (hook default 8); parse '0' as 0, not undefined, so the guard catches it
   cfg.forgeMaxFiles = fmf !== undefined ? Number(fmf) : undefined
+  // --floor wires the DETERMINISTIC FLOOR as the confirm: it activates the done-edge confirm even behind a
+  // judge-only primary --scorer, and composes ABOVE any --confirm-scorer (which runs only if the floor
+  // passes). Enforces "never ship a judge-only top gate" in scope mode.
+  cfg.floor = get('--floor')
+  if (cfg.floor) {
+    const floorPath = rpath(dirname(fileURLToPath(import.meta.url)), '..', 'scorers', 'floor.mjs')
+    cfg.confirmScorerCmd = floorConfirmCmd({ floorPath, floorCmd: cfg.floor, confirmCmd: cfg.confirmScorerCmd })
+  }
   return cfg
 }
 
@@ -59,8 +68,10 @@ const SCORERS_DIR = rpath(dirname(fileURLToPath(import.meta.url)), '..', 'scorer
 // denied here — it is a legitimate child sub-gate (a project test command), unlike in the Forge where the
 // model proposes its --cmd. The denylist test (isUnsafeScorer) is normalization-robust + realpath-aware and
 // is shared with the Forge denylist (src/forge/hook.mjs) so the two trust boundaries cannot drift.
-const SUBGATE_UNSAFE = new Set(['composite'])
-const SUBGATE_UNSAFE_PATHS = [join(SCORERS_DIR, 'composite.mjs')]
+// floor joins composite: its --cmd is an operator-provided shell command, so a decompose finding that named
+// it with a MODEL-chosen --cmd would reach a shell. Denied from both the AUTO set and operator extraPaths.
+const SUBGATE_UNSAFE = new Set(['composite', 'floor'])
+const SUBGATE_UNSAFE_PATHS = [join(SCORERS_DIR, 'composite.mjs'), join(SCORERS_DIR, 'floor.mjs')]
 
 // The scorer-id allowlist a child sub-gate is resolved against: every shipped scorer (by basename) plus
 // any operator-provided path via --scorer-allow. A finding can only ever name an id in this map [CR#4].
