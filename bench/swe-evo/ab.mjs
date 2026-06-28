@@ -90,7 +90,7 @@ export async function runAB({ instances, arms = planArms(), setupInstance, runAr
         arm: arm.id,
         instance_id: inst.instanceId,
         V: armRes.V ?? null,
-        C: armRes.C ?? null,
+        C: truth.C ?? armRes.C ?? null, // design B grades C offline on the final code (held out from every arm)
         T: truth.T,
         resolved: truth.resolved,
         veto: armRes.veto ?? 0,
