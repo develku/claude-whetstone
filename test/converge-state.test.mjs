@@ -93,6 +93,21 @@ test('save then load round-trips the converge state', () => {
   assert.equal(loaded.objectives[1].judgeClass, true)
 })
 
+test('initConvergeState threads planner provenance from cfg (additive; defaults preserved)', () => {
+  const { manifest, cfg } = fixture()
+  // a planner-driven run threads honest provenance + a report-only coverage number
+  const planned = initConvergeState({ ...cfg, objectivesSource: 'planner', coverageScore: 42 }, manifest)
+  assert.equal(planned.objectives_source, 'planner')
+  assert.equal(planned.coverage_score, 42)
+  // a coverage_score of 0 is a real number, not a missing field — must NOT collapse to null
+  const zero = initConvergeState({ ...cfg, objectivesSource: 'planner', coverageScore: 0 }, manifest)
+  assert.equal(zero.coverage_score, 0)
+  // the operator path (no planner fields) keeps the hard-coded defaults — every prior test still holds
+  const dflt = initConvergeState(cfg, manifest)
+  assert.equal(dflt.objectives_source, 'operator-manifest')
+  assert.equal(dflt.coverage_score, null)
+})
+
 test('globalBudgetExhausted reports when cumulative spend exceeds the pool, else null', () => {
   assert.equal(globalBudgetExhausted({ global_budget_tokens: 1000, spent_tokens: 500 }), null)
   assert.ok(globalBudgetExhausted({ global_budget_tokens: 1000, spent_tokens: 1500 }))

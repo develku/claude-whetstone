@@ -25,9 +25,12 @@ export function initConvergeState(cfg, manifest) {
     goal: manifest.goal,
     objectives_path: cfg.objectivesPath ? resolve(cfg.objectivesPath) : null,
     scope: cfg.scope ? resolve(cfg.scope) : null,
-    objectives_source: 'operator-manifest',
+    // Track A (the proactive planner) threads honest provenance here: a planner-driven run passes
+    // objectivesSource:'planner' so the durable ledger never records the 'operator-manifest' lie. The
+    // ?? defaults keep every operator-authored path (and every existing test) on the hard-coded values.
+    objectives_source: cfg.objectivesSource ?? 'operator-manifest',
     objectives_sufficiency: OBJECTIVES_SUFFICIENCY,
-    coverage_score: null, // Track-A reserved; never written by C
+    coverage_score: cfg.coverageScore ?? null, // Track-A report-only span; never read by C's gate
     last_good_ref: LAST_GOOD_REF,
     last_good_sha: null,
     floor: {
