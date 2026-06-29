@@ -9,7 +9,8 @@ A deterministic <b>loop-engineering</b> driver for Claude Code — raise <i>one<
 measured score threshold, where <b>code owns the gate</b> and the <b>model owns only diagnosis + edits</b>.
 </p>
 
-> Status: **v1.0.0 — the single-file core is stable; the orchestration layers are alpha.** See
+> Status: **v1.1.0 — the single-file core is stable; the orchestration layers are alpha.** Requires
+> **Node ≥ 23.5** (the behavioural-scorer isolation uses `module.registerHooks` + the Permission Model). See
 > [What's stable in v1](#whats-stable-in-v1). Matured by running it on itself (dogfooding); the cost,
 > auth, and security model are exercised end-to-end, not speculative.
 
@@ -55,7 +56,7 @@ not in a prompt.
 
 ## What's stable in v1
 
-whetstone is honest about maturity. **v1.0.0 declares the single-file core stable**; the multi-file and
+whetstone is honest about maturity. **v1.1.0 declares the single-file core stable**; the multi-file and
 orchestration layers exist and are tested at $0 but are **not** promoted to the supported surface —
 promoting them would assert sufficiency / scorer-capture guarantees that are not yet proven (the loop
 proves each leaf *measurable*, not that a *set* of leaves is *sufficient*).
