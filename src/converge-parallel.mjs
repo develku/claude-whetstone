@@ -314,14 +314,18 @@ async function runBatchRound(state, cfg, scopeDir, globalRO, batch, reservedToke
   if (regressed) {
     rollbackToLastGood(scopeDir, lastGood)
     delRef(scopeDir, CANDIDATE_REF)
-    // Quarantine only genuine COMBINATIONS (>=2). A lone survivor (its batch-mate crashed/timed out) that
-    // regresses is a per-objective failure, handled by the sequential fallback's retry/skip — NOT a bad
-    // co-scheduling. Quarantining a singleton would match every batch containing it (pickBatch), permanently
-    // barring a healthy objective from all future parallel rounds.
-    if (survivorIds.length >= 2) state.quarantined_batches = [...(state.quarantined_batches ?? []), survivorIds]
-    state.sequential_fallback_round = state.cycle // pin the NEXT round sequential (the fallback)
-    state.consecutive_batch_regressions = (state.consecutive_batch_regressions ?? 0) + 1
-    if (state.consecutive_batch_regressions >= (cfg.maxBatchRegressions ?? 2)) state.parallel_disabled = true
+    // Only a genuine COMBINATION (>=2 survivors) regressing is evidence that BATCHING is the problem. A lone
+    // survivor (its batch-mate crashed/timed out) that regresses is a per-objective failure — its solo edit was
+    // bad, exactly as it would be in sequential mode — so it gets the sequential fallback's retry/skip, and must
+    // NOT (a) quarantine a singleton (pickBatch would then bar that healthy objective from every future batch),
+    // NOR (b) count toward parallel_disabled (a solo-edit fault should not disable batching). So the quarantine,
+    // the consecutive-regression counter, and the parallel-disable trip all gate on the combination case.
+    if (survivorIds.length >= 2) {
+      state.quarantined_batches = [...(state.quarantined_batches ?? []), survivorIds]
+      state.consecutive_batch_regressions = (state.consecutive_batch_regressions ?? 0) + 1
+      if (state.consecutive_batch_regressions >= (cfg.maxBatchRegressions ?? 2)) state.parallel_disabled = true
+    }
+    state.sequential_fallback_round = state.cycle // pin the NEXT round sequential (the fallback) either way
     log({ cycle: round, batch: survivorIds, status: 'rolled-back', reason: rm.blocked ? 'floor failed' : 'cross-file batch regression' })
     return tail(globalVerdict(state), { kind: 'batch', round, objectiveIds, pre_sha: lastGood, merged_sha: mergedSha, accepted: false, rolledBack: true, veto_cause: rm.blocked ? 'floor' : 'cross-file-batch', survivors: survivorIds, failed: failedIds, floor_score: rm.floor.score })
   }

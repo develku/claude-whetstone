@@ -205,10 +205,13 @@ test('convergeRoundParallel does NOT quarantine a LONE survivor on regression (a
     assert.equal(last.rolledBack, true)
     assert.deepEqual(last.survivors, ['a']) // exactly one survivor
     assert.deepEqual(last.failed, ['b'])
-    // THE FIX: a 1-element survivor set is NOT a "combination" — quarantining it would match every batch
-    // containing 'a' (pickBatch line 55), permanently barring the healthy objective from parallel scheduling.
+    // THE FIX: a 1-element survivor set is NOT a "combination" — a solo-edit fault must neither quarantine the
+    // objective (pickBatch line 55 would then bar it from every batch) NOR count toward parallel_disabled.
     assert.deepEqual(state.quarantined_batches ?? [], []) // no singleton quarantine written
+    assert.equal(state.consecutive_batch_regressions ?? 0, 0) // a solo-edit fault does NOT disable batching
+    assert.notEqual(state.parallel_disabled, true)
     assert.ok(pickBatch(state, 2).some((o) => o.id === 'a')) // 'a' stays schedulable
+    assert.equal(state.sequential_fallback_round, state.cycle) // but the next round IS pinned sequential
   } finally {
     rmSync(scope, { recursive: true, force: true }); rmSync(sc.dir, { recursive: true, force: true })
   }
