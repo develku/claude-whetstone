@@ -5,7 +5,7 @@
 // testable seams.
 import { spawnSync, execFileSync } from 'node:child_process'
 import { buildLedger } from './ledger.mjs'
-import { extractCost, extractTokens, resolveMcpConfig, buildClaudeArgs, editorFailureReason } from './act-claude.mjs'
+import { extractCost, extractTokens, resolveMcpConfig, buildClaudeArgs, editorFailureReason, editorExitDisposition } from './act-claude.mjs'
 import { makeNonce, fenceUntrusted } from './prompt-fence.mjs'
 
 const git = (dir, args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim()
@@ -78,7 +78,9 @@ export function makeScopeAct({ scopeDir, maxTurns = 16, model = null, claudeBin 
     const args = buildClaudeArgs({ prompt, maxTurns, model, mcpConfig: resolveMcpConfig(mcpConfig), effort })
     const res = spawnSync(claudeBin, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, cwd: scopeDir, timeout: timeoutMs, killSignal: 'SIGKILL' })
     if (res.error) throw new Error(`editor ${claudeBin} failed (${res.error.code || res.error.message})`)
-    if (res.status !== 0) throw new Error(`editor ${claudeBin} exited ${res.status}: ${editorFailureReason(res.stdout, res.stderr)}`)
+    // error_max_turns is a NON-fatal truncation (incremental acceptEdits applied) — score it and continue;
+    // any other non-zero exit is a real failure. See editorExitDisposition.
+    if (editorExitDisposition(res.status, res.stdout).fatal) throw new Error(`editor ${claudeBin} exited ${res.status}: ${editorFailureReason(res.stdout, res.stderr)}`)
     enforceReadOnly(scopeDir, readOnly) // RISK #1 guard runs before "changed" is judged
     return { changed: scopeChanged(scopeDir), costUsd: extractCost(res.stdout), tokens: extractTokens(res.stdout) }
   }

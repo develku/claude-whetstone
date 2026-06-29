@@ -79,6 +79,29 @@ export function editorFailureReason(stdout, stderr) {
   return tail ? tail.slice(-500) : '(no editor output)'
 }
 
+// The subtype of the terminal result element ('success', 'error_max_turns', 'error_during_execution', …),
+// or null if the output can't be parsed. Pure + exported for test.
+export function editorResultSubtype(stdout) {
+  try {
+    const parsed = JSON.parse(stdout)
+    const arr = Array.isArray(parsed) ? parsed : [parsed]
+    return arr.findLast((e) => e?.type === 'result')?.subtype ?? null
+  } catch {
+    return null
+  }
+}
+
+// Decide what a FINISHED `claude -p` exit means for the loop. A clean exit (0) and a turn-limit hit
+// (subtype 'error_max_turns', which exits NON-ZERO) are BOTH non-fatal: the editor applied its edits
+// incrementally (--permission-mode acceptEdits), so a truncated pass is bounded PROGRESS the loop should
+// score and build on next pass — not a dead loop. Every OTHER non-zero exit (rate limit, auth, unreadable
+// --mcp-config) is fatal; an unparseable output can't confirm max_turns, so it stays fatal (safe). Pure.
+export function editorExitDisposition(status, stdout) {
+  if (status === 0) return { fatal: false, truncated: false }
+  if (editorResultSubtype(stdout) === 'error_max_turns') return { fatal: false, truncated: true }
+  return { fatal: true, truncated: false }
+}
+
 // The editor runs in the artifact's OWN directory (so the nested edit inherits that project's
 // config), but --mcp-config is given relative to the DRIVER's cwd. Resolve it to absolute up front:
 // left relative, the child looks for it in the artifact dir, doesn't find it, and exits without
@@ -155,10 +178,11 @@ export function makeClaudeAct({ artifactPath, maxTurns = 12, model = null, claud
     // res.error is set on spawn failure, timeout (ETIMEDOUT), or maxBuffer overflow. Surface the
     // code so the loop's error handler records an actionable reason instead of a silent hang.
     if (res.error) throw new Error(`editor ${claudeBin} failed (${res.error.code || res.error.message})`)
-    // A NON-ZERO EXIT (rate limit, unreadable --mcp-config, auth failure) is a real failure too — and
-    // res.error is null for it. Without this, a failed call slips through as a {changed:false, $0}
-    // no-op and the loop misreports it as "no artifact change". Surface it like the scorer path does.
-    if (res.status !== 0) throw new Error(`editor ${claudeBin} exited ${res.status}: ${editorFailureReason(res.stdout, res.stderr)}`)
+    // A FATAL non-zero exit (rate limit, unreadable --mcp-config, auth failure) is a real failure — and
+    // res.error is null for it. Without surfacing it, a failed call slips through as a {changed:false, $0}
+    // no-op and the loop misreports it as "no artifact change". But a turn-limit hit (error_max_turns) is
+    // NOT fatal: the editor's incremental edits are applied, so the pass is bounded progress to be scored.
+    if (editorExitDisposition(res.status, res.stdout).fatal) throw new Error(`editor ${claudeBin} exited ${res.status}: ${editorFailureReason(res.stdout, res.stderr)}`)
 
     const after = hashFile(artifactPath)
     return { changed: before !== after, costUsd: extractCost(res.stdout), tokens: extractTokens(res.stdout) }

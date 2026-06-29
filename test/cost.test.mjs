@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { extractCost, extractTokens, editorFailureReason } from '../src/act-claude.mjs'
+import { extractCost, extractTokens, editorFailureReason, editorResultSubtype, editorExitDisposition } from '../src/act-claude.mjs'
 
 // extractCost parses `claude -p --output-format json` into the per-call costUsd that feeds
 // spent_usd — the sole input to the budget stop. Pin every branch, including the best-effort
@@ -99,4 +99,28 @@ test('editorFailureReason falls back to the stdout TAIL on a truncated/partial s
 
 test('editorFailureReason: empty in -> a generic marker, never empty', () => {
   assert.equal(editorFailureReason('', ''), '(no editor output)')
+})
+
+// editorResultSubtype / editorExitDisposition decide whether a non-zero `claude -p` exit is a real
+// failure or a NORMAL turn-limit truncation. error_max_turns means the editor used its per-pass turn
+// budget — its incremental edits (acceptEdits) are applied and persist — so the loop must score them and
+// continue, NOT treat the whole pass as fatal (which killed the H1 audit). Everything else stays fatal.
+test('editorResultSubtype reads the last result subtype; null on unparseable', () => {
+  assert.equal(editorResultSubtype(JSON.stringify([{ type: 'system' }, { type: 'result', subtype: 'success' }])), 'success')
+  assert.equal(editorResultSubtype(JSON.stringify({ type: 'result', subtype: 'error_max_turns' })), 'error_max_turns')
+  assert.equal(editorResultSubtype('not json'), null)
+})
+
+test('editorExitDisposition: a clean exit 0 is non-fatal', () => {
+  assert.deepEqual(editorExitDisposition(0, ''), { fatal: false, truncated: false })
+})
+
+test('editorExitDisposition: a turn-limit hit (error_max_turns, exit!=0) is non-fatal/truncated', () => {
+  const stdout = JSON.stringify([{ type: 'system', subtype: 'init' }, { type: 'result', is_error: true, subtype: 'error_max_turns' }])
+  assert.deepEqual(editorExitDisposition(1, stdout), { fatal: false, truncated: true })
+})
+
+test('editorExitDisposition: any OTHER non-zero exit is fatal (incl. unparseable -> cannot confirm max_turns)', () => {
+  assert.equal(editorExitDisposition(1, JSON.stringify([{ type: 'result', is_error: true, subtype: 'error_during_execution' }])).fatal, true)
+  assert.equal(editorExitDisposition(1, 'unparseable').fatal, true)
 })
