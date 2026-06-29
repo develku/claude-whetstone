@@ -10,7 +10,7 @@ const SCORERS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'scor
 
 test('loadPlanAllowlist: every DATA-only scorer is admitted with an absolute scorers/ path', () => {
   const m = loadPlanAllowlist()
-  for (const id of ['contains', 'io-assert', 'io-trace', 'io-invariant', 'io-effect']) {
+  for (const id of ['contains', 'io-assert', 'io-trace', 'io-invariant', 'io-effect', 'doc-lint']) {
     assert.ok(m.has(id), `expected data-only scorer ${id} in the allowlist`)
     assert.match(m.get(id), /scorers\/.+\.mjs$/)
   }

@@ -34,7 +34,11 @@ export function forgeShouldFire(cfg, state, verdict) {
 // NEVER be a proposable Forge check, even if an operator --scorer-allow names one (the MODEL picks the id;
 // the operator only names paths). The denylist test is normalization-robust + realpath-aware via
 // isUnsafeScorer (shared with scope-cli's SUBGATE_UNSAFE so the two trust boundaries cannot drift).
-// io-assert (JSON data only) is the safe behavioural check.
+// The io-* behavioural scorers (io-assert/io-trace/io-effect/io-invariant) are safe to propose for TWO
+// reasons: (1) their args are DATA only (JSON in/out — no shell exec), and (2) they import & run the model's
+// artifact in a locked-down CHILD process (src/iso-runner.mjs, #2), so the artifact code cannot reach the
+// oracle. Earlier comments calling these "data-only safe" were half-right — importing artifact CODE was the
+// real danger; out-of-process isolation, not the data-only args, is what closes it.
 const FORGE_UNSAFE_SCORERS = new Set(['test-pass-rate', 'composite'])
 const SCORERS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scorers')
 const SHIPPED_UNSAFE = [resolve(SCORERS_DIR, 'test-pass-rate.mjs'), resolve(SCORERS_DIR, 'composite.mjs')]

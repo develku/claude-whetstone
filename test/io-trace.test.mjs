@@ -1,94 +1,29 @@
-// test/io-trace.test.mjs
+// test/io-trace.test.mjs — judgeTrace (parent oracle) unit tests + CLI end-to-end (full isolation).
+// The EXECUTE half (construction/replay/canonicalData forge-defense) is tested in test/iso-execute.test.mjs.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { dirname } from 'node:path'
-import { evaluateTrace } from '../scorers/io-trace.mjs'
+import { judgeTrace } from '../scorers/io-trace.mjs'
 
-// A fake module exercising both construction idioms.
-class Stack {
-  constructor() { this.a = [] }
-  push(x) { this.a.push(x) }
-  pop() { return this.a.pop() }
-  size() { return this.a.length }
-}
-const makeCounter = (start = 0) => { let n = start; return { inc() { return ++n }, value() { return n } } }
-const MOD = { Stack, makeCounter }
-
-test('evaluateTrace: a class subject replays a method sequence and asserts returns (mutator -> null)', () => {
-  const r = evaluateTrace(MOD, { newName: 'Stack', steps: [['push', 1], ['push', 2], ['pop'], ['size']], expect: [null, null, 2, 1] })
-  assert.equal(r.pass, true)
-})
-
-test('evaluateTrace: a factory subject (closure state) over a call sequence', () => {
-  const r = evaluateTrace(MOD, { factoryName: 'makeCounter', steps: [['inc'], ['inc'], ['value']], expect: [1, 2, 2] })
-  assert.equal(r.pass, true)
-})
-
-test('evaluateTrace: --init args reach the constructor/factory', () => {
-  const r = evaluateTrace(MOD, { factoryName: 'makeCounter', init: [10], steps: [['inc'], ['value']], expect: [11, 11] })
-  assert.equal(r.pass, true)
-})
-
-test('evaluateTrace: a behaviour mismatch fails with the observed vs expected', () => {
-  const r = evaluateTrace(MOD, { factoryName: 'makeCounter', steps: [['inc'], ['inc'], ['value']], expect: [1, 2, 99] })
+test('judgeTrace: matching returns pass; a mismatch reports observed vs expected', () => {
+  assert.equal(judgeTrace([null, null, 2, 1], [null, null, 2, 1]).pass, true)
+  const r = judgeTrace([1, 2, 2], [1, 2, 99])
   assert.equal(r.pass, false)
   assert.deepEqual(r.failing.got, [1, 2, 2])
+  assert.deepEqual(r.failing.expected, [1, 2, 99])
 })
 
-test('evaluateTrace: a missing method is a scorer error (caught, not a silent pass)', () => {
-  const r = evaluateTrace(MOD, { newName: 'Stack', steps: [['nope']], expect: [null] })
-  assert.equal(r.pass, false)
-  assert.match(r.failing.error, /method|nope/i)
-})
-
-test('evaluateTrace: a missing export is a scorer error', () => {
-  const r = evaluateTrace(MOD, { newName: 'Ghost', steps: [['x']], expect: [null] })
-  assert.equal(r.pass, false)
-  assert.match(r.failing.error, /export|constructor|Ghost/i)
-})
-
-// FORGE DEFENSE (the artifact controls its method return values): a returned object must NOT be able to forge
-// the expected value via toJSON / getters — canonicalData walks own data props and never invokes them.
-test('evaluateTrace: a return value with a forging toJSON does NOT pass (toJSON never invoked)', () => {
-  const mod = { make: () => ({ get: () => ({ real: 'WRONG', toJSON: () => 42 }) }) }
-  const r = evaluateTrace(mod, { factoryName: 'make', steps: [['get']], expect: [42] })
-  assert.equal(r.pass, false)
-  assert.match(r.failing.error ?? '', /not plain JSON|function/i)
-})
-
-test('evaluateTrace: a return value with a forging getter does NOT pass', () => {
-  const mod = { make: () => ({ get: () => { const o = {}; Object.defineProperty(o, 'v', { get: () => 1, enumerable: true }); return o } }) }
-  const r = evaluateTrace(mod, { factoryName: 'make', steps: [['get']], expect: [{ v: 1 }] })
-  assert.equal(r.pass, false)
-  assert.match(r.failing.error ?? '', /accessor|not plain JSON/i)
-})
-
-test('evaluateTrace: a cyclic return scores fail (artifact failure), never a scorer crash', () => {
-  const mod = { make: () => ({ get: () => { const o = {}; o.self = o; return o } }) }
-  const r = evaluateTrace(mod, { factoryName: 'make', steps: [['get']], expect: [{}] })
-  assert.equal(r.pass, false)
-  assert.match(r.failing.error ?? '', /cyclic|not plain JSON/i)
-})
-
-test('evaluateTrace: void-method returns still normalize undefined -> null (behaviour preserved)', () => {
-  class S { constructor() { this.a = [] } push(x) { this.a.push(x) } pop() { return this.a.pop() } }
-  const r = evaluateTrace({ S }, { newName: 'S', steps: [['push', 1], ['pop']], expect: [null, 1] })
-  assert.equal(r.pass, true) // push -> undefined -> null, exactly as the pre-hardening JSON.stringify did
-})
-
-// CLI end-to-end against a real stateful artifact (mirrors io-assert's contract).
 const SCORER = join(dirname(fileURLToPath(import.meta.url)), '..', 'scorers', 'io-trace.mjs')
 const runCli = (output, args) => {
   const res = spawnSync('node', [SCORER, '--output', output, ...args], { encoding: 'utf8' })
   return { status: res.status, out: res.stdout, err: res.stderr }
 }
 
-test('io-trace CLI: score 100 on an honest stateful artifact, 0 on a gamed one', () => {
+test('io-trace CLI: score 100 on an honest stateful artifact, 0 on a gamed one (out-of-process)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'iotrace-'))
   const honest = join(dir, 'honest.mjs')
   writeFileSync(honest, 'export const makeCounter = () => { let n = 0; return { inc() { return ++n }, value() { return n } } }\n')
@@ -101,6 +36,24 @@ test('io-trace CLI: score 100 on an honest stateful artifact, 0 on a gamed one',
   const bad = runCli(gamed, args)
   assert.equal(bad.status, 0)
   assert.equal(JSON.parse(bad.out).score, 0)
+})
+
+test('io-trace CLI: a gamed artifact that monkeypatches the oracle still scores 0 (isolation)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'iotrace-'))
+  const f = join(dir, 'g.mjs')
+  // patch assert in the child + return wrong values: the parent oracle is untouched.
+  writeFileSync(f, "import a from 'node:assert/strict'\na.deepEqual=()=>{}\nexport const make = () => ({ inc(){ return 999 } })\n")
+  const r = runCli(f, ['--factory', 'make', '--trace', JSON.stringify([['inc']]), '--expect', JSON.stringify([1])])
+  assert.equal(r.status, 0)
+  assert.equal(JSON.parse(r.out).score, 0)
+})
+
+test('io-trace CLI: a missing export is a score-0 verdict (not exit 2)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'iotrace-'))
+  const f = join(dir, 'a.mjs'); writeFileSync(f, 'export const other = 1\n')
+  const r = runCli(f, ['--factory', 'ghost', '--trace', '[["x"]]', '--expect', '[1]'])
+  assert.equal(r.status, 0)
+  assert.equal(JSON.parse(r.out).score, 0)
 })
 
 test('io-trace CLI: exits 2 on a malformed --trace (not a silent verdict)', () => {

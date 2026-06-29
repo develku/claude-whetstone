@@ -7,20 +7,24 @@ on:
 
 jobs:
   test:
-    name: node --test (${{ matrix.os }})
+    name: node --test (${{ matrix.os }}, node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
     strategy:
-      # Run both legs even if one fails, so a macOS-only or Linux-only regression
-      # is visible in the same run instead of being masked by the other.
+      # Run all legs even if one fails, so an OS- or Node-version-specific regression
+      # is visible in the same run instead of being masked by the others.
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        # whetstone requires Node >= 23.5.0 (package.json engines): the #2 behavioural-scorer isolation needs
+        # module.registerHooks (23.5) + the stable Permission Model (24) — neither exists on Node 22. Test on the
+        # lowest supported LTS (24) and the latest (26); the meetsNodeFloor guard's old-Node path is unit-tested.
+        node: ['24', '26']
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ matrix.node }}
 
       # No dependencies (package.json has none) — the suite is pure node:test with
       # stubbed act + deterministic scorers, so it spends nothing and needs no install.

@@ -16,10 +16,16 @@ import { isUnsafeScorer } from './scorer-safety.mjs'
 
 const SCORERS_DIR = rpath(dirname(fileURLToPath(import.meta.url)), '..', 'scorers')
 
-// The DATA-only scorers: they read the editor's structured output (JSON / call traces / effects) and
-// compare — verified to spawn NO subprocess and run NO shell (grep child_process/spawn/exec/shell = 0).
+// The DATA-only scorers: they read the editor's structured output (JSON / call traces / effects) and compare.
+// Their args are DATA, never a command, and they run NO shell. NOTE (post-#2): the io-* scorers DO spawn a
+// child — but it is `node --permission` with a static arg array (no shell:true) running the artifact in a
+// locked-down sandbox (src/iso-runner.mjs); that hardened, no-shell, data-stdin spawn is what makes them safe
+// to be model-selectable, NOT a zero-subprocess property. contains/doc-lint spawn nothing.
 // POSITIVE allowlist: ONLY these shipped ids are model-selectable.
-export const PLAN_DATA_ONLY = new Set(['contains', 'io-assert', 'io-trace', 'io-invariant', 'io-effect'])
+// doc-lint reads a markdown file + checks repo file-existence/version (node:fs reads only — no
+// child_process/spawn/exec/shell/--cmd/API); its model-authorable args redirect WHAT to read, never
+// WHAT to execute, so it is genuinely data-only and safe to be model-selectable.
+export const PLAN_DATA_ONLY = new Set(['contains', 'io-assert', 'io-trace', 'io-invariant', 'io-effect', 'doc-lint'])
 
 // The shell-executing scorers, HARD-subtracted (lowercased stems — also the denySet for isUnsafeScorer).
 // composite runs manifest lines via shell:true; floor runs an operator --cmd; test-pass-rate runs a

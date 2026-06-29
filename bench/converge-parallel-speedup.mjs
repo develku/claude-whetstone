@@ -1,18 +1,21 @@
 #!/usr/bin/env node
 // bench/converge-parallel-speedup.mjs
-// Track B speedup proof (spec §11 test 20). The $0 converge-parallel tests prove the concurrent round's
-// CORRECTNESS with stub children. This asks the throughput question: when two DISJOINT-editScope objectives
-// are both independently raisable, does --parallel raise BOTH in ONE merged batch round (one gate re-measure),
+// Track B batch-round proof (spec §11 test 20). The $0 converge-parallel tests prove the batch round's
+// CORRECTNESS with stub children. This asks the GATE-EFFICIENCY question: when two DISJOINT-editScope objectives
+// are both independently raisable, does --parallel raise BOTH in ONE merged batch round (ONE gate re-measure),
 // where the sequential backend takes TWO rounds (two gates)? The gate path is IDENTICAL across both backends
-// (runConvergeParallel reuses the verbatim reMeasureAll/globalVerdict) — so the speedup is free of any gate
+// (runConvergeParallel reuses the verbatim reMeasureAll/globalVerdict) — so the saving is free of any gate
 // weakening: the merged candidate is gated exactly as a sequential candidate would be.
 //
-// Honest reporting:
+// HONESTY (finding #9): the win measured here is STRUCTURAL — fewer GATE RE-MEASURES (one merged round for N
+// objectives), NOT wall-clock speedup. The editors run SERIALLY (runChild calls the blocking spawnSync editor,
+// which holds the event loop), so the fan-out is not wall-clock-concurrent; true concurrency needs an async
+// editor (deferred). This bench does NOT time wall-clock and makes no concurrency claim.
 //   - $0 STUB: runs BOTH backends on the same scenario and asserts parallel=1 batch round (both objectives),
-//     sequential=2 single-objective rounds, both converge to done. The structural speedup, proven at $0.
-//   - PAID: runs ONLY the parallel backend with REAL editors. NON-NULL iff two real-model editors, running
-//     concurrently in their own worktrees, both genuinely raised their disjoint objective and their edits
-//     MERGED into ONE candidate that passed the gate ONCE (survivors = both, one accepted batch round, done).
+//     sequential=2 single-objective rounds, both converge to done. The structural saving, proven at $0.
+//   - PAID: runs ONLY the parallel backend with REAL editors. NON-NULL iff two real-model editors (each in its
+//     own worktree) both genuinely raised their disjoint objective and their edits MERGED into ONE candidate
+//     that passed the gate ONCE (survivors = both, one accepted batch round, done).
 //     NULL iff a real editor flaked/no-op'd so the round did not merge both (reported honestly, not asserted).
 // CORRECTNESS is asserted ALWAYS: every accepted batch round's merged commit must have last-good as its parent
 // and both objectives must end met on the converged tree — a false-done is never allowed.
@@ -168,7 +171,7 @@ if (STUB) {
     process.exit(1)
   }
   if (par.batchRounds === 1 && par.mergedBoth) {
-    console.log(`\nreading: NON-NULL — two real ${model} editors ran CONCURRENTLY in their own worktrees, both genuinely raised their disjoint objective, and their edits MERGED into ONE candidate that passed the gate ONCE (1 batch round for 2 objectives). The concurrent fan-out worked under the identical gate.`)
+    console.log(`\nreading: NON-NULL — two real ${model} editors (each in its own worktree) both genuinely raised their disjoint objective, and their edits MERGED into ONE candidate that passed the gate ONCE: 1 batch round / 1 gate re-measure for 2 objectives (vs sequential's 2). NOTE: the editors ran SERIALLY (blocking spawnSync) — the win is the single batched gate, NOT wall-clock speedup. The batched fan-out worked under the identical gate.`)
   } else {
     console.log(`\nreading: NULL — the run converged correctly, but the speedup path (both objectives merged in ONE batch round) was not exercised by real models (a real editor likely flaked/no-op'd a round; batchRounds=${par.batchRounds} mergedBoth=${par.mergedBoth}). Correctness held; the one-round merge was shown only by the stub.`)
   }

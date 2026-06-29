@@ -7,8 +7,13 @@
 // passes ANY correct implementation (array- or list-backed stack, closure- or class-based counter) and fails
 // a gamed one. End a trace with a getter to assert FINAL STATE (no separate concept needed).
 //
-// Args are DATA only (JSON method/args/returns), never code, so it stays inside the Verifier Forge allowlist
-// trust boundary. A 1-step trace IS io-assert's case; io-trace is the N-step superset for stateful surfaces.
+// Args are DATA only (JSON method/args/returns), never code; combined with out-of-process isolation (#2) this
+// stays inside the Verifier Forge allowlist trust boundary. A 1-step trace IS io-assert's case; io-trace is the
+// N-step superset for stateful surfaces.
+//
+// ISOLATION (#2): the subject is constructed and the method sequence replayed in a locked-down CHILD process
+// (src/iso-runner.mjs), which returns the INERT, canonicalData-snapshotted per-step returns; the oracle
+// (assert.deepEqual vs --expect) runs HERE in this clean process the artifact can't reach.
 //
 // Contract: --output <path>; exactly one of --new <ClassExport> | --factory <fnExport>; optional
 // --init '<JSON args>' (constructor/factory args); --trace '<JSON [[method,...args],...]>'; --expect
@@ -16,40 +21,16 @@
 import { pathToFileURL } from 'node:url'
 import assert from 'node:assert/strict'
 import { resolveOutput } from '../src/safe-rel.mjs'
-import { canonicalData } from '../src/canonical-data.mjs'
+import { runIsolated, classifyObservation } from '../src/iso-runner.mjs'
 
 const arg = (name) => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined }
 const die = (msg) => { process.stderr.write(`io-trace: ${msg}\n`); process.exit(2) }
 
-// Construct the subject, replay the call sequence, and deep-equal the observed returns against `expect`.
-// Returns {pass} or {pass:false, failing}. Pure + exported (a test passes a fake module). Returns are
-// JSON-normalized (undefined -> null) so a mutator that returns undefined compares against JSON `expect`.
-export function evaluateTrace(mod, { newName, factoryName, init = [], steps, expect }) {
-  let subject
-  if (newName) {
-    const Ctor = mod[newName]
-    if (typeof Ctor !== 'function') return { pass: false, failing: { error: `artifact has no constructor export "${newName}"` } }
-    try { subject = new Ctor(...init) } catch (e) { return { pass: false, failing: { error: `constructing ${newName} threw: ${e.message}` } } }
-  } else {
-    const make = mod[factoryName]
-    if (typeof make !== 'function') return { pass: false, failing: { error: `artifact has no factory export "${factoryName}"` } }
-    try { subject = make(...init) } catch (e) { return { pass: false, failing: { error: `factory ${factoryName} threw: ${e.message}` } } }
-  }
-  const returns = []
-  for (const step of steps) {
-    const [method, ...args] = step
-    const fn = subject == null ? undefined : subject[method]
-    if (typeof fn !== 'function') return { pass: false, failing: { step, error: `subject has no method "${method}"` } }
-    try { returns.push(fn.apply(subject, args)) } catch (e) { return { pass: false, failing: { step, error: e.message } } }
-  }
-  // Normalize observed returns to plain JSON via the strict canonicalData walker — NOT JSON.stringify, which
-  // would invoke a gamed artifact's `toJSON`/getters and let it FORGE a return value. Only a TOP-LEVEL void
-  // return (undefined) is mapped to null (preserving the push->null semantics); every non-undefined return is
-  // walked STRICTLY (a NESTED undefined throws, matching the forge-defense, not JSON's silent drop). A non-JSON
-  // / forge-shaped return is an ARTIFACT failure (score 0), never a scorer crash.
-  let got
-  try { got = returns.map((r) => (r === undefined ? null : canonicalData(r))) } catch (e) { return { pass: false, failing: { error: `a return value is not plain JSON data (${e.message})` } } }
-  try { assert.deepEqual(got, expect) } catch { return { pass: false, failing: { expected: expect, got } } }
+// JUDGE (parent-side oracle): deep-equal the isolated, inert per-step returns against `expect`. The returns are
+// already JSON-normalized by the child (undefined -> null), so a mutator returning undefined compares against
+// JSON `expect`. Returns {pass} or {pass:false, failing}. Pure + exported (a test passes a fake observation).
+export function judgeTrace(returns, expect) {
+  try { assert.deepEqual(returns, expect) } catch { return { pass: false, failing: { expected: expect, got: returns } } }
   return { pass: true }
 }
 
@@ -71,13 +52,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (!Array.isArray(expect)) die('--expect must be a JSON array of return values')
   if (!Array.isArray(init)) die('--init must be a JSON array of arguments')
 
-  let mod
-  try { mod = await import(pathToFileURL(output).href) } catch (e) { die(`cannot import artifact ${output}: ${e.message}`) }
-
-  const r = evaluateTrace(mod, { newName, factoryName, init, steps, expect })
-  process.stdout.write(JSON.stringify({
-    score: r.pass ? 100 : 0,
-    critique: r.pass ? `all ${steps.length} trace steps behave as expected` : `behavioural trace failed: ${JSON.stringify(r.failing)}`,
-    findings: [],
-  }))
+  const obs = runIsolated({ artifact: output, mode: 'trace', spec: { newName, factoryName, init, steps }, readRoot: arg('--output') })
+  const c = classifyObservation(obs) // trace: a missing export / construction failure is a score-0 verdict
+  if (c) {
+    if (c.kind === 'scorer-error') die(c.message)
+    process.stdout.write(JSON.stringify({ score: 0, critique: c.critique, findings: [] }))
+  } else {
+    const r = judgeTrace(obs.returns, expect)
+    process.stdout.write(JSON.stringify({
+      score: r.pass ? 100 : 0,
+      critique: r.pass ? `all ${steps.length} trace steps behave as expected` : `behavioural trace failed: ${JSON.stringify(r.failing)}`,
+      findings: [],
+    }))
+  }
 }

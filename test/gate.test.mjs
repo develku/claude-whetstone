@@ -71,6 +71,15 @@ test('plateau is measured on best-so-far, not current — a single noise dip doe
   assert.equal(gateVerdict(s).status, 'plateau')
 })
 
+test('boundary: a best improvement of exactly min_delta is NOT a plateau (strict <)', () => {
+  // best climbs 50 -> 51 across window=3, so improvement == min_delta (1); strict `<` keeps it running.
+  // Pins the `improvement < min_delta` contract so a future flip to `<=` is a deliberate, tested change
+  // (mirrors the strict-`>` budget boundary pinned in loop.test.mjs).
+  assert.equal(gateVerdict(withHistory([50, 50, 50, 51])).status, 'running')
+  // one increment lower — no improvement across the window — DOES plateau
+  assert.equal(gateVerdict(withHistory([50, 50, 50, 50])).status, 'plateau')
+})
+
 test('error when the score is null (scorer produced nothing)', () => {
   assert.equal(gateVerdict(withHistory([40, 60, null])).status, 'error')
 })

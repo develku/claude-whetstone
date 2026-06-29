@@ -6,12 +6,22 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseInvariant, assertInvariants, evaluateInvariants } from '../scorers/io-invariant.mjs'
+import { parseInvariant, assertInvariants, judgeInvariants } from '../scorers/io-invariant.mjs'
+import { executeInvariants } from '../src/iso-execute.mjs'
 
 const IO = join(dirname(fileURLToPath(import.meta.url)), '..', 'scorers', 'io-invariant.mjs')
 const run = (output, args) => spawnSync('node', [IO, '--output', output, ...args], { encoding: 'utf8' })
 const artifact = (src) => { const p = join(mkdtempSync(join(tmpdir(), 'inv-')), 'impl.mjs'); writeFileSync(p, src); return p }
-const ev = (fn, argLists, names, opts) => evaluateInvariants(fn, argLists, names.map(parseInvariant), opts)
+// Compose the two halves the way the scorer does (EXECUTE in iso-execute + JUDGE in the scorer), so these
+// unit tests mirror the old evaluateInvariants contract while exercising the canonicalData snapshot path.
+const ev = (fn, argLists, names, opts = {}) => {
+  // The child receives a JSON COPY of the cases (over stdin), so a destructive impl mutates only its own copy
+  // and the parent's pristine argLists is what judgeInvariants snapshots. Model that copy boundary here.
+  const childCases = JSON.parse(JSON.stringify(argLists))
+  const obs = executeInvariants({ f: fn }, { fn: 'f', cases: childCases, basis: opts.basis ?? 0 })
+  if (!obs.ok) return { pass: false, failing: { error: obs.error || obs.reason } }
+  return judgeInvariants(obs, argLists, names.map(parseInvariant), opts)
+}
 
 // ---- parseInvariant ----
 test('parseInvariant splits name:JSONparam on the first colon', () => {
@@ -126,6 +136,21 @@ test('CLI: honest sort scores 100 with a double-wrapped unary-array case', () =>
 test('CLI: a gamed return-input scores 0', () => {
   const a = artifact('export const sort = (xs) => xs\n')
   const r = run(a, ['--fn', 'sort', '--case', '[[3,1,2]]', '--invariant', 'sorted'])
+  assert.equal(JSON.parse(r.stdout).score, 0)
+})
+
+test('CLI: a fn that MUTATES its input to fake a permutation is caught end-to-end (parent snapshot is pristine)', () => {
+  // The child mutates ITS json copy; the parent's pre-call basis is untouched, so permutation-of-input fails.
+  const a = artifact('export const sort = (xs) => { xs.splice(0, xs.length, 1, 2, 3); return [1, 2, 3] }\n')
+  const r = run(a, ['--fn', 'sort', '--case', '[[5,5,9]]', '--invariant', 'permutation-of-input'])
+  assert.equal(r.status, 0)
+  assert.equal(JSON.parse(r.stdout).score, 0)
+})
+
+test('CLI: a gamed artifact monkeypatching the oracle still scores 0 (isolation)', () => {
+  const a = artifact("import a from 'node:assert/strict'\na.deepEqual=()=>{}\nexport const sort = (xs) => xs\n") // return-input, neuter assert
+  const r = run(a, ['--fn', 'sort', '--case', '[[3,1,2]]', '--invariant', 'sorted'])
+  assert.equal(r.status, 0)
   assert.equal(JSON.parse(r.stdout).score, 0)
 })
 
