@@ -1,7 +1,7 @@
 // State is the durable, code-owned record of a run. The model never writes it.
 // recordPass is a PURE immutable update (operator coding-style: new objects, no
 // mutation); the file I/O helpers are the only side-effecting functions here.
-import { readFileSync, writeFileSync, renameSync, mkdirSync, copyFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, mkdirSync, copyFileSync, existsSync, realpathSync } from 'node:fs'
 import { join, extname, resolve, sep } from 'node:path'
 import { redactSecrets } from './redact.mjs'
 
@@ -100,6 +100,21 @@ export function safeSnapshotPath(loopDir, snap) {
   const full = resolve(base, snap)
   if (full !== base && !full.startsWith(base + sep)) {
     throw new Error(`snapshot ref escapes the run dir: ${snap}`)
+  }
+  // The lexical guard above is realpath-blind: an in-dir SYMLINK whose target is OUTSIDE the run dir passes
+  // it, yet the consumers FOLLOW the link — driver.mjs copyFileSync's it over the artifact and forge/hook
+  // reads it, an out-of-dir file-read primitive from a tampered/shared state.json. Re-check containment on
+  // the REAL paths. A not-yet-materialized ref (realpathSync throws) has no symlink to follow — the lexical
+  // guard already held. Mirrors src/safe-rel.mjs resolveOutput.
+  let realFull
+  try {
+    realFull = realpathSync(full)
+  } catch {
+    return full
+  }
+  const realBase = realpathSync(base) // base must exist since `full` (under it) resolved
+  if (realFull !== realBase && !realFull.startsWith(realBase + sep)) {
+    throw new Error(`snapshot ref escapes the run dir via symlink: ${snap}`)
   }
   return full
 }
