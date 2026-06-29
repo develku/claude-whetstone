@@ -64,10 +64,27 @@ proves each leaf *measurable*, not that a *set* of leaves is *sufficient*).
 |---|---|---|
 | **Stable** | `driver.mjs` single-file loop + objective scorers (`test-pass-rate`, `contains`, `io-assert`, `io-trace`, `io-invariant`, `io-effect`, `composite`, `floor`) + confirm-scorer, keep-best, plateau-escalate, crash-resume, dual token/USD budget | The supported v1. Code owns the gate; the gate is objective. |
 | **Experimental** | `scope-cli.mjs` (whole-dir, git-backed) · `llm-judge` (subjective gate) | Works; use with care. `llm-judge` is a *subjective* gate — capturable, weaker than an objective scorer. |
-| **Alpha** (in repo, unsupported) | `converge-cli` (multi-objective) · `--parallel` (concurrent fan-out) · `plan-cli` (proactive planner) | Built and $0-tested, but kept out of the supported surface and the `/whet` launcher until an external benchmark proves them. |
+| **Alpha** (in repo, unsupported) | `converge-cli` (multi-objective) · `--parallel` (concurrent fan-out) · `plan-cli` (proactive planner) · `--candidates` (tournament) · `replan-cli` + `outer-cli` (re-decomposition) | Built and $0-tested (several PAID-validated NON-NULL), but kept out of the supported surface and the `/whet` launcher until an external benchmark proves them. |
 
 The gate is **objective for code** (tests/assertions) and **subjective for non-code** (an `llm-judge`
 rubric): whetstone runs on any artifact a scorer can measure, but it is only as strong as the scorer.
+
+### The dynamic control plane (alpha)
+
+Above the single-objective loop, an alpha layer turns whetstone into a repo-wide, self-adapting loop —
+still under a code-owned **measured** gate, with two seats that stay **permanently human**: authoring the
+held-out truth, and accepting a structural replan.
+
+| Surface | What it adds | Safety |
+|---|---|---|
+| **tournament** (`converge --candidates K`) | K independent candidate editors per objective; the winner is picked on the **held-out** signal, never the gameable visible score | defeats the *winner's curse* (max-over-N on a soft gate optimizes into its blind spots); the held-out bar can never be lowered |
+| **global held-out truth gate** (`global_held_out` in a converge manifest) | a top-level acceptance check **separate** from the per-objective confirms — `done` requires it too | backstops *decomposition capture* (every objective met yet the real goal unmet); operator-authored, run-immutable (hash-pinned), outside every editScope |
+| **structural-feedback detector** (`converge-diagnostics`) | classifies a stalled run: `held_out_fail` / `contradiction` / `impossibility` / `plateau` | diagnostic only — never an authority over the gate |
+| **replan proposal** (`replan-cli` / `outer-cli`) | on a decomposition-fault stall, a model proposes a **different** decomposition | proposer-only: the proposal is *written for human review*, never auto-applied; the immutable truth is carried verbatim |
+
+The orchestration runtime is reimplemented in-repo as the **default** portable control plane (`--resume`,
+budgets, rollback, crash-recovery); the Claude Code Workflow tool is an *optional attended `act` drop-in*,
+never the orchestrator or the gate owner (see [Backends & the Workflow tool](#backends--the-claude-code-workflow-tool)).
 
 ## Install as a Claude Code plugin
 
@@ -344,6 +361,12 @@ src/driver.mjs      CLI + real wiring + config        test/driver.test.mjs, test
 scorers/test-pass-rate.mjs   reference scorer          test/scorer.test.mjs
 scorers/composite.mjs        min-combine N sub-scorers  test/composite.test.mjs
 scorers/llm-judge.mjs        opus-as-judge (subjective) test/judge.test.mjs
+
+# alpha — the dynamic control plane (multi-objective, repo-wide)
+src/converge*.mjs   multi-objective gate + tournament + global held-out truth + --parallel
+src/converge-diagnostics.mjs  structural-feedback detector (diagnostic only)
+src/plan*.mjs / src/replan*.mjs / src/outer*.mjs  proactive planner · re-decomposition proposal · outer loop
+src/whet.mjs        intake router (driver / scope / converge)
 ```
 
 See `SPEC.md` for the file/scorer/gate contracts and the config format.
