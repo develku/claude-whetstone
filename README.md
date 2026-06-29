@@ -9,8 +9,9 @@ A deterministic <b>loop-engineering</b> driver for Claude Code — raise <i>one<
 measured score threshold, where <b>code owns the gate</b> and the <b>model owns only diagnosis + edits</b>.
 </p>
 
-> Status: **early spike, public.** Built to be matured by running it on itself (dogfooding); the cost,
-> auth, and security model are exercised end-to-end, not speculative. Expect rough edges.
+> Status: **v1.0.0 — the single-file core is stable; the orchestration layers are alpha.** See
+> [What's stable in v1](#whats-stable-in-v1). Matured by running it on itself (dogfooding); the cost,
+> auth, and security model are exercised end-to-end, not speculative.
 
 ## How the loop works
 
@@ -51,6 +52,22 @@ decide whether it's done. Loop engineering's upgrade is to take that decision *a
 
 The model literally cannot vote itself done, because the `score >= target` branch lives in `gate.mjs`,
 not in a prompt.
+
+## What's stable in v1
+
+whetstone is honest about maturity. **v1.0.0 declares the single-file core stable**; the multi-file and
+orchestration layers exist and are tested at $0 but are **not** promoted to the supported surface —
+promoting them would assert sufficiency / scorer-capture guarantees that are not yet proven (the loop
+proves each leaf *measurable*, not that a *set* of leaves is *sufficient*).
+
+| Tier | Surface | Notes |
+|---|---|---|
+| **Stable** | `driver.mjs` single-file loop + objective scorers (`test-pass-rate`, `contains`, `io-assert`, `io-trace`, `io-invariant`, `io-effect`, `composite`, `floor`) + confirm-scorer, keep-best, plateau-escalate, crash-resume, dual token/USD budget | The supported v1. Code owns the gate; the gate is objective. |
+| **Experimental** | `scope-cli.mjs` (whole-dir, git-backed) · `llm-judge` (subjective gate) | Works; use with care. `llm-judge` is a *subjective* gate — capturable, weaker than an objective scorer. |
+| **Alpha** (in repo, unsupported) | `converge-cli` (multi-objective) · `--parallel` (concurrent fan-out) · `plan-cli` (proactive planner) | Built and $0-tested, but kept out of the supported surface and the `/whet` launcher until an external benchmark proves them. |
+
+The gate is **objective for code** (tests/assertions) and **subjective for non-code** (an `llm-judge`
+rubric): whetstone runs on any artifact a scorer can measure, but it is only as strong as the scorer.
 
 ## Install as a Claude Code plugin
 

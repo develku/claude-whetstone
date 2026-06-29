@@ -1,9 +1,12 @@
 {
   "name": "claude-whetstone",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "A deterministic loop-engineering driver: code owns the gate, the model owns diagnosis + edits. Raises one artifact toward a measured score threshold.",
+  "bin": {
+    "whetstone": "src/driver.mjs"
+  },
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "bench": "node bench/run-bench.mjs"
