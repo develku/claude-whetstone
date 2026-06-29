@@ -1,0 +1,31 @@
+{
+  "goal": "Ship CSV export without breaking the import path",
+  "floor": { "cmd": "npm test", "readOnly": ["package.json", "jest.config.js"] },
+  "global_budget_tokens": 8000000,
+  "objective_cap": 8,
+  "objectives": [
+    {
+      "id": "export",
+      "goal": "implement CSV export under src/export",
+      "scorer": "node scorers/test-pass-rate.mjs --cmd \"npm test -- src/export\"",
+      "target": 100,
+      "editScope": "src/export"
+    },
+    {
+      "id": "import-quality",
+      "goal": "keep the import module clean and well-structured",
+      "judgeClass": true,
+      "scorer": "node scorers/llm-judge.mjs --rubric rubrics/import.md",
+      "confirmScorer": "node scorers/llm-judge.mjs --rubric rubrics/import-heldout.md",
+      "target": 85,
+      "editScope": "src/import"
+    }
+  ],
+  "global_held_out": [
+    {
+      "id": "end-to-end-truth",
+      "scorer": "node scorers/test-pass-rate.mjs --cmd \"npm run test:e2e\"",
+      "target": 100
+    }
+  ]
+}
