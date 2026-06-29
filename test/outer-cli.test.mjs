@@ -63,6 +63,26 @@ test('runOuterCli: a replan-worthy stall WRITES a proposal + HUMAN REVIEW, never
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
+test('runOuterCli: reports the REAL replan proposer spend (not a masked 0)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'whet-outer-spend-'))
+  try {
+    const mPath = join(dir, 'm.json'); writeFileSync(mPath, JSON.stringify(PRIOR))
+    const outP = join(dir, 'proposal.json')
+    const out = []
+    const code = await runOuterCli(
+      { scope: 'repo', objectives: mPath, proposalOut: outP, proposeOnStall: true, testDirs: ['test'] },
+      {
+        runConverge: async () => ({ state: { structural_signal: 'held_out_fail' }, verdict: { status: 'capped', reason: 'decomposition insufficient' } }),
+        // a real opus replan burns tokens — the proposer returns spend at the TOP level (like planManifest), not in report
+        planManifest: async (cfg) => ({ manifest: { goal: cfg.goal, floor: cfg.floor, objectives: [{ id: 'new', goal: 'g', scorer: 'node sc/new.mjs', target: 90, editScope: 'new' }] }, report: { coverage_score: 50 }, spentUsd: 0.34, spentTokens: 12345 }),
+        planCall: async () => '[]', lsFiles: () => [], log: (s) => out.push(s), errlog: (s) => out.push('ERR:' + s),
+      },
+    )
+    assert.equal(code, 1)
+    assert.match(out.join('\n'), /12,345 tokens/) // the ACTUAL proposer spend surfaces, never a hard-coded 0
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
 test('runOuterCli: refuses when proposing is on but --propose-out is missing', async () => {
   const out = []
   const code = await runOuterCli(

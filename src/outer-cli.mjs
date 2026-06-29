@@ -106,7 +106,7 @@ export async function runOuterCli(cfg, deps = {}) {
 
   log(`inner converge: ${r.verdict.status} — ${r.verdict.reason}`)
   if (r.proposal) {
-    log(`spend (replan proposer): ${formatSpend({ tokens: r.proposal.report?.spentTokens ?? 0, costUsd: r.proposal.report?.spentUsd ?? 0 })}`)
+    log(`spend (replan proposer): ${formatSpend({ tokens: r.proposal.spentTokens ?? 0, costUsd: r.proposal.spentUsd ?? 0 })}`)
     log(`REPLAN PROPOSAL written: ${r.proposal.path}`)
     log('HUMAN REVIEW REQUIRED — NOT applied. To ACCEPT, run:')
     log(`  whetstone-converge --scope ${cfg.scope} --objectives ${r.proposal.path}`)

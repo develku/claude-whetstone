@@ -35,5 +35,7 @@ export async function runOuterLoop(cfg, deps) {
   )
   ;(deps.writeProposal ?? (() => {}))(proposalOut, proposed.manifest)
   log(`outer: replan proposal for '${signal}' written to ${proposalOut} — HUMAN REVIEW required (NOT applied)`)
-  return { state, verdict, proposal: { manifest: proposed.manifest, path: proposalOut, report: proposed.report }, reason: `stalled (${signal}) — replan proposal written for human review` }
+  // Carry the proposer's spend (proposeReplan returns it at the TOP level, like planManifest — NOT inside report) so
+  // the CLI can report the real opus token/cost burn rather than a masked 0.
+  return { state, verdict, proposal: { manifest: proposed.manifest, path: proposalOut, report: proposed.report, spentUsd: proposed.spentUsd, spentTokens: proposed.spentTokens }, reason: `stalled (${signal}) — replan proposal written for human review` }
 }

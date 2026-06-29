@@ -664,7 +664,12 @@ export async function runObjectiveTournament(state, cfg, scopeDir, globalRO, obj
   if (pick.winnerIndex == null) {
     rollbackToLastGood(scopeDir, state.last_good_sha) // defensive: keep the live tree at the anchor
     cleanupRefs()
-    state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: state.last_good_sha, candidate_sha: null, accepted: false, candidates: K, reason: pick.reason, structural_signal: pick.signal ?? null, spent_tokens: totalTokens }]
+    // Mirror runOneObjective's regression rollback: if any candidate actually produced (and advanced) a change that
+    // was then rejected, record rolledBack:true so the `contradiction` diagnostic — which counts rolledBack rounds —
+    // also works in tournament mode. A round where no candidate changed anything is NOT a rollback (matches the
+    // single-candidate "no in-scope change" entry, which carries no rolledBack flag).
+    const producedChange = candidates.some((c) => c.candidateSha)
+    state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: state.last_good_sha, candidate_sha: null, accepted: false, candidates: K, ...(producedChange ? { rolledBack: true } : {}), reason: pick.reason, structural_signal: pick.signal ?? null, spent_tokens: totalTokens }]
     bumpRetryOrSkip(state, obj)
     pushBinding(state)
     saveConvergeState(cfg.convergeDir, state)

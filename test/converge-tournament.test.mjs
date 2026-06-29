@@ -180,6 +180,9 @@ test('runConverge --candidates 2: winner-curse guard REJECTS a round where no ca
     assert.equal(readFileSync(join(scope, 'a/visible.txt'), 'utf8'), '0') // rolled back, gaming NOT integrated
     assert.equal(git(scope, 'rev-parse', 'HEAD'), baseline) // last-good never advanced
     assert.ok(state.rounds.some((r) => r.structural_signal === 'held_out_no_progress'))
+    // the rejected round produced candidates that advanced then got rolled back — recorded like runOneObjective's
+    // regression rollback, so the `contradiction` diagnostic (which counts rolledBack rounds) works in tournament mode
+    assert.ok(state.rounds.some((r) => r.structural_signal === 'held_out_no_progress' && r.rolledBack === true))
   } finally {
     rmSync(scope, { recursive: true, force: true }); rmSync(sc.dir, { recursive: true, force: true })
   }
