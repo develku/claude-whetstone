@@ -203,10 +203,13 @@ export function objectiveBudgetSlice(state) {
   return { usd: remUsd == null ? null : remUsd / live, tokens: remTok == null ? null : Math.floor(remTok / live) }
 }
 
-// Pre-launch reservation: refuse to launch when the slice cannot fund one expected pass (not merely <=0).
-export function canAffordObjective(state) {
+// Pre-launch reservation: refuse to launch when the slice cannot fund the expected passes (not merely <=0).
+// `passes` is 1 for a single-candidate step and state.candidates for a tournament ROUND (K independent children,
+// each funded up to the full slice) — so a K-candidate round is started only when all K passes are affordable,
+// closing the otherwise-K×-overshoot that a post-pass-only check would allow.
+export function canAffordObjective(state, passes = 1) {
   const s = objectiveBudgetSlice(state)
-  if (s.tokens != null && s.tokens < ONE_PASS_TOKENS) return false
+  if (s.tokens != null && s.tokens < passes * ONE_PASS_TOKENS) return false
   if (s.tokens == null && s.usd != null && s.usd <= 0) return false
   return true
 }
@@ -525,6 +528,113 @@ export async function runOneObjective(state, cfg, scopeDir, globalRO, obj, deps 
   return globalVerdict(state)
 }
 
+// pickTournamentWinner: the PURE selection heart of the Inc 1 tournament. Given the evaluated candidates for ONE
+// objective, pick the winner by the TRUTH signal — the held-out confirm for a judge objective, the visible
+// primary for a deterministic one — and NEVER argmax on the gameable visible (that is the winner's curse: more
+// candidates = more lottery tickets against the gate's blind spots, so naive visible-max makes the gate WORSE).
+// For a judge objective, if even the best held-out makes no real progress over last-good (< minDelta) the field
+// is optimizing the visible rather than the truth -> REJECT ALL and emit a structural signal (Inc 2 consumes it)
+// instead of integrating a gamer. Deterministic objectives have no soft gate to overfit, so they keep the
+// visible-max and never reject (matching runOneObjective, which accepts any non-regressing candidate). Ineligible
+// candidates (floor-blocked / regressing) are pre-marked {eligible:false} by the caller and excluded here.
+export function pickTournamentWinner(candidates, { judgeClass = false, lastGoodTruth = 0, minDelta = 1 } = {}) {
+  const eligible = candidates.filter((c) => c.eligible)
+  if (!eligible.length) return { winnerIndex: null, rejectAll: false, signal: null, reason: 'no eligible candidate' }
+  const truth = (c) => (judgeClass ? c.heldOut : c.visible)
+  const winner = eligible.reduce((b, c) => (truth(c) > truth(b) ? c : b), eligible[0]) // ties keep the first (stable)
+  if (judgeClass && truth(winner) - lastGoodTruth < minDelta) {
+    return { winnerIndex: null, rejectAll: true, signal: 'held_out_no_progress', reason: `winner's-curse guard: best held-out ${truth(winner)} shows no real progress over last-good ${lastGoodTruth} (Δ<${minDelta}) — gaming suspected` }
+  }
+  return { winnerIndex: winner.index, rejectAll: false, signal: null, reason: `tournament winner #${winner.index} by ${judgeClass ? 'held-out' : 'visible'} ${truth(winner)}` }
+}
+
+// runObjectiveTournament: the Inc 1 per-objective step for candidates>1. Produces K independent candidate child
+// runs off the SAME last-good, integrates + strictly re-measures EACH through the VERBATIM gate path
+// (squashIntegrate + reMeasureAll + regressionCheck), then pickTournamentWinner selects the winner by the
+// held-out truth signal and ACCEPTS only that one (advancing the anchor) — or rejects the whole round on the
+// winner's-curse guard. Spend for ALL K children is charged (tokens burned regardless of who wins). The round is
+// atomic at last-good (the anchor moves only on accept), so a crash mid-round resumes by redoing the round.
+// runOneObjective is left byte-untouched; convergeLoop routes here only when state.candidates>1, so the default
+// path and the 7 invariant files are unaffected.
+export async function runObjectiveTournament(state, cfg, scopeDir, globalRO, obj, deps = {}) {
+  const log = deps.log ?? (() => {})
+  const reMeasure = deps.reMeasure ?? reMeasureAll
+  const runChild = deps.runChild
+  const K = Math.max(1, state.candidates ?? 1)
+
+  state.global_pass += 1
+  state.cycle += 1
+  // A tournament round costs up to K passes; reserve K*ONE_PASS_TOKENS on the inflight marker so a crash
+  // mid-round biases the resumed budget UP by the round's at-risk spend (prepareResumeState reads reservedTokens,
+  // tolerating this singleton shape) — never under-counting. canAffordObjective(state, K) already gates the start.
+  state.inflight = { objectiveId: obj.id, child_loop_dir: join(cfg.convergeDir, 'children', `${obj.id}-${state.cycle}`), reservedTokens: K * ONE_PASS_TOKENS }
+  saveConvergeState(cfg.convergeDir, state)
+
+  const slice = objectiveBudgetSlice(state)
+  const pre = state.objectives.map((o) => ({ ...o }))
+  const isAllowed = (p) => editScopeAllowed(p, obj.editScope, globalRO)
+  const candidates = []
+  let totalUsd = 0
+  let totalTokens = 0
+
+  for (let i = 0; i < K; i++) {
+    const wt = gitMaterialize(scopeDir, state.last_good_sha)
+    let integ
+    try {
+      const oc = { ...buildObjectiveCfg(obj, state, cfg, wt, globalRO, slice), loopDir: join(cfg.convergeDir, 'children', `${obj.id}-${state.cycle}-c${i}`) }
+      const cs = await runChild(oc)
+      totalUsd += cs?.state?.spent_usd ?? cs?.spent_usd ?? 0
+      totalTokens += cs?.state?.spent_tokens ?? cs?.spent_tokens ?? 0
+      integ = squashIntegrate(scopeDir, state.last_good_sha, gitHead(wt), isAllowed, `${obj.id}#${i}`)
+    } finally {
+      gitCleanup(scopeDir, wt)
+    }
+    if (!integ.advanced) { candidates.push({ index: i, eligible: false }); continue }
+    const ref = `${CANDIDATE_REF}-${i}`
+    git(scopeDir, ['branch', '-f', ref, integ.sha]) // pin against gc while the whole field is re-measured
+    const rm = reMeasure(scopeDir, integ.sha, state.objectives, state.floor)
+    const regressed = rm.blocked || regressionCheck(pre, rm.vector, rm.floor.score, state.min_delta)
+    const v = rm.vector?.find((x) => x.id === obj.id) ?? {}
+    candidates.push({
+      index: i, ref, candidateSha: integ.sha, eligible: !regressed,
+      visible: v.primaryScore ?? 0,
+      heldOut: obj.judgeClass ? (v.confirmScore ?? 0) : (v.primaryScore ?? 0),
+      floor: rm.floor, vector: rm.vector,
+    })
+  }
+
+  chargeSpend(state, obj, totalUsd, totalTokens) // every candidate's tokens are spent regardless of who wins
+  state.inflight = null
+  const cleanupRefs = () => { for (const c of candidates) if (c.ref) delRef(scopeDir, c.ref) }
+
+  const lastGoodTruth = obj.judgeClass ? (obj.confirmScore ?? 0) : (obj.primaryScore ?? 0)
+  const pick = pickTournamentWinner(candidates, { judgeClass: obj.judgeClass, lastGoodTruth, minDelta: state.min_delta })
+
+  if (pick.winnerIndex == null) {
+    rollbackToLastGood(scopeDir, state.last_good_sha) // defensive: keep the live tree at the anchor
+    cleanupRefs()
+    state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: state.last_good_sha, candidate_sha: null, accepted: false, candidates: K, reason: pick.reason, structural_signal: pick.signal ?? null, spent_tokens: totalTokens }]
+    bumpRetryOrSkip(state, obj)
+    pushBinding(state)
+    saveConvergeState(cfg.convergeDir, state)
+    const v = globalVerdict(state)
+    log({ cycle: state.cycle, objective: obj.id, status: v.status, reason: pick.reason })
+    return v
+  }
+
+  const winner = candidates.find((c) => c.index === pick.winnerIndex)
+  const preAdvanceSha = state.last_good_sha
+  state.last_good_sha = advanceLastGood(scopeDir, winner.candidateSha)
+  cleanupRefs() // the named anchor now references the winner; drop every temp candidate pin
+  applyFloor(state, winner.floor)
+  applyVector(state, winner.vector, state.last_good_sha)
+  state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: preAdvanceSha, candidate_sha: winner.candidateSha, accepted: true, candidates: K, winner_index: winner.index, floor_score: winner.floor.score, spent_tokens: totalTokens }]
+  log({ cycle: state.cycle, objective: obj.id, status: 'integrated', reason: pick.reason })
+  pushBinding(state)
+  saveConvergeState(cfg.convergeDir, state)
+  return globalVerdict(state)
+}
+
 // The shared loop body for a fresh run and a resume. Both arrive with `state` already baseline-measured and
 // last_good_sha set; this owns only the convergence iteration (guards + objective selection); the per-
 // objective gate step is runOneObjective (single-sourced with Track B's fallback).
@@ -538,11 +648,14 @@ async function convergeLoop(state, cfg, scopeDir, globalRO, deps = {}) {
   while (v.status === 'running') {
     const over = globalBudgetExhausted(state)
     if (over) { v = { status: 'capped', reason: over }; break }
-    if (!canAffordObjective(state)) { v = { status: 'capped', reason: 'global budget cannot fund another objective pass' }; break }
+    if (!canAffordObjective(state, state.candidates ?? 1)) { v = { status: 'capped', reason: 'global budget cannot fund another objective pass' }; break }
     const obj = pickNextObjective(state)
     if (!obj) { v = { status: 'capped', reason: 'no further objective can be attempted (unmet objectives exhausted their retries)' }; break }
     obj.attempts = (obj.attempts ?? 0) + 1 // round-robin fairness signal (pickNextObjective reads it)
-    v = await runOneObjective(state, cfg, scopeDir, globalRO, obj, deps)
+    // Inc 1: candidates>1 runs a per-objective TOURNAMENT (winner picked on the held-out truth); 1 = the
+    // unchanged single-candidate gate step. Both share the verbatim gate path (squashIntegrate/reMeasure/gate).
+    const step = (state.candidates ?? 1) > 1 ? runObjectiveTournament : runOneObjective
+    v = await step(state, cfg, scopeDir, globalRO, obj, deps)
   }
 
   // done-edge stability: certify the win is reproducible (the concrete "stable") before declaring done.

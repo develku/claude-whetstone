@@ -74,6 +74,10 @@ export function initConvergeState(cfg, manifest) {
     spent_usd: 0,
     spent_tokens: 0,
     global_cap: cfg.globalCap ?? 20,
+    // Inc 1 tournament: K independent candidates per objective step (1 = no tournament, the default + unchanged
+    // single-candidate path). >1 selects runObjectiveTournament, which picks the winner by the held-out truth
+    // signal (the winner's-curse antidote). Held verbatim across resume so a tournament run resumes as one.
+    candidates: cfg.candidates ?? 1,
     global_pass: 0,
     global_plateau_window: cfg.globalPlateauWindow ?? 3,
     global_min_progress: cfg.globalMinProgress ?? 1,

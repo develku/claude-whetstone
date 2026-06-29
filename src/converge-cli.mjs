@@ -96,6 +96,17 @@ export function convergeJudgeObjectiveNeedsConfirm(cfg) {
   return null
 }
 
+// Inc 1 tournament: --candidates must be a positive integer (1 = no tournament). The winner's-curse antidote
+// (selecting on the held-out truth rather than the gameable visible) needs a held-out signal to bite; that is
+// already guaranteed for judge objectives by convergeJudgeObjectiveNeedsConfirm. Deterministic objectives have
+// no soft gate to overfit, so a deterministic tournament is a safe visible-max — no extra requirement.
+export function convergeCandidatesValid(cfg) {
+  const k = cfg.candidates
+  if (k == null) return null
+  if (!Number.isInteger(k) || k < 1) return `--candidates must be a positive integer (got ${k}); 1 = no tournament`
+  return null
+}
+
 // The manifest is the operator-owned meta-gate; a manifest UNDER --scope would be in the editor's blast
 // radius and model-editable. Refuse it (mirrors forgeStoreInsideScope).
 export function manifestInsideScope(cfg) {
@@ -159,6 +170,7 @@ export const CONVERGE_REFUSALS = [
   convergeUnsafeObjectiveScorer,
   convergeFloorFootprintReadOnly,
   manifestEditScopeReadOnlyCollision,
+  convergeCandidatesValid,
 ]
 
 // The full refuse-to-start check: structural validation first (the manifest must be well-formed before any
@@ -207,6 +219,9 @@ export function parseConvergeCli(argv, defaults = {}) {
     globalStabilityRuns: num('--global-stability-runs', defaults.globalStabilityRuns ?? 2),
     objectiveRetries: num('--objective-retries', defaults.objectiveRetries ?? 1),
     minDelta: num('--min-delta', defaults.minDelta ?? 1),
+    // Inc 1 tournament: K independent candidates per objective step; the winner is picked on the held-out truth
+    // signal (the winner's-curse antidote). 1 = unchanged single-candidate path.
+    candidates: num('--candidates', defaults.candidates ?? 1),
     model: get('--model', defaults.model ?? 'sonnet'),
     effort: get('--effort', defaults.effort ?? 'medium'),
     escalateModel: get('--model-escalate', defaults.escalateModel ?? 'opus'),
@@ -255,7 +270,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const argv = process.argv
   const cfg = parseConvergeCli(argv)
   if (!cfg.scope || !cfg.objectivesPath) {
-    process.stderr.write('usage: converge-cli.mjs --scope <repo dir> --objectives <manifest.json OUTSIDE the scope> [--converge-dir <dir>] [--global-budget-tokens N | --global-budget X] [--global-cap 20] [--global-stability-runs 2] [--objective-retries 1] [--parallel [--max-parallel 2] [--max-batch-regressions 2] [--flake-cap 3]] [--model sonnet] [--effort medium] [--no-escalate] [--mcp-config <path>]\n  resume: converge-cli.mjs --scope <dir> --objectives <manifest> --converge-dir <existing run dir> --resume [--parallel]\n')
+    process.stderr.write('usage: converge-cli.mjs --scope <repo dir> --objectives <manifest.json OUTSIDE the scope> [--converge-dir <dir>] [--global-budget-tokens N | --global-budget X] [--global-cap 20] [--global-stability-runs 2] [--objective-retries 1] [--candidates 1] [--parallel [--max-parallel 2] [--max-batch-regressions 2] [--flake-cap 3]] [--model sonnet] [--effort medium] [--no-escalate] [--mcp-config <path>]\n  resume: converge-cli.mjs --scope <dir> --objectives <manifest> --converge-dir <existing run dir> --resume [--parallel]\n')
     process.exit(2)
   }
   const { cleanTreeGuard, scopeDeps } = await import('./scope-cli.mjs')
@@ -279,7 +294,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   let manifest = null
   if (!cfg.resume) {
     manifest = loadManifest(cfg.objectivesPath)
-    const reason = convergeRefusal({ scope: cfg.scope, objectivesPath: cfg.objectivesPath, manifest })
+    const reason = convergeRefusal({ scope: cfg.scope, objectivesPath: cfg.objectivesPath, manifest, candidates: cfg.candidates })
     if (reason) {
       process.stderr.write(`refusing to start: ${reason}\n`)
       process.exit(2)
