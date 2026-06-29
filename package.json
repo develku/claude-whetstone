@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "A deterministic loop-engineering driver: code owns the gate, the model owns diagnosis + edits. Raises one artifact toward a measured score threshold.",
+  "engines": {
+    "node": ">=23.5.0"
+  },
   "bin": {
     "whetstone": "src/driver.mjs"
   },

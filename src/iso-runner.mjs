@@ -20,13 +20,38 @@ const TOOL_DIR = realpathSync(dirname(fileURLToPath(import.meta.url))) // src/: 
 const CHILD = join(TOOL_DIR, 'iso-runner-child.mjs')
 const DEFAULT_TIMEOUT_MS = Number(process.env.WHET_ISO_TIMEOUT_MS) || 60 * 1000
 
+// The child runs with an ALLOWLISTED env, NOT the parent's. Two reasons: (1) the operator's secrets
+// (EXA_API_KEY / *_TOKEN / *_SECRET …) must never reach the untrusted artifact — else a gamed fn could return
+// one and it would flow into the observation → the critique → the editor model (an in-band leak; off-machine
+// exfil is already denied by --permission); (2) NODE_OPTIONS is deliberately EXCLUDED so an ambient
+// NODE_OPTIONS=--allow-fs-write (etc.) can't widen the sandbox. The io-* contract is pure/stateful logic, which
+// needs no env; this set is only what the Node runtime itself wants. No secret-shaped key is on it.
+const ENV_ALLOWLIST = ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'LC_CTYPE']
+function childEnv() {
+  const env = {}
+  for (const k of ENV_ALLOWLIST) if (process.env[k] !== undefined) env[k] = process.env[k]
+  return env
+}
+
 // Run one behavioural check out-of-process. `artifact` is the already-resolved file path (the scorer resolves
 // --output/--rel via resolveOutput first). `readRoot` (optional) is the original --output: in scope mode that
 // is the repo/worktree ROOT, granted so an artifact that imports repo siblings across directories still loads
 // (matching the prior in-process behaviour — the artifact never had less fs-read than the code it tests). The
 // nonce/expected are never files, so widening read does not leak the oracle. Returns the child's observation
 // object, or a typed { ok:false, reason } when no valid framed result came back (crash/timeout/suppressed/forged).
+// The child statically imports module.registerHooks (Node >= 23.5.0). On an older runtime the child dies at
+// module-link BEFORE writing fd3, which would otherwise surface as a confusing score-0 "artifact failure" on a
+// perfectly honest artifact. Parent and child share process.execPath, so the parent's version is the child's.
+// Exported for test (can't downgrade Node in-process).
+export function meetsNodeFloor(version) {
+  const [maj, min] = String(version).split('.').map(Number)
+  return maj > 23 || (maj === 23 && min >= 5)
+}
+
 export function runIsolated({ artifact, mode, spec, readRoot, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+  if (!meetsNodeFloor(process.versions.node)) {
+    return { ok: false, reason: 'runtime', error: `iso-runner requires Node >= 23.5.0 (module.registerHooks); current ${process.versions.node}` }
+  }
   let realArtifact
   try { realArtifact = realpathSync(artifact) } catch (e) { return { ok: false, reason: 'artifact', error: `cannot resolve artifact: ${e.message}` } }
   const grants = new Set([TOOL_DIR, dirname(realArtifact)]) // src/ (runner+deps) + the artifact's own dir
@@ -38,6 +63,7 @@ export function runIsolated({ artifact, mode, spec, readRoot, timeoutMs = DEFAUL
     CHILD,
   ], {
     input: JSON.stringify({ nonce, artifact: realArtifact, mode, spec }),
+    env: childEnv(), // allowlisted — no operator secrets, no NODE_OPTIONS (see ENV_ALLOWLIST)
     stdio: ['pipe', 'ignore', 'pipe', 'pipe'], // stdin=job, stdout ignored, stderr captured, fd3=result
     timeout: timeoutMs,
     maxBuffer: 16 * 1024 * 1024, // a gamed child flooding fd3 hits ENOBUFS -> r.error -> no-frame, never OOM
@@ -60,6 +86,7 @@ export function runIsolated({ artifact, mode, spec, readRoot, timeoutMs = DEFAUL
 //     return, suppressed/forged/crashed child): a verdict (score 0), not a scorer malfunction.
 export function classifyObservation(obs, { missingExportExits = false } = {}) {
   if (obs.ok) return null
+  if (obs.reason === 'runtime') return { kind: 'scorer-error', message: obs.error } // unsupported Node — surface clearly
   if (obs.reason === 'import') return { kind: 'scorer-error', message: `cannot import artifact: ${obs.error}` }
   if (obs.reason === 'missing-export') {
     return missingExportExits

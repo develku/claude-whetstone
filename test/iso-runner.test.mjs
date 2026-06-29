@@ -11,6 +11,19 @@ import { runIsolated } from '../src/iso-runner.mjs'
 const artifact = (src) => { const p = join(mkdtempSync(join(tmpdir(), 'iso-')), 'impl.mjs'); writeFileSync(p, src); return p }
 const assertCase = (a, input) => runIsolated({ artifact: a, mode: 'assert', spec: { fn: 'add', cases: [input] } })
 
+test('env isolation: the child does NOT inherit operator secrets from the parent env', () => {
+  // The artifact under test must not be able to read the operator's API keys / tokens out of process.env —
+  // they would otherwise flow into the observation -> the critique -> the editor model (in-band leak).
+  process.env.WHET_TEST_SECRET = 'leaked-secret-value'
+  try {
+    const a = artifact("export const add = () => process.env.WHET_TEST_SECRET ?? 'absent'\n")
+    const r = runIsolated({ artifact: a, mode: 'assert', spec: { fn: 'add', cases: [[]] } })
+    assert.equal(r.results[0].value, 'absent') // NOT 'leaked-secret-value'
+  } finally {
+    delete process.env.WHET_TEST_SECRET
+  }
+})
+
 test('honest artifact: the observation carries the real return value', () => {
   const r = assertCase(artifact('export const add=(a,b)=>a+b\n'), [2, 3])
   assert.deepEqual(r, { ok: true, results: [{ value: 5 }] })
