@@ -16,11 +16,11 @@ intentional / not worth the cost).
 
 Via `npm run coverage` (src + scorers, deterministic). Ratcheted up by cycle 1.
 
-| Metric | Cycle 0 (2026-06-30) | Cycle 1 (2026-06-30) |
-|--------|----------------------|----------------------|
-| Line | 96.03% | **96.10%** |
-| Branch | 82.15% | **82.54%** |
-| Function | 91.83% | **92.12%** |
+| Metric | Cycle 0 | Cycle 1 | Cycle 2 (2026-06-30) |
+|--------|---------|---------|----------------------|
+| Line | 96.03% | 96.10% | **96.27%** |
+| Branch | 82.15% | 82.54% | **82.89%** |
+| Function | 91.83% | 92.12% | **92.28%** |
 
 The loop must not drop below the latest column; ratchet upward as coverage improves.
 
@@ -57,6 +57,27 @@ The loop must not drop below the latest column; ratchet upward as coverage impro
 | C1-11 | coverage | LOW | `scorers/io-effect.mjs` | fixed | = Q-003 (`86c92e1`). |
 | C1-12 | simplification | LOW | `src/git-snapshot.mjs` (+3) | wontfix | 4 byte-identical private `git` exec helpers — adversarial verify REJECTED unification: intentional tolerated duplication (clarity > reuse; the converge modules deliberately avoid the import cycle a shared helper would add). |
 | C1-13 | correctness | LOW | `src/outer-cli.mjs` (+ other `*-cli.mjs`) | deferred | Surfaced by the cycle-1 review: the non-`driver` CLI entry guards still use the lexical-only `import.meta.url === pathToFileURL(argv[1]).href` (no realpath fallback), so a symlinked launch silently no-ops — the same class the driver fix (`5e9117f`) closed. NOT a live bug: only `driver` is the package `bin`; the others are invoked by absolute path via the `whet` router. Latent consistency gap; revisit if any becomes a bin entry. |
+
+### Cycle 2 (2026-06-30) — deeper audit of the unexplored surface (14 candidates → 12 verified NEW → 9 fixed)
+
+Finders targeted the cycle-1-untouched modules (planner/outer/replan, converge rollback/batch internals, iso-* sandbox, utils), with the cycle-1 findings fed to the verifier as a dedup list (0 re-reported).
+
+| ID | Axis | Sev | File(s) | Status | Note / provenance |
+|----|------|-----|---------|--------|-------------------|
+| C2-01 | correctness | MEDIUM | `src/converge-parallel.mjs` | fixed | A lone-survivor batch regression wrote a SINGLETON quarantine entry, which pickBatch matches against every batch → a healthy objective permanently barred from parallel (false termination). Quarantine only combinations (`length >= 2`) (`6424350`). |
+| C2-02 | correctness | LOW | `src/outer-cli.mjs` | fixed | `runOuterCli` didn't catch a throwing `proposeReplan`/`planManifest` (routine planner refusal) → unhandled rejection crash. try/catch → `e.exitCode ?? 2` (`42e168c`). |
+| C2-03 | correctness | LOW | `src/converge-diagnostics.mjs` | fixed | `plateaued` comment claimed "same notion" as the gate's plateau, but it's a RAW delta vs the gate's running-max (diverge on non-monotonic). Advisory-only → comment corrected (`f51ee4b`). |
+| C2-04 | coverage | MEDIUM | `src/converge.mjs` | fixed | Resume with the deterministic floor failing at last-good (blocked-on-resume early-return) untested (`378f076`). |
+| C2-05 | coverage | LOW | `src/converge-parallel.mjs` | fixed | Whole-batch no-op tail (no in-scope change) untested (`378f076`). |
+| C2-06 | coverage | LOW | `src/converge-parallel.mjs` | fixed | Empty-pickBatch terminal cap (all objectives skipped) untested (`378f076`). |
+| C2-07 | coverage | LOW | `scorers/io-assert.mjs` | fixed | `judgeCases` 'no result' (results shorter than cases) untested (`378f076`). |
+| C2-08 | coverage | LOW | `scorers/io-invariant.mjs` | fixed | `sorted` allStr (string-array) branch untested (`378f076`). |
+| C2-09 | coverage | LOW | `src/iso-execute.mjs` | fixed | `executeEffect` non-JSON return under wantReturns (forge defense) untested (`378f076`). |
+| C2-10 | security | LOW | `src/redact.mjs` | wontfix | AWS_SECRET_ACCESS_KEY-style + credential-URL redaction misses — but the module DOCUMENTS best-effort over a self-gitignored run dir (zero exfil path); broadening risks false-positive redactions. Verifier: not worth. |
+| C2-11 | coverage | LOW | `src/converge-parallel.mjs` | deferred | Done-edge stability 'unstable' branch untested — but it's a SYMMETRIC gap (sequential analog also untested), reachable only with stability_runs>1 + a non-empty held-out stub. Verifier: not worth (would need both paths). |
+| C2-12 | coverage | LOW | `src/iso-runner.mjs` | wontfix | Artifact-resolve early-return single line untested — but the reason→score-zero contract IS tested in iso-runner-contract.test.mjs; verifier judged the addition over-claimed and not worth. |
+| C2-13 | coverage | — | `src/scope-context.mjs` | wontfix | confirm() no-snapshot fallback is DEAD in real execution (a persist-with-snapshot always precedes confirm); per the operator's "no defensive code/tests for impossible cases" rule, rejected. |
+| C2-14 | correctness | LOW | `src/converge-parallel.mjs` | deferred | Surfaced by the cycle-2 self-review: `consecutive_batch_regressions` resets only on an accepted BATCH, never on a successful sequential fallback — so a combo regression, a successful sequential round, then an unrelated combo regression hits the cap "consecutively". Pre-existing asymmetry (NOT introduced by C2-01); separate question from the increment guard. Revisit if premature parallel-disable is observed. |
 
 ---
 
