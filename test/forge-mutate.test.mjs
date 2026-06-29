@@ -26,6 +26,23 @@ test('boolean-flip turns true into false', () => {
   assert.ok(some('export const t = () => true\n', 'false'))
 })
 
+test('every comparison/boolean/arithmetic DIRECTION emits a distinct mutant (guards equivalent/no-op operators)', () => {
+  // The tests above cover ===->!==, <->>, true->false, +->- (and ++->--). Pin the REMAINING directions so a
+  // wrong-direction or identity callback — which produces an equivalent mutant the downstream oracle filter
+  // silently drops, weakening the required-kill neighbourhood with no test failure — is caught here. Each
+  // minimal source isolates one operator so the expected transformed token uniquely proves that callback ran.
+  assert.ok(some('export const f = (a, b) => a !== b\n', 'a === b')) // !== -> ===
+  assert.ok(some('export const f = (a, b) => a == b\n', 'a != b')) //  ==  -> !=
+  assert.ok(some('export const f = (a, b) => a != b\n', 'a == b')) //  !=  -> ==
+  assert.ok(some('export const f = (a, b) => a <= b\n', 'a >= b')) //  <=  -> >=
+  assert.ok(some('export const f = (a, b) => a >= b\n', 'a <= b')) //  >=  -> <=
+  assert.ok(some('export const f = (a, b) => a > b\n', 'a < b')) //    >   -> <
+  assert.ok(some('export const f = () => false\n', 'true')) //         false -> true
+  assert.ok(some('export const f = (a, b) => a - b\n', 'a + b')) //    -   -> +
+  assert.ok(some('export const f = (a, b) => a * b\n', 'a / b')) //    *   -> /
+  assert.ok(some('export const f = (a, b) => a / b\n', 'a * b')) //    /   -> *
+})
+
 test('arithmetic-swap swaps a space-delimited binary + to - WITHOUT corrupting ++', () => {
   const muts = sourcesOf('export const add = (a, b) => a + b\n')
   assert.ok(muts.some((s) => s.includes('a - b')))

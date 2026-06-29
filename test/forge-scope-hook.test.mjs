@@ -112,6 +112,24 @@ test('runScopeForgeHook refuses a non-SHA snapshot (trust boundary)', async () =
   assert.equal(r.skipped, true)
 })
 
+test('runScopeForgeHook SKIPS when good/bad SHAs differ but the trees are identical (no changed files)', async () => {
+  // a same-tree/different-SHA pair (an --allow-empty recovery commit, or a revert-to-identical): gitDiffNames
+  // returns [] and the fire must short-circuit, NOT iterate an empty learnSet and falsely report
+  // coverageComplete with nothing learned.
+  const dir = mkdtempSync(join(tmpdir(), 'scope-hook-empty-'))
+  git(dir, 'init', '-q'); git(dir, 'config', 'user.email', 't@e.com'); git(dir, 'config', 'user.name', 't')
+  mkdirSync(join(dir, 'src'))
+  writeFileSync(join(dir, 'src', 'm.mjs'), 'export const f = (n) => n * 2\n')
+  git(dir, 'add', '-A'); git(dir, 'commit', '-q', '-m', 'gamed'); const gamedSha = git(dir, 'rev-parse', 'HEAD')
+  git(dir, 'commit', '-q', '--allow-empty', '-m', 'honest') // HEAD tree === gamedSha tree -> empty diff
+  const storePath = join(mkdtempSync(join(tmpdir(), 'st-')), 'checks.json')
+  const cfg = { forge: true, forgeStorePath: storePath, scorerAllow: [IO_ASSERT], model: 'sonnet' }
+  const state = { goal: 'g', artifact_path: dir, last_critique: '', confirm_vetoed_at_pass: 0, history: [{ snapshot: gamedSha }] }
+  const r = await runScopeForgeHook({ cfg, state }, { propose: stubPropose, log: () => {} })
+  assert.equal(r.skipped, true)
+  assert.match(JSON.stringify(r), /no changed files/) // the empty-diff branch, distinct from the non-SHA guard
+})
+
 test('rankChangedFiles orders code before non-code, then by path (stable, never drops)', () => {
   const out = rankChangedFiles(['z.md', 'src/b.mjs', 'a.json', 'src/a.mjs'])
   assert.deepEqual(out, ['src/a.mjs', 'src/b.mjs', 'a.json', 'z.md'])
