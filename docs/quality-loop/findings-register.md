@@ -16,11 +16,11 @@ intentional / not worth the cost).
 
 Via `npm run coverage` (src + scorers, deterministic). Ratcheted up by cycle 1.
 
-| Metric | Cycle 0 | Cycle 1 | Cycle 2 (2026-06-30) |
-|--------|---------|---------|----------------------|
-| Line | 96.03% | 96.10% | **96.27%** |
-| Branch | 82.15% | 82.54% | **82.89%** |
-| Function | 91.83% | 92.12% | **92.28%** |
+| Metric | Cycle 0 | Cycle 1 | Cycle 2 | Cycle 3 (2026-06-30) |
+|--------|---------|---------|---------|----------------------|
+| Line | 96.03% | 96.10% | 96.27% | **96.31%** |
+| Branch | 82.15% | 82.54% | 82.89% | **83.11%** |
+| Function | 91.83% | 92.12% | 92.28% | **93.73%** |
 
 The loop must not drop below the latest column; ratchet upward as coverage improves.
 
@@ -78,6 +78,19 @@ Finders targeted the cycle-1-untouched modules (planner/outer/replan, converge r
 | C2-12 | coverage | LOW | `src/iso-runner.mjs` | wontfix | Artifact-resolve early-return single line untested — but the reason→score-zero contract IS tested in iso-runner-contract.test.mjs; verifier judged the addition over-claimed and not worth. |
 | C2-13 | coverage | — | `src/scope-context.mjs` | wontfix | confirm() no-snapshot fallback is DEAD in real execution (a persist-with-snapshot always precedes confirm); per the operator's "no defensive code/tests for impossible cases" rule, rejected. |
 | C2-14 | correctness | LOW | `src/converge-parallel.mjs` | deferred | Surfaced by the cycle-2 self-review: `consecutive_batch_regressions` resets only on an accepted BATCH, never on a successful sequential fallback — so a combo regression, a successful sequential round, then an unrelated combo regression hits the cap "consecutively". Pre-existing asymmetry (NOT introduced by C2-01); separate question from the increment guard. Revisit if premature parallel-disable is observed. |
+
+### Cycle 3 (2026-06-30) — forge non-invariant + iso sandbox + data-inertness audit (11 candidates → 6 verified NEW → 5 fixed)
+
+Finders targeted the cycle-1/2-untouched DEEP surface (the 8 non-invariant forge modules, the iso-runner/iso-frame sandbox + nonce framing, canonical-data inertness, driver/converge core). Full register fed as dedup. The correctness audits of the forge core, the tournament/winner's-curse path, and driver/converge core all came back **NEGATIVE (no bug — verified sound)** — a strong signal the cores are correct.
+
+| ID | Axis | Sev | File(s) | Status | Note / provenance |
+|----|------|-----|---------|--------|-------------------|
+| C3-01 | security | **HIGH** | `src/forge/hook.mjs` (+`scorer-safety.mjs`, `plan-allowlist.mjs`) | fixed | **Model-authored RCE.** The Forge proposable-scorer denylist was `{test-pass-rate, composite}` — missing `floor` + `llm-judge` (which plan-allowlist correctly denies). With `--scorer-allow scorers/floor.mjs`, a model-authored `floor --cmd <cmd>` runs an arbitrary command via floor's second shell (proven end-to-end). Root-cause fix: canonical `SHELL_SCORERS` defined ONCE in scorer-safety.mjs, both boundaries import it (no more drift) (`6f8a899`). |
+| C3-02 | coverage | LOW | `src/forge/mutate.mjs` | fixed | Half the mutation operator directions never executed (fn 60.87%) → an equivalent-mutant regression undetected. All directions pinned (fn→100%) (`16bab59`). |
+| C3-03 | coverage/security | LOW | `src/forge/scope-generate.mjs` | fixed | Scope-mode allowlist rejection (trust gate) + absent-file `safeRead` fallback untested (`16bab59`). |
+| C3-04 | coverage | LOW | `src/forge/generate.mjs` | fixed | `claudePropose` exit-0 non-JSON stdout parse-error path untested (`16bab59`). |
+| C3-05 | coverage | LOW | `src/forge/scope-hook.mjs` | fixed | No-changed-files skip (same-tree good/bad SHAs) untested (`16bab59`). |
+| C3-06 | simplification | LOW | `src/plan-call.mjs` | wontfix | `buildPlannerArgs` exported but internal-only — verifier judged it a deliberate pure-testable-seam export (sibling `extractPlannerText` is exported+tested), cosmetic, not worth the churn. |
 
 ---
 

@@ -17,7 +17,7 @@
 //
 // IMPORTANT invariant: oracleCmds are OPERATOR-authored full scorer commands (--forge-oracle, same trust class
 // as --confirm-scorer) and run VERBATIM via the injected runCheck. They intentionally DO NOT pass through
-// forgeAllowlist / FORGE_UNSAFE_SCORERS (which gate MODEL-proposed checks) — do not "harden" them through it.
+// forgeAllowlist / the SHELL_SCORERS denylist (which gate MODEL-proposed checks) — do not "harden" them through it.
 
 // Run a check `runs` times against one artifact; report the (consistent) verdict, or unstable if they
 // disagree. Copied from admit.mjs (the Forge layers stay import-independent — stdlib only).
