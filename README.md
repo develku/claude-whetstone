@@ -62,7 +62,7 @@ proves each leaf *measurable*, not that a *set* of leaves is *sufficient*).
 
 | Tier | Surface | Notes |
 |---|---|---|
-| **Stable** | `driver.mjs` single-file loop + objective scorers (`test-pass-rate`, `contains`, `io-assert`, `io-trace`, `io-invariant`, `io-effect`, `composite`, `floor`) + confirm-scorer, keep-best, plateau-escalate, crash-resume, dual token/USD budget | The supported v1. Code owns the gate; the gate is objective. |
+| **Stable** | `driver.mjs` single-file loop + objective scorers (`test-pass-rate`, `contains`, `io-assert`, `io-trace`, `io-invariant`, `io-effect`, `composite`, `floor`, `doc-lint`) + confirm-scorer, keep-best, plateau-escalate, crash-resume, dual token/USD budget | The supported v1. Code owns the gate; the gate is objective. |
 | **Experimental** | `scope-cli.mjs` (whole-dir, git-backed) · `llm-judge` (subjective gate) | Works; use with care. `llm-judge` is a *subjective* gate — capturable, weaker than an objective scorer. |
 | **Alpha** (in repo, unsupported) | `converge-cli` (multi-objective) · `--parallel` (concurrent fan-out) · `plan-cli` (proactive planner) · `--candidates` (tournament) · `replan-cli` + `outer-cli` (re-decomposition) | Built and $0-tested (several PAID-validated NON-NULL), but kept out of the supported surface and the `/whet` launcher until an external benchmark proves them. |
 
@@ -361,6 +361,7 @@ src/driver.mjs      CLI + real wiring + config        test/driver.test.mjs, test
 scorers/test-pass-rate.mjs   reference scorer          test/scorer.test.mjs
 scorers/composite.mjs        min-combine N sub-scorers  test/composite.test.mjs
 scorers/llm-judge.mjs        opus-as-judge (subjective) test/judge.test.mjs
+scorers/doc-lint.mjs         doc-vs-repo claim gate     test/doc-lint.test.mjs
 
 # alpha — the dynamic control plane (multi-objective, repo-wide)
 src/converge*.mjs   multi-objective gate + tournament + global held-out truth + --parallel
