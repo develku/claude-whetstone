@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { runConvergeParallel, convergeRoundParallel } from '../src/converge-parallel.mjs'
+import { runConvergeParallel, convergeRoundParallel, pickBatch } from '../src/converge-parallel.mjs'
 import { setupConvergeRun, reMeasureAll } from '../src/converge.mjs'
 import { loadConvergeState } from '../src/converge-state.mjs'
 import { globalVerdict } from '../src/converge-gate.mjs'
@@ -176,6 +176,39 @@ test('convergeRoundParallel flips parallel_disabled after maxBatchRegressions co
     const child = makeStubChild({ a: { 'a/feature.txt': 100, 'a/api.txt': 10 }, b: { 'b/feature.txt': 100 } })
     await convergeRoundParallel(state, cfg, scope, globalRO, { runChild: child, log: () => {} })
     assert.equal(state.parallel_disabled, true) // one strike with the cap at 1
+  } finally {
+    rmSync(scope, { recursive: true, force: true }); rmSync(sc.dir, { recursive: true, force: true })
+  }
+})
+
+// --- lone-survivor regression must NOT quarantine a singleton (it would bar a healthy objective forever) ---
+
+test('convergeRoundParallel does NOT quarantine a LONE survivor on regression (a singleton would bar it from every batch)', async () => {
+  const sc = writeScorer()
+  const scope = tempRepo({ 'a/feature.txt': '0', 'b/feature.txt': '0', 'a/api.txt': '95', 'c/x.txt': '0' })
+  const cfg = baseCfg(scope, sc.dir, { maxParallel: 2 })
+  try {
+    const manifest = rollbackManifest(sc) // a, b, c=keep a/api (met at baseline: 95)
+    const { state, globalRO } = baseline(scope, manifest, cfg)
+    const lastGood = state.last_good_sha
+    // batch is [a,b] (c is met). b's child CRASHES -> only a survives. a's solo edit breaks a/api (regresses
+    // the met c) -> whole-batch rollback with a LONE survivor ['a'].
+    const honest = makeStubChild({ a: { 'a/feature.txt': 100, 'a/api.txt': 10 } })
+    const child = async (childCfg) => {
+      if (childCfg.editScope === 'b') throw new Error('child b crashed')
+      return honest(childCfg)
+    }
+    await convergeRoundParallel(state, cfg, scope, globalRO, { runChild: child, log: () => {} })
+
+    assert.equal(state.last_good_sha, lastGood) // rolled back, never advanced
+    const last = state.rounds.at(-1)
+    assert.equal(last.rolledBack, true)
+    assert.deepEqual(last.survivors, ['a']) // exactly one survivor
+    assert.deepEqual(last.failed, ['b'])
+    // THE FIX: a 1-element survivor set is NOT a "combination" — quarantining it would match every batch
+    // containing 'a' (pickBatch line 55), permanently barring the healthy objective from parallel scheduling.
+    assert.deepEqual(state.quarantined_batches ?? [], []) // no singleton quarantine written
+    assert.ok(pickBatch(state, 2).some((o) => o.id === 'a')) // 'a' stays schedulable
   } finally {
     rmSync(scope, { recursive: true, force: true }); rmSync(sc.dir, { recursive: true, force: true })
   }

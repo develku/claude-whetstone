@@ -314,7 +314,11 @@ async function runBatchRound(state, cfg, scopeDir, globalRO, batch, reservedToke
   if (regressed) {
     rollbackToLastGood(scopeDir, lastGood)
     delRef(scopeDir, CANDIDATE_REF)
-    state.quarantined_batches = [...(state.quarantined_batches ?? []), survivorIds]
+    // Quarantine only genuine COMBINATIONS (>=2). A lone survivor (its batch-mate crashed/timed out) that
+    // regresses is a per-objective failure, handled by the sequential fallback's retry/skip — NOT a bad
+    // co-scheduling. Quarantining a singleton would match every batch containing it (pickBatch), permanently
+    // barring a healthy objective from all future parallel rounds.
+    if (survivorIds.length >= 2) state.quarantined_batches = [...(state.quarantined_batches ?? []), survivorIds]
     state.sequential_fallback_round = state.cycle // pin the NEXT round sequential (the fallback)
     state.consecutive_batch_regressions = (state.consecutive_batch_regressions ?? 0) + 1
     if (state.consecutive_batch_regressions >= (cfg.maxBatchRegressions ?? 2)) state.parallel_disabled = true
