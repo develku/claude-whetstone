@@ -90,3 +90,4 @@ npm run coverage # baseline ratchet: line/branch/function aggregate over src + s
 | Cycle | Date | Axes worked | Findings confirmed | Fixed | Coverage (L/B/F) | Notes |
 |-------|------|-------------|--------------------|-------|------------------|-------|
 | 0 (setup) | 2026-06-30 | — | — | — | 96.03 / 82.15 / 91.83 | Harness + symlink fix landed; baseline captured. |
+| 1 | 2026-06-30 | all four | 12 (of 13 candidates) | 11 | 96.10 / 82.54 / 92.12 | 4-axis adversarial Workflow. HIGH budget-non-enforcement (C1-01), MEDIUM escalation-inversion (C1-02) + symlink-escape (C1-03), 2 dead exports, 6 trust-boundary coverage guards. 2 rejected by adversarial verify (path-containment unify, git-helper dup). Gate stayed green throughout; 8 invariant files byte-unchanged. |
