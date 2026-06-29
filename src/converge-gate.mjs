@@ -22,6 +22,13 @@ export function objectiveMet(o) {
   return validScore(s) && s >= o.target
 }
 
+// Inc 3a: the operator-authored GLOBAL held-out truth checks that are NOT satisfied (unmeasured/invalid score, or
+// below target). A SEPARATE top-level acceptance requirement from the per-objective confirms — the semantic
+// backstop against decomposition capture. Empty global_held_out -> [] -> the gate behaves exactly as before.
+export function globalHeldOutUnmet(g) {
+  return (g.global_held_out ?? []).filter((c) => !validScore(c.score) || c.score < c.target)
+}
+
 function runningMax(scores) {
   const out = []
   let m = -Infinity
@@ -67,14 +74,23 @@ export function globalVerdict(g) {
   }
 
   const unmet = objs.filter((o) => !objectiveMet(o))
+  const heldOutUnmet = globalHeldOutUnmet(g) // Inc 3a: the immutable global truth gate (empty -> vacuous)
 
-  // 3. DONE — every declared objective met AND the floor held. Boolean-AND of MET, NEVER MIN(scores).
-  // (Regression-freeness and stability are guaranteed by the orchestrator before it asks the gate.)
-  if (unmet.length === 0) {
+  // 3. DONE — every declared objective met AND every global held-out truth met AND the floor held. Boolean-AND of
+  // MET, NEVER MIN(scores). (Regression-freeness and stability are guaranteed by the orchestrator beforehand.)
+  if (unmet.length === 0 && heldOutUnmet.length === 0) {
+    const truthNote = (g.global_held_out ?? []).length ? ` + ${g.global_held_out.length} global held-out truth check(s) passed` : ''
     return {
       status: 'done',
-      reason: `all ${objs.length} DECLARED objectives met (held-out confirms passed, floor held, no cross-file regression) — proves the manifest, NOT repo-goal sufficiency`,
+      reason: `all ${objs.length} DECLARED objectives met (held-out confirms passed, floor held, no cross-file regression)${truthNote} — proves the manifest, NOT repo-goal sufficiency`,
     }
+  }
+
+  // 3b. DECOMPOSITION INSUFFICIENT — every objective met but a global held-out truth is NOT satisfied. The
+  // (mutable) decomposition was achieved yet the (immutable) goal-truth was not: `done` is withheld and there is
+  // no unmet objective left to edit. Terminal capped, with the truth-specific reason (Inc 3a backstop).
+  if (unmet.length === 0) {
+    return { status: 'capped', reason: `all ${objs.length} objectives met but the global held-out truth is not satisfied (${heldOutUnmet.map((c) => c.id).join(', ')}) — the declared decomposition is insufficient for the goal; revise the objective set` }
   }
 
   // 4. CAPPED — the global cycle ceiling reached with objectives still short (done beat this above).

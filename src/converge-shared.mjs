@@ -56,5 +56,8 @@ export function globalReadOnly(manifestOrState, scope) {
     for (const s of scorerScriptPaths(o.scorer ?? '', scope)) set.add(canonRel(s))
     if (o.confirmScorer) for (const s of scorerScriptPaths(o.confirmScorer, scope)) set.add(canonRel(s))
   }
+  // Inc 3a: the global held-out truth scorer scripts are also read-only — the editor must not rewrite the truth.
+  for (const c of manifestOrState?.global_held_out ?? [])
+    for (const s of scorerScriptPaths(c.scorer ?? '', scope)) set.add(canonRel(s))
   return [...set].filter(Boolean)
 }

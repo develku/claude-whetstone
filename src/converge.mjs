@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { gitMaterialize, gitCleanup, gitHead, isSha } from './git-snapshot.mjs'
 import { pathsIntersect, globalReadOnly } from './converge-shared.mjs'
 import { objectiveScore, objectiveMet, globalVerdict, globalRegressed } from './converge-gate.mjs'
-import { initConvergeState, ensureConvergeDir, saveConvergeState, loadConvergeState, globalBudgetExhausted, inflightList, LAST_GOOD_REF } from './converge-state.mjs'
+import { initConvergeState, ensureConvergeDir, saveConvergeState, loadConvergeState, globalBudgetExhausted, inflightList, LAST_GOOD_REF, heldOutTruthHash } from './converge-state.mjs'
 import { detectStructuralSignal } from './converge-diagnostics.mjs'
 import { shq } from './shq.mjs'
 
@@ -173,6 +173,35 @@ export function reMeasureAll(scopeDir, candidateSha, objectives, floor, deps = {
   return { floor: floorRes, vector, blocked: false }
 }
 
+// Inc 3a: measure the operator-authored GLOBAL held-out truth checks against a pristine candidate commit — each
+// in its OWN fresh worktree (same isolation as objective scorers). Kept SEPARATE from reMeasureAll (which Track B
+// reuses verbatim) so reMeasureAll's shape is byte-stable; the global truth gate is a SEQUENTIAL-path addition
+// (parallel refuses a manifest with global_held_out). Empty -> [] -> a total no-op.
+export function measureGlobalHeldOut(scopeDir, candidateSha, globalHeldOut, deps = {}) {
+  if (!globalHeldOut || !globalHeldOut.length) return []
+  const materialize = deps.materialize ?? gitMaterialize
+  const cleanup = deps.cleanup ?? gitCleanup
+  const runScorer = deps.runScorer ?? defaultRunScorer
+  return globalHeldOut.map((c) => {
+    const wt = materialize(scopeDir, candidateSha)
+    try {
+      return { id: c.id, score: runScorer(c.scorer, wt).score }
+    } finally {
+      cleanup(scopeDir, wt)
+    }
+  })
+}
+
+// Stamp measured global-held-out scores + met onto state.global_held_out (globalVerdict's done reads .met/.score).
+export function applyGlobalHeldOut(state, results) {
+  for (const c of state.global_held_out ?? []) {
+    const r = results.find((x) => x.id === c.id)
+    if (!r) continue
+    c.score = r.score
+    c.met = typeof r.score === 'number' && r.score >= c.target
+  }
+}
+
 // --- the ORCHESTRATOR loop (runConverge) and its helpers ---
 
 // The documented per-pass token floor (act-claude's ~150K context-reload tax) — the pre-launch reservation
@@ -321,7 +350,7 @@ export function buildObjectiveCfg(obj, state, cfg, wt, globalRO, slice) {
 // The done-edge STABILITY gate (DCA refinement #6, the concrete "stable"): re-run the FULL vector + floor at
 // last-good (global_stability_runs total readings); done stands only if EVERY reading keeps all objectives
 // met and the floor passing. A flaky deterministic-labelled scorer that spiked to target once does not certify.
-export function stabilityHolds(scopeDir, state, reMeasure) {
+export function stabilityHolds(scopeDir, state, reMeasure, deps = {}) {
   for (let i = 1; i < (state.global_stability_runs ?? 1); i++) {
     const rm = reMeasure(scopeDir, state.last_good_sha, state.objectives, state.floor)
     if (rm.blocked) return false
@@ -329,6 +358,12 @@ export function stabilityHolds(scopeDir, state, reMeasure) {
       const v = rm.vector.find((x) => x.id === o.id)
       const probe = { ...o, primaryScore: v?.primaryScore ?? null, confirmScore: v?.confirmScore ?? null }
       if (!objectiveMet(probe)) return false
+    }
+    // Inc 3a: a stable done must also keep the global held-out truth satisfied across the re-measure.
+    const gho = measureGlobalHeldOut(scopeDir, state.last_good_sha, state.global_held_out, deps)
+    for (const c of state.global_held_out ?? []) {
+      const r = gho.find((x) => x.id === c.id)
+      if (!(r && typeof r.score === 'number' && r.score >= c.target)) return false
     }
   }
   return true
@@ -376,6 +411,7 @@ export function setupConvergeRun(cfg, manifest, scopeDir, deps = {}) {
   }
   applyFloor(state, baseline.floor)
   applyVector(state, baseline.vector, state.last_good_sha)
+  applyGlobalHeldOut(state, measureGlobalHeldOut(scopeDir, state.last_good_sha, state.global_held_out, deps)) // Inc 3a baseline truth
   pushBinding(state)
   saveConvergeState(cfg.convergeDir, state)
   return { state, globalRO, blockedVerdict: null }
@@ -404,6 +440,15 @@ export function prepareResumeState(cfg, scopeDir, deps = {}) {
   const reMeasure = deps.reMeasure ?? reMeasureAll
   const state = loadConvergeState(cfg.convergeDir)
   if (!isSha(state.last_good_sha)) throw new Error(`cannot resume: corrupt last_good_sha (${state.last_good_sha})`)
+  // Inc 3a: the immutable global held-out truth cannot be weakened/dropped across a resume — its recorded hash
+  // must still match (guards against tampering the durable state's truth gate between runs).
+  if (state.held_out_truth_hash != null && heldOutTruthHash(state.global_held_out) !== state.held_out_truth_hash)
+    throw new Error('cannot resume: the global held-out truth gate changed since this run started (hash mismatch) — the truth bar is immutable within a run')
+  // Inc 3a (C1): the parallel backend does NOT measure/gate the global held-out, and --resume bypasses
+  // convergeRefusal — so refuse a PARALLEL resume of a run carrying a global truth here (the shared resume path),
+  // else a parallel batch could declare done on a STALE truth score. Sequential resume re-measures every accept.
+  if (cfg.parallel && (state.global_held_out?.length ?? 0) > 0)
+    throw new Error('cannot resume with --parallel: the global held-out truth gate is not wired for the parallel backend — resume sequentially (omit --parallel) when global_held_out is set')
 
   rollbackToLastGood(scopeDir, state.last_good_sha) // discard ALL of HEAD>last_good
   git(scopeDir, ['branch', '-f', LAST_GOOD_REF, state.last_good_sha]) // re-pin the durable named anchor
@@ -447,6 +492,7 @@ export function prepareResumeState(cfg, scopeDir, deps = {}) {
   }
   applyFloor(state, rm.floor)
   applyVector(state, rm.vector, state.last_good_sha) // re-derive met from the SHA; recorded vector untrusted
+  applyGlobalHeldOut(state, measureGlobalHeldOut(scopeDir, state.last_good_sha, state.global_held_out, deps)) // Inc 3a: re-derive the truth too
   const over = globalBudgetExhausted(state)
   if (over) throw new Error(`cannot resume: ${over} — raise the global budget above what was already spent`)
   state.inflight = null
@@ -524,6 +570,7 @@ export async function runOneObjective(state, cfg, scopeDir, globalRO, obj, deps 
     delRef(scopeDir, CANDIDATE_REF) // the named anchor now references it; drop the temp pin
     applyFloor(state, rm.floor)
     applyVector(state, rm.vector, state.last_good_sha)
+    applyGlobalHeldOut(state, measureGlobalHeldOut(scopeDir, state.last_good_sha, state.global_held_out, deps)) // Inc 3a
     state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: preAdvanceSha, candidate_sha: candidateSha, accepted: true, floor_score: rm.floor.score, spent_tokens: spentTokens }]
     log({ cycle: state.cycle, objective: obj.id, status: 'integrated', reason: `score ${objectiveScore(state.objectives.find((o) => o.id === obj.id))}` })
   }
@@ -632,6 +679,7 @@ export async function runObjectiveTournament(state, cfg, scopeDir, globalRO, obj
   cleanupRefs() // the named anchor now references the winner; drop every temp candidate pin
   applyFloor(state, winner.floor)
   applyVector(state, winner.vector, state.last_good_sha)
+  applyGlobalHeldOut(state, measureGlobalHeldOut(scopeDir, state.last_good_sha, state.global_held_out, deps)) // Inc 3a
   state.rounds = [...state.rounds, { objectiveId: obj.id, pre_sha: preAdvanceSha, candidate_sha: winner.candidateSha, accepted: true, candidates: K, winner_index: winner.index, floor_score: winner.floor.score, spent_tokens: totalTokens }]
   log({ cycle: state.cycle, objective: obj.id, status: 'integrated', reason: pick.reason })
   pushBinding(state)
@@ -664,7 +712,7 @@ async function convergeLoop(state, cfg, scopeDir, globalRO, deps = {}) {
 
   // done-edge stability: certify the win is reproducible (the concrete "stable") before declaring done.
   if (v.status === 'done' && (state.global_stability_runs ?? 1) > 1) {
-    if (!stabilityHolds(scopeDir, state, reMeasure)) {
+    if (!stabilityHolds(scopeDir, state, reMeasure, deps)) {
       v = { status: 'capped', reason: 'global stability re-measure unstable — the win did not reproduce over the done-edge re-measure' }
     }
   }

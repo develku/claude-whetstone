@@ -5,10 +5,22 @@
 // this owns only the global picture. Mirrors state.mjs's atomic tmp+rename write; imports its helpers,
 // never edits it.
 import { writeFileSync, readFileSync, renameSync, mkdirSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { isoNow } from './state.mjs'
 import { redactSecrets } from './redact.mjs'
 import { isJudgeClass } from './converge-shared.mjs'
+
+// Inc 3a: a stable content hash of the operator-authored GLOBAL held-out truth package — its scorers, targets,
+// AND membership (the SET). Canonicalizes each check's keys (order-insensitive) but preserves array membership, so
+// weakening a target OR dropping/adding a check changes the hash. Recorded at init; the truth bar cannot move
+// within a run (a replan may revise the decomposition, never this — DCA 20260629T141245).
+export function heldOutTruthHash(globalHeldOut) {
+  // Hash ONLY the truth-defining triple in a fixed key order (not the mutable score/met), so the SAME hash is
+  // computed at init (manifest items) and on resume (state items carry extra score/met fields).
+  const canon = (globalHeldOut ?? []).map((c) => ({ id: c.id, scorer: c.scorer, target: c.target }))
+  return createHash('sha256').update(JSON.stringify(canon)).digest('hex')
+}
 
 // The honesty constant: Track C proves the DECLARED objective set is met, NEVER that the set is SUFFICIENT
 // for the repo goal (that is Track A). Hard-coded here so NO code path can flip it (the gate cannot
@@ -69,6 +81,12 @@ export function initConvergeState(cfg, manifest) {
       retries: 0,
       attempts: 0, // times this objective has been picked — pickNextObjective round-robins on the minimum
     })),
+    // Inc 3a: the operator-authored, run-IMMUTABLE GLOBAL held-out truth gate — a top-level acceptance
+    // requirement SEPARATE from the per-objective confirms (globalVerdict's done requires every check met). Each
+    // is measured against the candidate in reMeasureAll like an objective; score starts null (unmeasured = blocks
+    // done). held_out_truth_hash pins the package so a resume cannot silently weaken/drop a check.
+    global_held_out: (manifest.global_held_out ?? []).map((c) => ({ id: c.id, scorer: c.scorer, target: c.target, score: null, met: false })),
+    held_out_truth_hash: heldOutTruthHash(manifest.global_held_out),
     global_budget_usd: cfg.globalBudgetUsd ?? null,
     global_budget_tokens: cfg.globalBudgetTokens ?? null,
     spent_usd: 0,

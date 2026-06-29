@@ -51,13 +51,20 @@ export function detectStructuralSignal(state, opts = {}) {
   const zeroTraction = opts.zeroTraction ?? 0
   const objectives = state.objectives ?? []
 
-  // 1) held-out failure — directly observed: a judge objective passing visible while failing held-out, OR an
-  //    Inc-1 tournament winner's-curse reject recorded in a recent round.
+  // 1) held-out failure — directly observed: a judge objective passing visible while failing held-out; an Inc-1
+  //    tournament winner's-curse reject in a recent round; OR (Inc 3a) every objective met yet a GLOBAL held-out
+  //    truth check unmet = the decomposition is insufficient for the goal.
   const recentRounds = (state.rounds ?? []).slice(-window)
   const guardFired = recentRounds.some((r) => r.structural_signal === 'held_out_no_progress')
   const heldOutFail = heldOutFailingObjectives(objectives)
-  if (guardFired || heldOutFail.length) {
-    return { signal: 'held_out_fail', detail: heldOutFail.length ? `objective(s) ${heldOutFail.map((o) => o.id).join(', ')} pass visible but fail held-out` : 'tournament winner-curse guard rejected a round (no held-out progress)' }
+  const unmetObj = objectives.filter((o) => o.status !== 'met' && o.status !== 'skipped')
+  const globalTruthUnmet = (state.global_held_out ?? []).filter((c) => !(typeof c.score === 'number' && c.score >= c.target))
+  const decompInsufficient = unmetObj.length === 0 && globalTruthUnmet.length > 0
+  if (guardFired || heldOutFail.length || decompInsufficient) {
+    const detail = decompInsufficient
+      ? `all objectives met but global held-out truth unmet (${globalTruthUnmet.map((c) => c.id).join(', ')}) — decomposition insufficient`
+      : (heldOutFail.length ? `objective(s) ${heldOutFail.map((o) => o.id).join(', ')} pass visible but fail held-out` : 'tournament winner-curse guard rejected a round (no held-out progress)')
+    return { signal: 'held_out_fail', detail }
   }
 
   // 2) contradiction — derived heuristic: >=2 distinct objectives keep undoing each other within the window.

@@ -161,6 +161,38 @@ export function convergeFloorFootprintReadOnly(cfg) {
   return null
 }
 
+// Inc 3a: the operator-authored GLOBAL held-out truth gate. Each check must be well-formed AND its scorer SCRIPT
+// must lie OUTSIDE every editScope (the editor must not be able to weaken/rewrite the truth it is judged against)
+// AND must not be a command-executing scorer (composite/floor). Absent global_held_out -> null (opt-in).
+export function convergeHeldOutTruthGuards(cfg) {
+  const gho = cfg.manifest?.global_held_out
+  if (gho == null) return null
+  if (!Array.isArray(gho)) return 'global_held_out must be an array of {id, scorer, target}'
+  const editScopes = (cfg.manifest?.objectives ?? []).map((o) => o.editScope).filter(Boolean)
+  const ids = new Set()
+  for (const c of gho) {
+    if (typeof c.id !== 'string' || !c.id.trim()) return 'each global_held_out check requires a non-empty id'
+    if (ids.has(c.id)) return `duplicate global_held_out id: ${c.id} (each held-out check needs a unique id — applyGlobalHeldOut maps by id)`
+    ids.add(c.id)
+    if (typeof c.scorer !== 'string' || !c.scorer.trim()) return `global held-out ${c.id ?? '?'} requires a scorer command`
+    if (typeof c.target !== 'number' || !Number.isFinite(c.target) || c.target < 0 || c.target > 100) return `global held-out ${c.id} target must be a number 0..100`
+    for (const t of scriptTokens(c.scorer)) {
+      for (const es of editScopes)
+        if (pathsIntersect(t, es)) return `global held-out ${c.id} scorer (${t}) is inside editScope ${es} — the held-out truth must lie OUTSIDE every editScope (the editor must not be able to weaken it)`
+      if (isUnsafeScorer(t, SUBGATE_UNSAFE, SUBGATE_UNSAFE_PATHS)) return `global held-out ${c.id} scorer resolves to a command-executing scorer (composite/floor) — not allowed`
+    }
+  }
+  return null
+}
+
+// Inc 3a: the global held-out truth gate is wired for the SEQUENTIAL path only; --parallel does not yet measure or
+// gate on it, so allowing both would silently weaken the gate on the parallel path. Refuse the combination.
+export function convergeParallelNoHeldOut(cfg) {
+  if (cfg.parallel && (cfg.manifest?.global_held_out?.length ?? 0) > 0)
+    return '--parallel is not yet wired for the global held-out truth gate — run sequentially (omit --parallel) when global_held_out is set'
+  return null
+}
+
 export const CONVERGE_REFUSALS = [
   convergeNeedsGlobalBudget,
   convergeObjectivesNeedCap,
@@ -171,6 +203,8 @@ export const CONVERGE_REFUSALS = [
   convergeFloorFootprintReadOnly,
   manifestEditScopeReadOnlyCollision,
   convergeCandidatesValid,
+  convergeHeldOutTruthGuards,
+  convergeParallelNoHeldOut,
 ]
 
 // The full refuse-to-start check: structural validation first (the manifest must be well-formed before any
@@ -294,7 +328,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   let manifest = null
   if (!cfg.resume) {
     manifest = loadManifest(cfg.objectivesPath)
-    const reason = convergeRefusal({ scope: cfg.scope, objectivesPath: cfg.objectivesPath, manifest, candidates: cfg.candidates })
+    const reason = convergeRefusal({ scope: cfg.scope, objectivesPath: cfg.objectivesPath, manifest, candidates: cfg.candidates, parallel: cfg.parallel })
     if (reason) {
       process.stderr.write(`refusing to start: ${reason}\n`)
       process.exit(2)
