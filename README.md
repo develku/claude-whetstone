@@ -64,7 +64,7 @@ proves each leaf *measurable*, not that a *set* of leaves is *sufficient*).
 |---|---|---|
 | **Stable** | `driver.mjs` single-file loop + objective scorers (`test-pass-rate`, `contains`, `io-assert`, `io-trace`, `io-invariant`, `io-effect`, `composite`, `floor`, `doc-lint`) + confirm-scorer, keep-best, plateau-escalate, crash-resume, dual token/USD budget | The supported v1. Code owns the gate; the gate is objective. |
 | **Experimental** | `scope-cli.mjs` (whole-dir, git-backed) · `llm-judge` (subjective gate) | Works; use with care. `llm-judge` is a *subjective* gate — capturable, weaker than an objective scorer. |
-| **Alpha** (in repo, unsupported) | `converge-cli` (multi-objective) · `--parallel` (concurrent fan-out) · `plan-cli` (proactive planner) · `--candidates` (tournament) · `replan-cli` + `outer-cli` (re-decomposition) | Built and $0-tested (several PAID-validated NON-NULL), but kept out of the supported surface and the `/whet` launcher until an external benchmark proves them. |
+| **Alpha** (in repo, unsupported) | `converge-cli` (multi-objective) · `--parallel` (batched fan-out: N objectives → one gated round; editor execution is serial, not wall-clock concurrent) · `plan-cli` (proactive planner) · `--candidates` (tournament) · `replan-cli` + `outer-cli` (re-decomposition) | Built and $0-tested (several PAID-validated NON-NULL), but kept out of the supported surface and the `/whet` launcher until an external benchmark proves them. |
 
 The gate is **objective for code** (tests/assertions) and **subjective for non-code** (an `llm-judge`
 rubric): whetstone runs on any artifact a scorer can measure, but it is only as strong as the scorer.

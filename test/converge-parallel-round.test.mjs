@@ -9,8 +9,9 @@ import { setupConvergeRun, reMeasureAll } from '../src/converge.mjs'
 import { loadConvergeState } from '../src/converge-state.mjs'
 import { globalVerdict } from '../src/converge-gate.mjs'
 
-// Track B inc 4 — the CONCURRENT round: reserve → fan-out children → squash-merge survivors → the IDENTICAL
-// single-writer gate → accept / whole-batch-rollback+quarantine+fallback. Real-git Tier-2 with stub children.
+// Track B inc 4 — the BATCH round: reserve → fan-out children → squash-merge survivors → the IDENTICAL
+// single-writer gate → accept / whole-batch-rollback+quarantine+fallback. Real-git Tier-2 with stub children
+// (these prove the round STRUCTURE + gate identity; editor execution is serial today — see converge-parallel.mjs).
 
 const git = (dir, ...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim()
 

@@ -1,6 +1,16 @@
-// Track B: CONCURRENT fan-out under the IDENTICAL gate. Runs a BATCH of disjoint-editScope objectives at
-// once, merges into ONE candidate, and calls the verbatim reMeasureAll/globalVerdict — sequential stays the
-// default, --parallel selects it, the gate path is never forked. This slice is the PURE batch-selection +
+// Track B: BATCHED fan-out under the IDENTICAL gate. Runs a BATCH of disjoint-editScope objectives in one
+// round, merges into ONE candidate, and calls the verbatim reMeasureAll/globalVerdict — sequential stays the
+// default, --parallel selects it, the gate path is never forked.
+//
+// HONESTY (finding #9/#10): the value here is STRUCTURAL, not wall-clock. The win is fewer GATE RE-MEASURES —
+// N disjoint objectives clear in ONE merged gated round instead of N sequential rounds. Editor EXECUTION is
+// currently SERIAL: the injected runChild ultimately calls the blocking `spawnSync` editor (act-claude), which
+// holds the event loop, so the Promise.allSettled fan-out below does NOT yield wall-clock concurrency — the
+// children's edits happen one after another. True concurrency would need an async editor (child_process.spawn);
+// that is a DEFERRED enhancement. Relatedly, raceChild's timeout + the killChild hook are the harness for that
+// future async editor and are DORMANT today (the setTimeout can't fire while a sibling's spawnSync blocks, and
+// converge-cli does not wire killChild); the real per-child cap today is spawnSync's own timeout+SIGKILL.
+// This slice is the PURE batch-selection +
 // pre-launch budget reservation + the (literally-reused) regression predicate, plus the single-commit N-way
 // merge (squashIntegrateBatch) and the worktree-admin mutex (withWorktreeLock); the orchestration round lands
 // in inc 4. Imports the squash apply primitives + ONE_PASS_TOKENS + regressionCheck from converge.mjs (no fork).
@@ -48,8 +58,9 @@ export function pickBatch(state, maxParallel) {
   return batch
 }
 
-// Greedy PRE-LAUNCH budget reservation (report §6-a — worse under parallelism: N children spend CONCURRENTLY,
-// budgets are checked POST-pass). Admit batch members (in pickBatch order) while the running sum of each
+// Greedy PRE-LAUNCH budget reservation (report §6-a — worse under batching: all N children of the round commit
+// their spend BEFORE the gate, yet budgets are normally checked POST-pass). Admit batch members (in pickBatch
+// order) while the running sum of each
 // child's WHOLE-CHILD worst case (cap × ONE_PASS_TOKENS) fits the remaining pool (pool − spent − already-
 // reserved). Reserving one pass per child would under-reserve up to cap× — a child runs up to `cap` passes.
 // Token dial is precise; usd-only is coarse (admit up to maxParallel, no token reservation, rely on the
@@ -155,10 +166,14 @@ export function withWorktreeLock(fn) {
 
 // === the parallel round (convergeRoundParallel) ===
 
-// Race a child producer against a hard timeout. allSettled alone awaits a HUNG child forever; a hung nested
-// claude -p also keeps spending, so on timeout we fire onTimeout (the inc-6 detached-pgid SIGKILL hook) and
-// drop the child this round. The producer NEVER rejects (it catches internally), so the rejection arm is
-// defensive only. Returns { timedOut:true } | { timedOut:false, value }.
+// Race a child producer against a hard timeout. NOTE (finding #10): this layer is DORMANT under today's
+// blocking-spawnSync editor — the setTimeout can't fire while a sibling child's spawnSync holds the event loop,
+// and converge-cli does not wire `killChild` (so onTimeout no-ops). It is the harness for a FUTURE async
+// (non-blocking) editor; today the real per-child cap is spawnSync's own timeout+SIGKILL (see makeClaudeAct).
+// When the editor becomes async: allSettled alone awaits a HUNG child forever and a hung claude -p keeps
+// spending, so on timeout we fire onTimeout (the detached-pgid SIGKILL hook) and drop the child this round.
+// The producer NEVER rejects (it catches internally), so the rejection arm is defensive only.
+// Returns { timedOut:true } | { timedOut:false, value }.
 function raceChild(producer, timeoutMs, onTimeout) {
   let timer
   const timeout = new Promise((res) => {
@@ -210,7 +225,7 @@ async function runOneFallback(state, cfg, scopeDir, globalRO, deps) {
   return runOneObjective(state, cfg, scopeDir, globalRO, obj, deps)
 }
 
-// runBatchRound: the concurrent round. Reserve → write the inflight SET BEFORE spawning → fan out PURE
+// runBatchRound: the batch round. Reserve → write the inflight SET BEFORE spawning → fan out PURE
 // producers (each timeout-raced) → partition → single-commit N-way merge of the survivors → the IDENTICAL
 // single-writer gate (reMeasureAll + batchRegressed) → accept (advance) OR whole-batch rollback + quarantine +
 // sequential-fallback pin + consecutive→parallel_disabled. All ref/index ops run single-threaded post-barrier.
@@ -234,8 +249,10 @@ async function runBatchRound(state, cfg, scopeDir, globalRO, batch, reservedToke
   }))
   saveConvergeState(cfg.convergeDir, state)
 
-  // CONCURRENT EXECUTION: children are pure producers; each races a hard timeout. Worktree materialize/cleanup
-  // is serialized by withWorktreeLock (inside childProducer); the runChild edits run concurrently.
+  // FAN-OUT: children are pure producers; each races a hard timeout. Worktree materialize/cleanup is serialized
+  // by withWorktreeLock (inside childProducer). NOTE: the runChild edits run SERIALLY today, not concurrently —
+  // the editor is a blocking spawnSync, so each child's edit holds the event loop until it returns (finding #9).
+  // The value of this round is the single batched gate re-measure for N objectives, not wall-clock speedup.
   const usdSlice = objectiveBudgetSlice(state).usd
   const settled = await Promise.allSettled(batch.map((obj) => {
     const perChildSlice = { tokens: (obj.cap ?? 4) * ONE_PASS_TOKENS, usd: usdSlice }
@@ -316,7 +333,7 @@ async function runBatchRound(state, cfg, scopeDir, globalRO, batch, reservedToke
 
 // convergeRoundParallel: one round of the parallel driver. A parallel-disabled run or a pinned fallback round
 // runs ONE objective sequentially; otherwise reserve the budget-bounded batch (affordBatch) — K=0 caps, K=1
-// degenerates to the sequential gate (no parallel apparatus for width 1), K>=2 runs the concurrent batch.
+// degenerates to the sequential gate (no batch apparatus for width 1), K>=2 runs the batched fan-out round.
 export async function convergeRoundParallel(state, cfg, scopeDir, globalRO, deps = {}) {
   const maxParallel = Math.max(1, cfg.maxParallel ?? 2)
 

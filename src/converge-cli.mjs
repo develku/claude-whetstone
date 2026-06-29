@@ -262,8 +262,10 @@ export function parseConvergeCli(argv, defaults = {}) {
     noEscalate: argv.includes('--no-escalate'),
     mcpConfig: get('--mcp-config', defaults.mcpConfig ?? null),
     resume: argv.includes('--resume'),
-    // Track B: concurrent fan-out under the IDENTICAL gate. Sequential stays the DEFAULT; --parallel selects
-    // it. The gate path is the same across both backends (runConvergeParallel reuses the verbatim gate).
+    // Track B: BATCHED fan-out under the IDENTICAL gate — N disjoint objectives in ONE merged gated round (one
+    // gate re-measure) vs sequential's N rounds. Sequential stays the DEFAULT; --parallel selects it. The gate
+    // path is the same across both backends (runConvergeParallel reuses the verbatim gate). NOTE: editor
+    // execution is SERIAL today (blocking spawnSync) — the win is fewer gate re-measures, not wall-clock speedup.
     parallel: argv.includes('--parallel'),
     maxParallel: num('--max-parallel', defaults.maxParallel ?? 2),
     maxBatchRegressions: num('--max-batch-regressions', defaults.maxBatchRegressions ?? 2),
