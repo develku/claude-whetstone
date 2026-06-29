@@ -4,10 +4,9 @@
 // and runs the cycle (src/forge/run.mjs). Kept out of driver.mjs so the driver change stays a thin guarded
 // call. The allowlist is built inline from --scorer-allow (not imported from scope-cli) to avoid a
 // driver<->scope-cli import cycle.
-import { resolve, basename, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { resolve, basename } from 'node:path'
 import { safeSnapshotPath } from '../state.mjs'
-import { isUnsafeScorer } from '../scorer-safety.mjs'
+import { isUnsafeScorer, SHELL_SCORERS, SHELL_SCORER_PATHS } from '../scorer-safety.mjs'
 import { generateCandidates, claudePropose } from './generate.mjs'
 import { admitCheck, scorerRunCheck } from './admit.mjs'
 import { mutationAdmit } from './mutation-admit.mjs'
@@ -31,24 +30,24 @@ export function forgeShouldFire(cfg, state, verdict) {
 
 // Scorers whose contract is "execute my argument" (a --cmd / raw manifest line run via shell:true) turn
 // the shq-quoted DATA args back into code INSIDE the scorer, downstream of the Forge fence — so they must
-// NEVER be a proposable Forge check, even if an operator --scorer-allow names one (the MODEL picks the id;
-// the operator only names paths). The denylist test is normalization-robust + realpath-aware via
-// isUnsafeScorer (shared with scope-cli's SUBGATE_UNSAFE so the two trust boundaries cannot drift).
+// NEVER be a proposable Forge check, even if an operator --scorer-allow names one (the MODEL picks the id +
+// args; the operator only names paths). The Forge is the SAME model-authors-args threat as Track A's plan
+// allowlist, so it subtracts the SAME canonical set: SHELL_SCORERS (composite, floor, test-pass-rate,
+// llm-judge) from scorer-safety.mjs — defined once there so the two boundaries cannot drift (they had: this
+// list was once {test-pass-rate, composite} only, a model-authored-RCE hole via floor's --cmd / llm-judge's
+// --rubric+--mcp-config). The test is normalization-robust + realpath-aware via isUnsafeScorer.
 // The io-* behavioural scorers (io-assert/io-trace/io-effect/io-invariant) are safe to propose for TWO
 // reasons: (1) their args are DATA only (JSON in/out — no shell exec), and (2) they import & run the model's
 // artifact in a locked-down CHILD process (src/iso-runner.mjs, #2), so the artifact code cannot reach the
 // oracle. Earlier comments calling these "data-only safe" were half-right — importing artifact CODE was the
 // real danger; out-of-process isolation, not the data-only args, is what closes it.
-const FORGE_UNSAFE_SCORERS = new Set(['test-pass-rate', 'composite'])
-const SCORERS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scorers')
-const SHIPPED_UNSAFE = [resolve(SCORERS_DIR, 'test-pass-rate.mjs'), resolve(SCORERS_DIR, 'composite.mjs')]
 
 // The proposable-scorer allowlist: operator-named scorers only (--scorer-allow), basename -> absolute path.
-// Command-executing scorers are denylisted (above).
+// Command-executing scorers are denylisted (SHELL_SCORERS, above).
 export function forgeAllowlist(scorerAllow = []) {
   return new Map(
     scorerAllow
-      .filter((p) => !isUnsafeScorer(p, FORGE_UNSAFE_SCORERS, SHIPPED_UNSAFE))
+      .filter((p) => !isUnsafeScorer(p, SHELL_SCORERS, SHELL_SCORER_PATHS))
       .map((p) => [basename(p).replace(/\.[^.]+$/, ''), resolve(p)]),
   )
 }

@@ -35,9 +35,14 @@ test('forgeAllowlist maps each --scorer-allow path to basename->absolute', () =>
 test('forgeAllowlist excludes command-executing scorers (denylist)', () => {
   // A scorer whose contract is "run my argument" (--cmd via shell:true) turns shq-quoted data back
   // into code INSIDE the scorer, downstream of the Forge fence — so it must never be a proposable check.
-  const m = forgeAllowlist(['/a/test-pass-rate.mjs', '/a/composite.mjs', '/a/io-assert.mjs'])
+  // ALL FOUR model-args-unsafe scorers must be excluded, matching plan-allowlist's PLAN_SHELL_SCORERS:
+  // the Forge and plan boundaries share the model-authors-args threat and must not drift (floor reads a
+  // --cmd run via a second shell; llm-judge takes a model-authored --rubric / --mcp-config).
+  const m = forgeAllowlist(['/a/test-pass-rate.mjs', '/a/composite.mjs', '/a/floor.mjs', '/a/llm-judge.mjs', '/a/io-assert.mjs'])
   assert.equal(m.has('test-pass-rate'), false)
   assert.equal(m.has('composite'), false)
+  assert.equal(m.has('floor'), false)
+  assert.equal(m.has('llm-judge'), false)
   assert.equal(m.get('io-assert'), '/a/io-assert.mjs') // data-only behavioural check stays
 })
 

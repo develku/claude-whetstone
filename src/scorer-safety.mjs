@@ -8,8 +8,9 @@
 // share so they cannot drift (the bug a prior per-boundary ad-hoc filter had: the denylist key and
 // the derived id used different normalizations, so composite.v2.mjs / Composite.mjs / bare composite
 // all slipped past). A leaf module (node stdlib only) so neither boundary import creates a cycle.
-import { basename, resolve } from 'node:path'
+import { basename, resolve, dirname, join } from 'node:path'
 import { realpathSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 // Canonical stem for the denylist comparison: drop the directory, strip ALL extensions (not just the
 // last), and lowercase — so composite.mjs, Composite.mjs, composite.v2.mjs, composite.backup.mjs and
@@ -38,3 +39,16 @@ export function isUnsafeScorer(p, denySet, unsafePaths = []) {
     try { return realpathSync(u) === real } catch { return false }
   })
 }
+
+// The canonical set of SHIPPED scorers that are unsafe to be MODEL-SELECTABLE, because their contract is
+// "run my argument": composite (manifest lines via shell:true), floor (an operator --cmd via a second shell),
+// test-pass-rate (a model-authorable --cmd), llm-judge (a model-authored --rubric / --mcp-config). Defined
+// ONCE here so the TWO model-authors-args boundaries — Track A's loadPlanAllowlist (plan-allowlist.mjs) and
+// the Verifier Forge's forgeAllowlist (forge/hook.mjs) — BOTH subtract the SAME set and cannot drift. (A prior
+// drift left the Forge denylist missing floor + llm-judge: a proven model-authored-RCE hole.) Lowercased stems
+// (matching scorerStem). NOTE: this is the model-AUTHORS-args threat; scope/converge's SUBGATE_UNSAFE =
+// {composite, floor} is a DIFFERENT, smaller threat model (a model-EDITED file pathed into as a scorer cmd)
+// and is intentionally a separate, narrower denylist.
+const SCORERS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'scorers')
+export const SHELL_SCORERS = new Set(['composite', 'floor', 'test-pass-rate', 'llm-judge'])
+export const SHELL_SCORER_PATHS = [...SHELL_SCORERS].map((id) => join(SCORERS_DIR, `${id}.mjs`))

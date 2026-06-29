@@ -12,7 +12,7 @@
 import { readdirSync } from 'node:fs'
 import { dirname, basename, join, resolve as rpath } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { isUnsafeScorer } from './scorer-safety.mjs'
+import { isUnsafeScorer, SHELL_SCORERS, SHELL_SCORER_PATHS } from './scorer-safety.mjs'
 
 const SCORERS_DIR = rpath(dirname(fileURLToPath(import.meta.url)), '..', 'scorers')
 
@@ -27,11 +27,12 @@ const SCORERS_DIR = rpath(dirname(fileURLToPath(import.meta.url)), '..', 'scorer
 // WHAT to execute, so it is genuinely data-only and safe to be model-selectable.
 export const PLAN_DATA_ONLY = new Set(['contains', 'io-assert', 'io-trace', 'io-invariant', 'io-effect', 'doc-lint'])
 
-// The shell-executing scorers, HARD-subtracted (lowercased stems — also the denySet for isUnsafeScorer).
-// composite runs manifest lines via shell:true; floor runs an operator --cmd; test-pass-rate runs a
-// model-authorable --cmd; llm-judge calls an API with a model-authored rubric (judge-class capture surface).
-export const PLAN_SHELL_SCORERS = new Set(['composite', 'floor', 'test-pass-rate', 'llm-judge'])
-const PLAN_SHELL_PATHS = [...PLAN_SHELL_SCORERS].map((id) => join(SCORERS_DIR, `${id}.mjs`))
+// The shell-executing scorers, HARD-subtracted. The canonical set lives in scorer-safety.mjs (SHELL_SCORERS)
+// so the Forge boundary (forge/hook.mjs) and this one share ONE definition and cannot drift; re-exported here
+// under the historical name for plan-refuse + the tests. composite runs manifest lines via shell:true; floor
+// runs an operator --cmd; test-pass-rate runs a model-authorable --cmd; llm-judge calls an API with a
+// model-authored rubric (judge-class capture surface).
+export const PLAN_SHELL_SCORERS = SHELL_SCORERS
 
 // loadPlanAllowlist(scorerAllowPaths) -> Map<id, absPath> of DATA-only scorers only.
 export function loadPlanAllowlist(scorerAllowPaths = []) {
@@ -45,7 +46,7 @@ export function loadPlanAllowlist(scorerAllowPaths = []) {
   // operator --scorer-allow: the operator's trust decision, EXCEPT a renamed/symlinked shipped SHELL
   // scorer is still HARD-subtracted (isUnsafeScorer is stem-robust + realpath-aware, shared with the Forge).
   for (const p of scorerAllowPaths) {
-    if (isUnsafeScorer(p, PLAN_SHELL_SCORERS, PLAN_SHELL_PATHS)) continue
+    if (isUnsafeScorer(p, PLAN_SHELL_SCORERS, SHELL_SCORER_PATHS)) continue
     const id = basename(p).replace(/\.[^.]+$/, '')
     // A shipped data-only id is NEVER overwritten by an operator path: otherwise a `--scorer-allow
     // /tmp/contains.mjs` (a shell-executing file) would silently replace the security-verified shipped
