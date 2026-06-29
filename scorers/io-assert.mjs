@@ -8,9 +8,15 @@
 // A --case is 'JSON_INPUT=>JSON_OUTPUT'; INPUT is the argument list (a scalar is one arg, a JSON array is
 // spread: '[a,b]=>c' means f(a,b)===c). Contract: read --output/--fn/--case (repeatable), print
 // {score, critique, findings} JSON, exit 0; exit 2 on scorer error (missing export, bad case, bad import).
+//
+// ISOLATION (#2): the artifact is imported and called in a locked-down CHILD process (src/iso-runner.mjs); the
+// child returns the INERT return value, and the oracle (assert.deepEqual) runs HERE in this clean process. The
+// artifact can no longer monkeypatch the comparison, hijack stdout, or steal the result frame — it is the
+// out-of-process boundary, not the data-only args, that makes this safe to import a model's code.
 import { pathToFileURL } from 'node:url'
 import assert from 'node:assert/strict'
 import { resolveOutput } from '../src/safe-rel.mjs'
+import { runIsolated, classifyObservation } from '../src/iso-runner.mjs'
 
 const arg = (name) => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined }
 const allArgs = (name) => process.argv.reduce((a, v, i) => (process.argv[i - 1] === name ? [...a, v] : a), [])
@@ -23,14 +29,14 @@ export function parseCase(s) {
   return { input: JSON.parse(s.slice(0, i)), output: JSON.parse(s.slice(i + 2)) }
 }
 
-// Run fn against each case and return {pass} or {pass:false, failing}. The case INPUT is the argument LIST:
-// a bare scalar is one argument, a JSON array is SPREAD (so '[a,b]=>c' means f(a,b) === c). Pure + exported.
-export function evaluateCases(fn, cases) {
-  for (const c of cases) {
-    const args = Array.isArray(c.input) ? c.input : [c.input]
-    let got
-    try { got = fn(...args) } catch (e) { return { pass: false, failing: { input: c.input, error: e.message } } }
-    try { assert.deepEqual(got, c.output) } catch { return { pass: false, failing: { input: c.input, expected: c.output, got } } }
+// JUDGE (parent-side oracle): deep-equal each isolated, inert per-case result against its expected output.
+// `results` is the child's per-case observation ({value} or {threw,error}); `cases` the parsed [{input,output}].
+// A throwing case fails (the artifact erred on that input). Returns {pass} or {pass:false, failing}. Pure + exported.
+export function judgeCases(results, cases) {
+  for (let i = 0; i < cases.length; i++) {
+    const r = results[i]
+    if (!r || r.threw) return { pass: false, failing: { input: cases[i].input, error: r ? r.error : 'no result' } }
+    try { assert.deepEqual(r.value, cases[i].output) } catch { return { pass: false, failing: { input: cases[i].input, expected: cases[i].output, got: r.value } } }
   }
   return { pass: true }
 }
@@ -45,15 +51,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try { cases = allArgs('--case').map(parseCase) } catch (e) { die(e.message) }
   if (!cases.length) die('at least one --case INPUT=>OUTPUT is required')
 
-  let mod
-  try { mod = await import(pathToFileURL(output).href) } catch (e) { die(`cannot import artifact ${output}: ${e.message}`) }
-  const fn = mod[fnName]
-  if (typeof fn !== 'function') die(`artifact does not export a function named "${fnName}"`)
-
-  const r = evaluateCases(fn, cases)
-  process.stdout.write(JSON.stringify({
-    score: r.pass ? 100 : 0,
-    critique: r.pass ? `all ${cases.length} behavioural cases pass` : `behavioural case failed: ${JSON.stringify(r.failing)}`,
-    findings: [],
-  }))
+  const obs = runIsolated({ artifact: output, mode: 'assert', spec: { fn: fnName, cases: cases.map((c) => c.input) }, readRoot: arg('--output') })
+  const c = classifyObservation(obs, { missingExportExits: true })
+  if (c) {
+    if (c.kind === 'scorer-error') die(c.message)
+    process.stdout.write(JSON.stringify({ score: 0, critique: c.critique, findings: [] }))
+  } else {
+    const r = judgeCases(obs.results, cases)
+    process.stdout.write(JSON.stringify({
+      score: r.pass ? 100 : 0,
+      critique: r.pass ? `all ${cases.length} behavioural cases pass` : `behavioural case failed: ${JSON.stringify(r.failing)}`,
+      findings: [],
+    }))
+  }
 }

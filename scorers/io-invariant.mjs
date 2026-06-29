@@ -6,11 +6,17 @@
 // permutation of the input" passes ANY correct sort and fails `return input` (not sorted) or a hardcoded
 // constant (not a permutation of an arbitrary input).
 //
-// Args are DATA only (JSON), never code, so it stays inside the Verifier Forge allowlist trust boundary. The
-// input arg list is SNAPSHOT before the call, so a destructive impl cannot mutate its argument to fake
-// permutation/length/input-unchanged. It does NOT strengthen admit beyond pass-good/fail-the-observed-bad —
-// an over-strong invariant that would falsely veto a FUTURE honest impl is the separately-deferred
+// Args are DATA only (JSON), never code; combined with out-of-process isolation (#2) this stays inside the
+// Verifier Forge allowlist trust boundary. The input arg list is SNAPSHOT in the PARENT (it is never passed to
+// the artifact here — the child gets its own JSON copy), so a destructive impl cannot mutate its argument to
+// fake permutation/length/input-unchanged. It does NOT strengthen admit beyond pass-good/fail-the-observed-bad
+// — an over-strong invariant that would falsely veto a FUTURE honest impl is the separately-deferred
 // mutation-backed admit; the non-brittle ledger leg (pass an ALTERNATE honest impl) is the mitigation here.
+//
+// ISOLATION (#2): the artifact is called per-case in a locked-down CHILD (src/iso-runner.mjs), which returns the
+// INERT, canonicalData-snapshotted output + the post-call live basis arg; the property checks (the oracle) run
+// HERE in this clean process. A getter/toJSON forge of the output is rejected by the child's canonicalData; a
+// child-side oracle monkeypatch is moot (the checks never run there).
 //
 // Contract: --output <root> [--rel <file>] --fn <name> --case '<JSON arg-list>' (repeatable, SPREAD like
 // io-assert — a unary array fn is DOUBLE-wrapped, e.g. '[[3,1,2]]') --invariant '<name>[:<JSON param>]'
@@ -20,6 +26,7 @@
 // discriminate the right way).
 import { pathToFileURL } from 'node:url'
 import { resolveOutput } from '../src/safe-rel.mjs'
+import { runIsolated, classifyObservation } from '../src/iso-runner.mjs'
 
 const arg = (name) => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined }
 const allArgs = (name) => process.argv.reduce((a, v, i) => (process.argv[i - 1] === name ? [...a, v] : a), [])
@@ -105,21 +112,22 @@ export function parseInvariant(s) {
   return i < 0 ? { name: str, param: undefined } : { name: str.slice(0, i), param: JSON.parse(str.slice(i + 1)) }
 }
 
-// Run every case through every invariant (AND). Each case's arg list is snapshot to JSON BEFORE the call so a
-// destructive impl cannot fake input-referencing invariants. A throwing fn fails the case (score 0). Assumes
-// invariants are already validated (assertInvariants). Pure + exported (a test passes a plain fn).
-export function evaluateInvariants(fn, argLists, invariants, { basis = 0 } = {}) {
-  for (const argList of argLists) {
-    const snapshot = JSON.parse(JSON.stringify(argList)) // faithful: --case args are JSON
-    let out
-    try { out = fn(...argList) } catch (e) { return { pass: false, failing: { args: safe(snapshot), error: String(e?.message ?? e) } } }
-    // io-invariant checks SYNCHRONOUS pure functions; an async fn returns a Promise we cannot property-check.
-    // Fail with a clear reason and swallow the eventual rejection so it never surfaces as an unhandled rejection.
-    if (out != null && typeof out.then === 'function') { out.catch(() => {}); return { pass: false, failing: { args: safe(snapshot), error: 'fn returned a Promise — io-invariant checks synchronous functions' } } }
-    const ctx = { basis: snapshot[basis], basisLive: argList[basis] }
+// JUDGE (parent-side oracle): run every isolated per-case observation through every invariant (AND). The
+// pre-call basis is the parent's PRISTINE argLists[i][basis] (never passed to the artifact); basisLive is the
+// child's post-call snapshot of the same arg, so input-unchanged sees real mutation. A throwing / async case
+// fails (score 0). `observation` is the child's {cases:[{out,basisLive}|{threw,error}|{promise}]}. Assumes
+// invariants are already validated (assertInvariants). Pure + exported (a test passes a fake observation).
+export function judgeInvariants(observation, argLists, invariants, { basis = 0 } = {}) {
+  for (let i = 0; i < argLists.length; i++) {
+    const snapshot = argLists[i] // faithful pre-call input — the parent's copy was never mutated by the artifact
+    const c = observation.cases[i]
+    if (!c) return { pass: false, failing: { args: safe(snapshot), error: 'no result for case' } }
+    if (c.threw) return { pass: false, failing: { args: safe(snapshot), error: c.error } }
+    if (c.promise) return { pass: false, failing: { args: safe(snapshot), error: 'fn returned a Promise — io-invariant checks synchronous functions' } }
+    const ctx = { basis: snapshot[basis], basisLive: c.basisLive }
     for (const inv of invariants) {
-      if (!INVARIANTS[inv.name].check(out, { ...ctx, param: inv.param })) {
-        return { pass: false, failing: { invariant: inv.name, args: safe(snapshot), out: safe(out) } }
+      if (!INVARIANTS[inv.name].check(c.out, { ...ctx, param: inv.param })) {
+        return { pass: false, failing: { invariant: inv.name, args: safe(snapshot), out: safe(c.out) } }
       }
     }
   }
@@ -146,16 +154,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const basis = basisRaw === undefined ? 0 : Number(basisRaw)
   if (!Number.isInteger(basis) || basis < 0) die('--basis must be a non-negative integer')
 
-  let mod
-  try { mod = await import(pathToFileURL(output).href) } catch (e) { die(`cannot import artifact ${output}: ${e.message}`) }
-  const fn = mod[fnName]
-  if (typeof fn !== 'function') die(`artifact does not export a function named "${fnName}"`)
-
-  const r = evaluateInvariants(fn, cases, invariants, { basis })
-  const names = invariants.map((i) => i.name).join(', ')
-  process.stdout.write(JSON.stringify({
-    score: r.pass ? 100 : 0,
-    critique: r.pass ? `all ${cases.length} case(s) satisfy: ${names}` : `invariant failed: ${JSON.stringify(r.failing)}`,
-    findings: [],
-  }))
+  const obs = runIsolated({ artifact: output, mode: 'invariant', spec: { fn: fnName, cases, basis }, readRoot: arg('--output') })
+  const c = classifyObservation(obs, { missingExportExits: true })
+  if (c) {
+    if (c.kind === 'scorer-error') die(c.message)
+    process.stdout.write(JSON.stringify({ score: 0, critique: c.critique, findings: [] }))
+  } else {
+    const r = judgeInvariants(obs, cases, invariants, { basis })
+    const names = invariants.map((i) => i.name).join(', ')
+    process.stdout.write(JSON.stringify({
+      score: r.pass ? 100 : 0,
+      critique: r.pass ? `all ${cases.length} case(s) satisfy: ${names}` : `invariant failed: ${JSON.stringify(r.failing)}`,
+      findings: [],
+    }))
+  }
 }

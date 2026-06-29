@@ -14,10 +14,13 @@
 // etc. AFTER loading cannot subvert the walker; (b) the array branch reads own descriptors too (a getter at an
 // index `Object.defineProperty(a,'0',{get})` is rejected, not invoked); (c) Proxies are rejected up front
 // (reflection on a proxy invokes its traps); (d) output props are built with defineProperty so a `__proto__`
-// key becomes a data prop, not prototype pollution. REMAINING boundary (NOT this module's job): the artifact
-// runs IN-PROCESS via `await import`, so its method bodies can still have arbitrary side effects — true execution
-// isolation is the verifier sandbox's responsibility (see the io-effect spec, codex #12). This module only
-// governs how a RETURNED/MUTATED value is READ.
+// key becomes a data prop, not prototype pollution. EXECUTION isolation (a separate concern) is now provided by
+// src/iso-runner.mjs (#2): the io-* scorers import & run the artifact in a locked-down CHILD process, and call
+// THIS walker IN that child to reduce each artifact-controlled value to INERT data before it crosses the
+// process boundary back to the parent's oracle. So this module governs how a value is READ (no getter/toJSON),
+// and the iso-runner governs WHERE the artifact runs (out of the oracle's process) — together they close the
+// import-capture hole. (canonicalData captures its primordials at load, so it stays sound even in the child,
+// which imports it before the artifact.)
 import { types } from 'node:util'
 const isProxy = types.isProxy
 const getProto = Object.getPrototypeOf
