@@ -1,7 +1,7 @@
 // State is the durable, code-owned record of a run. The model never writes it.
 // recordPass is a PURE immutable update (operator coding-style: new objects, no
 // mutation); the file I/O helpers are the only side-effecting functions here.
-import { readFileSync, writeFileSync, renameSync, mkdirSync, copyFileSync, existsSync, realpathSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, mkdirSync, copyFileSync, realpathSync } from 'node:fs'
 import { join, extname, resolve, sep } from 'node:path'
 import { redactSecrets } from './redact.mjs'
 
@@ -65,10 +65,6 @@ export function recordPass(state, { score, critique = null, snapshot = null, rev
   }
 }
 
-export function setStatus(state, status, reason) {
-  return { ...state, status, status_reason: reason, updated_at: isoNow() }
-}
-
 // --- file I/O (the run directory is the durable record) ---
 
 export function ensureLoopDir(loopDir) {
@@ -130,5 +126,3 @@ export function writeReview(loopDir, pass, review) {
   writeFileSync(join(loopDir, rel), redactSecrets(JSON.stringify(review, null, 2)))
   return rel
 }
-
-export const snapshotExists = (loopDir, rel) => existsSync(join(loopDir, rel))
