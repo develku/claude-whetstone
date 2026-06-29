@@ -17,6 +17,7 @@ import { gitMaterialize, gitCleanup, gitHead, isSha } from './git-snapshot.mjs'
 import { pathsIntersect, globalReadOnly } from './converge-shared.mjs'
 import { objectiveScore, objectiveMet, globalVerdict, globalRegressed } from './converge-gate.mjs'
 import { initConvergeState, ensureConvergeDir, saveConvergeState, loadConvergeState, globalBudgetExhausted, inflightList, LAST_GOOD_REF } from './converge-state.mjs'
+import { detectStructuralSignal } from './converge-diagnostics.mjs'
 import { shq } from './shq.mjs'
 
 const git = (dir, args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim()
@@ -336,6 +337,9 @@ export function stabilityHolds(scopeDir, state, reMeasure) {
 function finalize(state, verdict) {
   state.global_status = verdict.status
   state.global_reason = verdict.reason
+  // Inc 2 (diagnostic only, no authority): on a non-done outcome, attach WHY the run stalled — a structural
+  // signal the outer-loop replan seat (Inc 3, deferred) would consume. Never read by globalVerdict; pure advisory.
+  state.structural_signal = verdict.status === 'done' ? null : detectStructuralSignal(state).signal
 }
 
 // runConverge: a FRESH global convergence run. CODE owns decompose-target (pickNextObjective), the measured
