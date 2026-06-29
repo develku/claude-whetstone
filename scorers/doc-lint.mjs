@@ -29,8 +29,11 @@ import { resolveOutput } from '../src/safe-rel.mjs'
 
 const SHELL_LANGS = new Set(['bash', 'sh', 'shell', 'console', 'zsh'])
 const FENCE = /```(\w*)[^\n]*\n([\s\S]*?)```/g
-const PATH_TOKEN = /[A-Za-z0-9_][A-Za-z0-9_.-]*\/[A-Za-z0-9_./-]*\.[A-Za-z0-9]+/g
-const MD_LINK = /\[[^\]]*\]\(([^)\s]+)\)/g
+// Quantifiers are BOUNDED (not `*`): an unbounded run of slash/dot tokens before the required `.ext`
+// drove O(n^2) catastrophic backtracking (a pathological long line burned seconds). No real repo path
+// approaches these caps, so the bound is behaviour-preserving on real docs while keeping matching linear.
+const PATH_TOKEN = /[A-Za-z0-9_][A-Za-z0-9_.-]{0,512}\/[A-Za-z0-9_./-]{0,512}\.[A-Za-z0-9]+/g
+const MD_LINK = /\[[^\]]{0,2048}\]\(([^)\s]+)\)/g
 const HTML_ATTR = /\b(?:src|href)\s*=\s*["']([^"']+)["']/gi
 
 // A ref is checkable only if it names a repo-relative file: has a directory and an extension,

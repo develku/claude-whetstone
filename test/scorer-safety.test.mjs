@@ -14,6 +14,12 @@ test('scorerStem strips ALL extensions and lowercases', () => {
   assert.equal(scorerStem('rel/test-pass-rate.backup.mjs'), 'test-pass-rate')
 })
 
+test('scorerStem strips a leading dotfile prefix so a .composite.mjs copy cannot dodge to an empty stem', () => {
+  assert.equal(scorerStem('/a/.composite.mjs'), 'composite')
+  assert.equal(scorerStem('/a/.composite'), 'composite')
+  assert.equal(scorerStem('/a/.test-pass-rate.bak.mjs'), 'test-pass-rate')
+})
+
 const DENY = new Set(['composite', 'test-pass-rate'])
 
 test('isUnsafeScorer catches name-stem variants of a denylisted scorer (the Phase A bypasses)', () => {
@@ -22,6 +28,7 @@ test('isUnsafeScorer catches name-stem variants of a denylisted scorer (the Phas
   assert.equal(isUnsafeScorer('/a/Composite.mjs', DENY), true)
   assert.equal(isUnsafeScorer('/a/composite', DENY), true)
   assert.equal(isUnsafeScorer('/a/test-pass-rate.copy.mjs', DENY), true)
+  assert.equal(isUnsafeScorer('/a/.composite.mjs', DENY), true) // dotfile-prefixed copy
 })
 
 test('isUnsafeScorer allows a genuinely different scorer', () => {

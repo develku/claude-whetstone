@@ -17,7 +17,9 @@ import { realpathSync } from 'node:fs'
 // keeps single-extension-strip, case-preserving, as the scorerId the model names); it exists ONLY to
 // make the unsafe test robust against renamed/copied/cased dodges of a shipped command-executing scorer.
 export function scorerStem(p) {
-  return basename(p).replace(/\..*$/, '').toLowerCase()
+  // Strip a leading dotfile prefix FIRST: otherwise `.composite.mjs` -> /\..*$/ matches from the leading
+  // dot -> '' (empty stem), letting a dotfile-named copy of a denylisted command-executing scorer dodge.
+  return basename(p).replace(/^\.+/, '').replace(/\..*$/, '').toLowerCase()
 }
 
 // True if `p` names a command-executing scorer that must be excluded from a model-reachable allowlist.

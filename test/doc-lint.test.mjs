@@ -53,6 +53,22 @@ test('extractRefs excludes traversal refs from a fenced block and a link', () =>
   assert.deepEqual(extractRefs(md), ['src/real.mjs'])
 })
 
+test('extractRefs is not catastrophically slow on a pathological slash-run (ReDoS bound)', () => {
+  // a ~100KB single fenced line of slash-separated tokens with NO terminal extension forced the old
+  // PATH_TOKEN regex into O(n^2) backtracking (80KB ≈ 8s). The bounded quantifier must keep it linear.
+  const md = '```\nsrc/' + 'abc/'.repeat(25000) + '\n```'
+  const t0 = performance.now()
+  const refs = extractRefs(md)
+  const ms = performance.now() - t0
+  assert.ok(ms < 2000, `extractRefs took ${ms.toFixed(0)}ms — must stay bounded, was O(n^2)`)
+  assert.deepEqual(refs, []) // no terminal .ext -> no checkable ref (behavior unchanged)
+})
+
+test('extractRefs still matches multi-dot filenames after the ReDoS bound (token-identity)', () => {
+  const md = '```\ntest/doc-lint.test.mjs   a.b.c/x.y.z.json   src/io-effect.mjs\n```'
+  assert.deepEqual(extractRefs(md).sort(), ['a.b.c/x.y.z.json', 'src/io-effect.mjs', 'test/doc-lint.test.mjs'])
+})
+
 // ── lintDoc: score = fraction of checkable claims that hold ────────────────────
 
 test('lintDoc scores 100 when every ref exists and the version is advertised', () => {
