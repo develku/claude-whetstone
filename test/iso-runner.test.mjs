@@ -62,3 +62,16 @@ test('getBuiltinModule bypass: cannot fetch node:v8 without import either', () =
   const r = assertCase(artifact("try{const v8=process.getBuiltinModule('v8');v8.getHeapSnapshot()}catch{}\nexport const add=()=>-999\n"), [2, 3])
   assert.equal(r.results[0].value, -999)
 })
+
+// fail-safe regression guards (the inner timeout + maxBuffer must yield a score-0 verdict, never a hang/forge):
+test('a hung artifact is killed by the inner timeout and scores 0 (no parent hang)', () => {
+  const a = artifact('while (true) {}\nexport const add = () => 1\n') // hangs at module-eval
+  const r = runIsolated({ artifact: a, mode: 'assert', spec: { fn: 'add', cases: [[]] }, timeoutMs: 500 })
+  assert.equal(r.ok, false) // spawnSync ETIMEDOUT -> reason:'spawn' -> not a forged pass
+})
+
+test('a child flooding fd3 beyond maxBuffer is rejected (ENOBUFS), never a forged pass', () => {
+  const a = artifact("import { writeSync } from 'node:fs'\ntry { const b = 'x'.repeat(1024 * 1024); for (let i = 0; i < 20; i++) writeSync(3, b) } catch {}\nexport const add = () => 1\n")
+  const r = runIsolated({ artifact: a, mode: 'assert', spec: { fn: 'add', cases: [[]] } })
+  assert.equal(r.ok, false) // 20MB > 16MB maxBuffer -> ENOBUFS -> reason:'spawn'
+})

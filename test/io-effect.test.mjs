@@ -123,6 +123,14 @@ test('io-effect CLI: a gamed artifact monkeypatching the oracle still scores 0 (
   assert.equal(JSON.parse(r.out).score, 0)
 })
 
+test('io-effect CLI: a missing export is a score-0 verdict (not exit 2, unlike io-assert/io-invariant)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ioeffect-'))
+  const f = join(dir, 'a.mjs'); writeFileSync(f, 'export const other = 1\n')
+  const r = runCli(f, ['--fn', 'ghost', '--sink', '[]', '--calls', '[[]]', '--expect-sink', '[]'])
+  assert.equal(r.status, 0)
+  assert.equal(JSON.parse(r.out).score, 0)
+})
+
 test('io-effect CLI: --rel joins --output root + relative file', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ioeffect-rel-'))
   writeFileSync(join(dir, 'impl.mjs'), 'export const logEvent = (sink, e) => { sink.push(e) }\n')
