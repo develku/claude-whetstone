@@ -68,6 +68,13 @@ test('still scores normally when tests FAIL (non-zero exit WITH failures is the 
   assert.equal(JSON.parse(r.stdout).score, 66.67)
 })
 
+test('exits 2 when a run collected ZERO tests (pass 0 + fail 0) — a NaN-score guard, not score 0', () => {
+  // a glob that matched no files prints 'pass 0 / fail 0'; total===0 would divide-by-zero into a NaN
+  // score that the gate mis-handles. This is distinct from the masked-crash case (which needs exit≠0).
+  const r = run(`node -e "console.log('ℹ pass 0'); console.log('ℹ fail 0')"`)
+  assert.equal(r.status, 2)
+})
+
 test('extracts failing test names into the findings array (the gate-facing JSON)', () => {
   const r = run(`node -e "console.log('✖ test alpha (1ms)'); console.log('✖ test beta (1ms)'); console.log('ℹ pass 1'); console.log('ℹ fail 2')"`)
   const j = JSON.parse(r.stdout)

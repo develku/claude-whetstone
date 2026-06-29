@@ -27,6 +27,14 @@ test('returns 0 (best-effort) on unparseable output', () => {
   assert.equal(extractCost(''), 0)
 })
 
+test('coerces a PRESENT-but-non-numeric cost field to 0 (the || 0 guard, distinct from the missing-field path)', () => {
+  // a future claude -p shape that emits a STRING cost must not inject NaN into spent_usd — that would make
+  // every `NaN > budget` false and defeat the budget stop. This exercises the `|| 0` operator itself, which
+  // the missing-field tests never reach (they short-circuit at `?? 0` before Number() runs).
+  assert.equal(extractCost(JSON.stringify({ type: 'result', total_cost_usd: 'abc' })), 0)
+  assert.equal(extractCost(JSON.stringify({ type: 'result', total_cost_usd: null, cost_usd: 'x' })), 0)
+})
+
 // extractTokens sums the real tokens the call touched (input + output + both cache counts) into the
 // per-call value that feeds spent_tokens — the input to the token budget stop (the subscription
 // user's real constraint). Same best-effort ->0 contract as extractCost (hard_cap is the backstop).
@@ -50,6 +58,11 @@ test('extractTokens returns 0 when usage is absent', () => {
 test('extractTokens returns 0 (best-effort) on unparseable output', () => {
   assert.equal(extractTokens('not json at all'), 0)
   assert.equal(extractTokens(''), 0)
+})
+
+test('extractTokens coerces a PRESENT-but-non-numeric token field to 0 (per-field || 0 guard)', () => {
+  // a malformed usage field (string instead of number) must contribute 0, not NaN, to the token total
+  assert.equal(extractTokens(JSON.stringify({ type: 'result', usage: { input_tokens: 'xx', output_tokens: 5 } })), 5)
 })
 
 // editorFailureReason turns a non-zero `claude -p --output-format json` exit into an ACTIONABLE reason.

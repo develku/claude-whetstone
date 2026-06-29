@@ -74,6 +74,18 @@ test('floor CLI exits 2 when --cmd is missing', () => {
   assert.equal(run([]).status, 2)
 })
 
+// The floor is the H4 deterministic safety floor; when it passes and chains a held-out --and confirm, a
+// BROKEN confirm must escalate to scorer-error (exit 2), never be misread as a pass. Pins those error
+// escalations (floor.mjs ~72% branch — the chained-confirm failure arms were untested).
+test('floor CLI: a chained --and confirm that crashes or emits non-JSON escalates to scorer-error (exit 2)', () => {
+  const dir = tmp()
+  const crash = join(dir, 'crash.mjs'); writeFileSync(crash, 'process.exit(3)\n')
+  // floor passes (true), the held-out confirm exits non-zero -> must NOT be read as done
+  assert.equal(run(['--cmd', 'true', '--and', `node ${crash}`]).status, 2)
+  const notjson = join(dir, 'notjson.mjs'); writeFileSync(notjson, 'process.stdout.write("not json")\n')
+  assert.equal(run(['--cmd', 'true', '--and', `node ${notjson}`]).status, 2)
+})
+
 // --- scope-cli wiring ----------------------------------------------------------------------------
 
 test('scope-cli --floor wires floor.mjs as the confirm; composes any existing --confirm-scorer above it', () => {

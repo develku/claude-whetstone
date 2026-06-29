@@ -62,3 +62,19 @@ test('io-trace CLI: exits 2 on a malformed --trace (not a silent verdict)', () =
   const res = runCli(f, ['--new', 'Stack', '--trace', 'not json', '--expect', '[]'])
   assert.equal(res.status, 2)
 })
+
+// The CLI contract-enforcement guards (lowest branch coverage in the repo): a malformed verifier spec must
+// be a scorer ERROR (exit 2), never a silent wrong verdict. Pins the four guards so a regression that
+// weakened any of them would be caught (cf. the sibling io-effect.test.mjs convention).
+test('io-trace CLI: exits 2 on contract-violating arg shapes (subject mode + trace/expect/init shapes)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'iotrace-'))
+  const f = join(dir, 'a.mjs'); writeFileSync(f, 'export class Stack {}\nexport const make = () => ({ inc() { return 1 } })\n')
+  // both --new and --factory -> mutual-exclusion guard
+  assert.equal(runCli(f, ['--new', 'Stack', '--factory', 'make', '--trace', '[["x"]]', '--expect', '[1]']).status, 2)
+  // valid JSON but not an array-of-arrays -> --trace shape guard
+  assert.equal(runCli(f, ['--factory', 'make', '--trace', '[1,2]', '--expect', '[]']).status, 2)
+  // scalar (non-array) --expect -> --expect shape guard
+  assert.equal(runCli(f, ['--factory', 'make', '--trace', '[["inc"]]', '--expect', '5']).status, 2)
+  // scalar (non-array) --init -> --init shape guard
+  assert.equal(runCli(f, ['--factory', 'make', '--trace', '[["inc"]]', '--expect', '[1]', '--init', '5']).status, 2)
+})
