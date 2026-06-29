@@ -84,6 +84,20 @@ test('executeEffect: a sink with a forging toJSON is rejected (canonicalData)', 
   assert.deepEqual(r.finalSink, {})
 })
 
+test('executeEffect: a non-JSON per-call RETURN under wantReturns is an artifact failure, never a forged pass', () => {
+  // under --expect-returns the oracle deep-equals returns; a model could return a getter-bearing object whose
+  // value hides behind an accessor. The wantReturns canonicalData snapshot must reject it (the last untested
+  // executor forge-defense branch); the sibling sink path is already covered above.
+  const gamed = { f: (sink) => { const o = {}; Object.defineProperty(o, 'v', { get: () => 1, enumerable: true }); sink.push(1); return o } }
+  const r = executeEffect(gamed, { fn: 'f', sink: [], calls: [[]], wantReturns: true })
+  assert.equal(r.ok, false)
+  assert.equal(r.reason, 'artifact')
+  // without wantReturns the return is ignored — the SAME artifact passes (only the sink is judged)
+  const v = executeEffect(gamed, { fn: 'f', sink: [], calls: [[]] })
+  assert.equal(v.ok, true)
+  assert.deepEqual(v.finalSink, [1])
+})
+
 // ---- executeInvariants ----
 test('executeInvariants: reports per-case out + post-call basisLive', () => {
   const mod = { sortCopy: (a) => [...a].sort((x, y) => x - y) }

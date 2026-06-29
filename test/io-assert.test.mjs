@@ -29,6 +29,17 @@ test('judgeCases fails a case the artifact threw on (per-case error, not a crash
   assert.match(r.failing.error, /boom/)
 })
 
+test('judgeCases reports "no result" (not a crash) when the results array is shorter than the cases', () => {
+  // a truncated/partial child observation can yield fewer results than cases; the `r ? r.error : 'no result'`
+  // guard must produce a clean fail verdict, not a TypeError reading .error of undefined.
+  const r0 = judgeCases([], [{ input: 5, output: 1 }])
+  assert.equal(r0.pass, false)
+  assert.equal(r0.failing.error, 'no result')
+  const r1 = judgeCases([{ value: 1 }], [{ input: 5, output: 1 }, { input: 6, output: 2 }]) // 2nd result missing
+  assert.equal(r1.pass, false)
+  assert.equal(r1.failing.error, 'no result')
+})
+
 test('io-assert scores 100 for a behaviourally-correct artifact in ANY phrasing (not brittle)', () => {
   const honest = artifact('export const f = (n) => Math.sign(n)\n') // no "n < 0" — a contains check would miss this
   const r = run(honest, ['--fn', 'f', '--case', '5=>1', '--case', '-3=>-1', '--case', '0=>0'])

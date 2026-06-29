@@ -94,6 +94,28 @@ test('prepareGlobalResume RE-DERIVES met by re-measuring — a stale recorded "m
   }
 })
 
+test('prepareGlobalResume REFUSES with a blocked verdict when the deterministic floor fails at last-good', async () => {
+  const sc = writeScorer()
+  const scope = tempRepo({ 'a/val.txt': '50' })
+  try {
+    const cfg = cfgFor(scope, sc)
+    // the repo's deterministic floor broke at last-good between the crash and the resume (e.g. a dependency
+    // removed / environment changed). Resume must refuse cleanly — NOT spend tokens editing on a broken repo.
+    const manifest = { ...manifestFor(sc), floor: { cmd: 'false' } }
+    const state = initConvergeState(cfg, manifest)
+    state.last_good_sha = git(scope, 'rev-parse', 'HEAD')
+    ensureConvergeDir(cfg.convergeDir)
+    saveConvergeState(cfg.convergeDir, state)
+    let childCalls = 0
+    const { verdict } = await prepareGlobalResume(cfg, { runChild: async (c) => { childCalls++; return childWrites(100)(c) }, log: () => {} })
+    assert.equal(verdict.status, 'blocked')
+    assert.match(verdict.reason, /floor.*last-good/i)
+    assert.equal(childCalls, 0) // no objective launched against a floor-failing repo
+  } finally {
+    rmSync(scope, { recursive: true, force: true }); rmSync(sc.dir, { recursive: true, force: true })
+  }
+})
+
 test('prepareGlobalResume REFUSES (throws actionable) when the global budget is already exhausted', async () => {
   const sc = writeScorer()
   const scope = tempRepo({ 'a/val.txt': '50' })

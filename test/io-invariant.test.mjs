@@ -62,6 +62,13 @@ test('sorted: type-gates a single non-finite element ([NaN]) and passes a single
   assert.equal(ev(() => [], [[[0]]], ['sorted']).pass, true) // empty array is vacuously sorted
 })
 
+test('sorted: admits a correctly-sorted STRING array (allStr branch) and rejects an unsorted one', () => {
+  // the type gate admits all-string arrays and compares lexicographically — a real supported path that
+  // every other `sorted` test (all numeric) leaves unexercised.
+  assert.equal(ev(() => ['a', 'b', 'c'], [[['c', 'a', 'b']]], ['sorted']).pass, true)
+  assert.equal(ev(() => ['b', 'a'], [[['a', 'b']]], ['sorted']).pass, false)
+})
+
 // ---- permutation-of-input (snapshot-before-call mutation defense, codex #1) ----
 test('permutation-of-input: honest sort is a permutation of its input', () => {
   const honest = (a) => [...a].sort((x, y) => x - y)
