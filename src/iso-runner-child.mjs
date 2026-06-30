@@ -24,12 +24,15 @@ const { nonce, artifact, mode, spec } = job
 process.argv.length = Math.min(process.argv.length, 1) // scrub argv (the nonce isn't here, but leak nothing)
 
 // (2) deny the introspection/escape builtins at the module layer (covers `import` AND `require`). Normalize:
-// strip node:, then everything from the first / ? # — so v8, node:v8, node:inspector/promises, node:v8?x match.
+// strip node: (CASE-INSENSITIVELY), then everything from the first / ? # — so v8, node:v8, node:inspector/promises,
+// node:v8?x, and NODE:V8 all match. The case-insensitive strip is belt-and-suspenders like the scrub below: Node's
+// loader rejects a cased scheme (ERR_UNKNOWN_BUILTIN_MODULE) on every supported version today, so an uppercase
+// dodge is already a score-0 import failure — but the deny set must not rely on that external loader behaviour.
 // LIMITATION (by design): an honest artifact that imports one of these at module-eval time is reported
 // reason:'import' -> the scorer exits 2 (it cannot score), not score 0. The io-* scorers check pure/stateful
 // LOGIC, which never needs v8/inspector/vm/worker/child_process/module; a file that does is out of their scope.
 const DENY = new Set(['v8', 'inspector', 'vm', 'worker_threads', 'child_process', 'module'])
-const bare = (s) => String(s).replace(/^node:/, '').split(/[/?#]/)[0].toLowerCase()
+const bare = (s) => String(s).replace(/^node:/i, '').split(/[/?#]/)[0].toLowerCase()
 registerHooks({ resolve(specifier, ctx, next) { if (DENY.has(bare(specifier))) throw new Error(`iso-runner: "${specifier}" denied in sandbox`); return next(specifier, ctx) } })
 
 // (3) remove the non-import routes to builtins/native bindings. process.getBuiltinModule fetches a builtin
