@@ -133,3 +133,23 @@ accepted ONLY from assistant-authored transcript text; tool_result/user/mixed ex
   injection gate BEFORE the $0.43 whet pass, then human wiring (CLI/hook/SKILL) after. whet shines once
   a *deterministic* gate exists; reducing a fuzzy goal ("is this durable?") to that gate — and keeping
   the fuzzy half OUT, left to the agent — is the human's load-bearing work. Confirms F1 from the other side.
+
+---
+
+## Phase C disposition (2026-06-30) — every friction finding has a decision
+
+The "feed friction back" step is closed when each finding carries an action, not just a description.
+
+| ID | Disposition | Rationale |
+|----|-------------|-----------|
+| **F4** | **FIXED** (DF-01, PR #7) | bundled scorer made pytest-portable; re-validated in run 2. |
+| **F6** | **mitigated-as-practice** | "mocked-seam unit gate + ONE real-boundary integration test" — applied in run 2 (the `capture-scan` CLI test). It's a scorer-/gate-authoring *practice*, not a whetstone code change; a short docs note is the only code-side residue → folded here, low. |
+| **F3** | **already covered** | the README "Install as a Claude Code plugin" section already documents the snapshot + "restart the session" after a (re)install/update. No change. |
+| **F7** | **observation** | no action — a calibration note on where whet's value sits (cheap once a deterministic gate exists). |
+| **F2** | **DEFERRED — designated next increment** | cross-repo `--target-repo` + permission-surface preflight. Highest-value remaining (hit in BOTH runs); self-contained in `src/driver.mjs` (non-invariant). Minimal viable: warn when the artifact dir ≠ cwd AND that dir's `.claude/settings*.json` carries `allow` rules / `dangerouslySkipPermissions` (automates the whet.md SAFETY manual check). A clean TDD increment for a fresh session. |
+| **F1** | **DEFERRED — needs design** | whet gives no help authoring/stress-testing the gate. A mutation-based "is this gate gameable?" probe relates to the existing Forge; design-first. |
+| **F5** | **DEFERRED — low** | driver mode prints only score+trajectory (no built-in adversarial gaming-check/diff surfacing). The operator verifies manually; acceptable by design. Revisit if first-time-user trust friction recurs. |
+
+**State: stable.** All run-1/run-2 work committed + pushed; 3 PRs open (tracegram #4/#5, whetstone #7);
+every finding dispositioned. The only remaining actions are operator-owned: merge the PRs, and
+reinstall the global `tracegram` bin post-merge so the Stop hook can reach `capture-scan`.
