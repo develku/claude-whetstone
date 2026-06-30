@@ -16,11 +16,11 @@ intentional / not worth the cost).
 
 Via `npm run coverage` (src + scorers, deterministic). Ratcheted up by cycle 1.
 
-| Metric | Cycle 0 | Cycle 1 | Cycle 2 | Cycle 3 (2026-06-30) |
-|--------|---------|---------|---------|----------------------|
-| Line | 96.03% | 96.10% | 96.27% | **96.31%** |
-| Branch | 82.15% | 82.54% | 82.89% | **83.11%** |
-| Function | 91.83% | 92.12% | 92.28% | **93.73%** |
+| Metric | Cycle 0 | Cycle 1 | Cycle 2 | Cycle 3 | Cycle 4 (2026-06-30) |
+|--------|---------|---------|---------|---------|----------------------|
+| Line | 96.03% | 96.10% | 96.27% | 96.31% | **96.31%** |
+| Branch | 82.15% | 82.54% | 82.89% | 83.11% | **83.48%** |
+| Function | 91.83% | 92.12% | 92.28% | 93.73% | **93.89%** |
 
 The loop must not drop below the latest column; ratchet upward as coverage improves.
 
@@ -91,6 +91,18 @@ Finders targeted the cycle-1/2-untouched DEEP surface (the 8 non-invariant forge
 | C3-04 | coverage | LOW | `src/forge/generate.mjs` | fixed | `claudePropose` exit-0 non-JSON stdout parse-error path untested (`16bab59`). |
 | C3-05 | coverage | LOW | `src/forge/scope-hook.mjs` | fixed | No-changed-files skip (same-tree good/bad SHAs) untested (`16bab59`). |
 | C3-06 | simplification | LOW | `src/plan-call.mjs` | wontfix | `buildPlannerArgs` exported but internal-only — verifier judged it a deliberate pure-testable-seam export (sibling `extractPlannerText` is exported+tested), cosmetic, not worth the churn. |
+
+### Cycle 4 (2026-06-30) — iso sandbox internals + utils + scope edit path (7 candidates → 4 verified NEW → 2 fixed)
+
+Finders swept the last un-deeply-audited surface: the iso-runner/iso-frame sandbox spawn/scrub/env, prompt-fence, redact (off-disk only), the utils (whet/validate/shq/ledger/...), scope-act/scope-context. **The security audit of the sandbox + the correctness audit of the periphery found NO new bug** (the boundary is sound) — only 2 MEDIUM coverage gaps on already-correct gate-integrity guards. Strong convergence signal (worth-fixing trend 11 → 9 → 5 → **2**). Test-only cycle (zero production change); the Workflow's adversarial verify leg covered it, so the separate power-review was skipped.
+
+| ID | Axis | Sev | File(s) | Status | Note / provenance |
+|----|------|-----|---------|--------|-------------------|
+| C4-01 | coverage | MEDIUM | `scorers/io-invariant.mjs` | fixed | `canonicalKey` (the multiset engine behind permutation-of-input/unique/input-unchanged) was exercised only via flat numeric arrays — its type-prefix (1 vs "1") + key-sort anti-gaming properties + throws now pinned directly (`0629458`). |
+| C4-02 | coverage | MEDIUM | `src/scope-context.mjs` | fixed | `runScopeScorer`'s non-zero-exit (L20) + maxBuffer-overflow (L19) guards — which turn a broken project scorer into a throw, not a silent JSON.parse — untested. Both pinned (`0629458`). |
+| C4-03 | simplification | LOW | `src/plan-cli.mjs` (+replan/outer) | wontfix | `gitLsFiles`/`buildRepoContext` byte-duplicated across 3 CLI entries — verifier: low-probability drift, the CLI entries deliberately stay self-contained (cycle-free static graphs); not worth the churn. |
+| C4-04 | coverage | LOW | `src/iso-execute.mjs` | wontfix | `executeTrace` null-subject ternary untested — but its OUTPUT verdict path is already covered by the missing-method test; trivial correct ternary, not worth pinning. |
+| — | — | — | `src/scope-act.mjs` | rejected | `enforceReadOnly`'s `reverted[]` porcelain mis-parse — the field is DEAD (zero consumers, never logged); enforcement runs on the readOnly pathspecs directly, so no behavioral impact at all. real=false. |
 
 ---
 
