@@ -23,6 +23,7 @@ Related: [`RUNBOOK.md`](./RUNBOOK.md) · [`findings-register.md`](./findings-reg
 | # | Date | Target | Gate | Model | Verdict | Tokens / $ |
 |---|------|--------|------|-------|---------|------------|
 | 1 | 2026-06-30 | tracegram recall: group index by type | `uv run pytest` (RED authored) | sonnet | **DONE @ pass 1, verified** | 122,067 tok / $0.29 |
+| 2 | 2026-06-30 | tracegram autocapture.scan (marker extraction + injection gate) | `pytest tests/test_autocapture.py` (RED + injection suite) | sonnet | **DONE @ pass 1, verified; PR-review caught 1 untested-path bug** | 304,948 tok / $0.43 |
 
 ---
 
@@ -99,3 +100,36 @@ Run phase:
 - F2 (`--target-repo` + permission-surface preflight) — open.
 - F3 (`/whet` restart hint on install) — open, low.
 - F5 (driver-mode built-in gaming-check / diff surfacing) — open, low.
+
+---
+
+## Run 2 — autocapture.scan (marker-driven Stop hook for tracegram)
+
+**Target:** `tracegram` @ branch `feat/auto-capture-hook` ([PR #5](https://github.com/develku/tracegram/pull/5))
+**Artifact (whet edited):** `src/tracegram/autocapture.py`
+**Gate:** `pytest tests/test_autocapture.py` — RED authored incl. a 4-test **injection suite** (markers
+accepted ONLY from assistant-authored transcript text; tool_result/user/mixed excluded) + slug-dedup
++ path-traversal rejection. Process-critical (auto-write to canon) → **DCA `20260630T161746`** preceded.
+
+### Result (verified)
+- `#0=30 #1=100 | done` — whet implemented `scan()` in **1 pass**, 304,948 tok / $0.43, cap 10.
+- Ran under the **FIXED bundled `test-pass-rate.mjs` (DF-01)** → re-validated the scorer fix in
+  production on a harder (pytest, role-filtering) task; the collection-error RED (score 0) also
+  exercised the new `N error` parse path.
+- Verified: autocapture 10/10 + full suite green. The injection tests were **already green against the
+  stub** (it captured nothing), so whet had to implement capture WITHOUT breaking the role filter —
+  it did (genuine, not gamed).
+
+### New friction (Phase B)
+- **F6 — MEDIUM — a gate that mocks the boundary doesn't test the boundary wiring.** The unit gate
+  injected `_propose`/`_list_names` seams to stay canon-free; that left the **real-canon default-seam
+  path uncovered**, and whet guessed a non-existent `tracegram.canon` API for it. The gate was 10/10
+  green; only **human PR-review** caught it. Generalizes whetstone's own thesis: *what the gate mocks,
+  the editor can break freely.* Mitigation applied: pair the mocked-seam unit gate with ONE
+  integration test driving the real boundary (the `capture-scan` CLI test). → candidate
+  scorer-authoring doc note for whetstone.
+- **F7 — observation — for fuzzy/process-critical tasks, design dominates and whet is the cheap part.**
+  Run 1 (recall) was ~all-whet. Run 2 needed brainstorm → DCA → spec → plan → a human-authored
+  injection gate BEFORE the $0.43 whet pass, then human wiring (CLI/hook/SKILL) after. whet shines once
+  a *deterministic* gate exists; reducing a fuzzy goal ("is this durable?") to that gate — and keeping
+  the fuzzy half OUT, left to the agent — is the human's load-bearing work. Confirms F1 from the other side.
