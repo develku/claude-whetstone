@@ -94,7 +94,9 @@ Finders targeted the cycle-1/2-untouched DEEP surface (the 8 non-invariant forge
 
 ### Cycle 4 (2026-06-30) — iso sandbox internals + utils + scope edit path (7 candidates → 4 verified NEW → 2 fixed)
 
-Finders swept the last un-deeply-audited surface: the iso-runner/iso-frame sandbox spawn/scrub/env, prompt-fence, redact (off-disk only), the utils (whet/validate/shq/ledger/...), scope-act/scope-context. **The security audit of the sandbox + the correctness audit of the periphery found NO new bug** (the boundary is sound) — only 2 MEDIUM coverage gaps on already-correct gate-integrity guards. Strong convergence signal (worth-fixing trend 11 → 9 → 5 → **2**). Test-only cycle (zero production change); the Workflow's adversarial verify leg covered it, so the separate power-review was skipped.
+Finders swept the last un-deeply-audited surface: the iso-runner/iso-frame sandbox spawn/scrub/env, prompt-fence, redact (off-disk only), the utils (whet/validate/shq/ledger/...), scope-act/scope-context. **The security + correctness audits found NO new bug** (the boundary is sound) — the 2 MEDIUM worth-fixing were coverage gaps on already-correct gate-integrity guards. Strong convergence signal (worth-fixing trend 11 → 9 → 5 → **2**).
+
+**Note — security axis re-run:** the original cycle-4 security finder was terminated by the prompt-injection scanner (a web-search hit `"exfiltrate"`, HIGH), losing its work. Re-run from LOCAL SOURCE ONLY via a no-web `security-auditor` agent → confirmed the boundary SOUND, surfaced one LOW (C4-05), recovered the gap.
 
 | ID | Axis | Sev | File(s) | Status | Note / provenance |
 |----|------|-----|---------|--------|-------------------|
@@ -103,6 +105,7 @@ Finders swept the last un-deeply-audited surface: the iso-runner/iso-frame sandb
 | C4-03 | simplification | LOW | `src/plan-cli.mjs` (+replan/outer) | wontfix | `gitLsFiles`/`buildRepoContext` byte-duplicated across 3 CLI entries — verifier: low-probability drift, the CLI entries deliberately stay self-contained (cycle-free static graphs); not worth the churn. |
 | C4-04 | coverage | LOW | `src/iso-execute.mjs` | wontfix | `executeTrace` null-subject ternary untested — but its OUTPUT verdict path is already covered by the missing-method test; trivial correct ternary, not worth pinning. |
 | — | — | — | `src/scope-act.mjs` | rejected | `enforceReadOnly`'s `reverted[]` porcelain mis-parse — the field is DEAD (zero consumers, never logged); enforcement runs on the readOnly pathspecs directly, so no behavioral impact at all. real=false. |
+| C4-05 | security | LOW | `src/iso-runner-child.mjs` | fixed | (Recovered from the scanner-killed security re-run.) The sandbox builtin-DENY scheme strip was case-SENSITIVE (`/^node:/`), so `import('NODE:V8')` dodged the deny set. **Empirically NOT exploitable today** — Node's loader rejects a cased scheme (ERR_UNKNOWN_BUILTIN_MODULE) on 26.4 / the ≥23.5 floor / CI 24+26 — but the deny set must not rely on that external assumption. Fixed `/^node:/i` (defense-in-depth, matching the file's own belt-and-suspenders scrub) + an outcome-pin regression test; the `getBuiltinModule` scrub stays the primary guard (`e694edf`). |
 
 ---
 
