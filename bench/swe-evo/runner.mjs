@@ -88,9 +88,12 @@ export function editorCodePatch(treeDir, baseCommit) {
 // Run one instance's tests in its Docker image against `treeDir`, applying only `testFiles` of the gold
 // test_patch (source isolation: the held-out arms' test bodies never enter this container's grading set
 // unless this arm asks for them). Returns the {node->'pass'|'fail'} map. Throws on a Docker/infra failure.
-export function dockerRun({ instance, treeDir, testFiles }) {
+export function dockerRun({ instance, treeDir, testFiles, editorBase }) {
   const work = mkdtempSync(join(tmpdir(), 'swe-run-'))
-  const codePatch = editorCodePatch(treeDir, instance.baseCommit)
+  // editorBase is the host-side editor checkout's base — the SEALED seed SHA when sealing is on (the original
+  // base_commit has been wiped from the editor tree's history), else the original base_commit. Either way the
+  // base TREE content is identical, so the captured patch applies cleanly on the container's base_commit reset.
+  const codePatch = editorCodePatch(treeDir, editorBase || instance.baseCommit)
   // Design B: the EPHEMERAL container applies the FULL gold test_patch — F2P and P2P routinely share a
   // parametrized test file, so a per-arm slice would strip the gold test code a P2P node needs and forge a
   // false regression. Source isolation is enforced at the EDITOR's tree (base only, no gold tests), not

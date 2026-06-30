@@ -4,7 +4,7 @@
 // integration, exercised by the feasibility dry-run, not $0.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseArmResult, auditVerdict } from '../bench/swe-evo/run-ab.mjs'
+import { parseArmResult, auditVerdict, sealStateMismatch } from '../bench/swe-evo/run-ab.mjs'
 
 test('parseArmResult reads V (best score), tokens, usd, a veto flag, and status/error from state.json', () => {
   const r = parseArmResult({ best_score: 100, spent_tokens: 12345, spent_usd: 0.34, confirm_vetoed_at_pass: 3, status: 'done' })
@@ -55,4 +55,22 @@ test('auditVerdict flags an all-errored run as INVALID (not underpowered)', () =
   assert.equal(v.valid.length, 0)
   assert.equal(v.invalid, true)
   assert.equal(v.opportunities.length, 0)
+})
+
+// sealStateMismatch guards a reused (cached) --work dir: a checkout sealed under one setting must not be
+// reused under the opposite one, or the seal is silently defeated (unsealed reuse under --sealed) or the
+// editor reset breaks (sealed reuse under no --sealed). No checkout (fresh materialize) is never a mismatch.
+test('sealStateMismatch: a fresh materialize (no checkout) is never a mismatch', () => {
+  assert.equal(sealStateMismatch(false, false, true), false) // about to extract+seal
+  assert.equal(sealStateMismatch(false, false, false), false) // about to extract unsealed
+})
+
+test('sealStateMismatch: a cached checkout reused under the SAME sealed setting is fine (resume)', () => {
+  assert.equal(sealStateMismatch(true, true, true), false) // sealed checkout, sealed run
+  assert.equal(sealStateMismatch(true, false, false), false) // unsealed checkout, unsealed run
+})
+
+test('sealStateMismatch: reusing a checkout under the OPPOSITE sealed setting is a mismatch (must throw)', () => {
+  assert.equal(sealStateMismatch(true, false, true), true) // UNSEALED checkout reused with --sealed -> silent leak
+  assert.equal(sealStateMismatch(true, true, false), true) // SEALED checkout reused without --sealed -> reset breaks
 })

@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { loadInstances } from './dataset.mjs'
 import { planSplit } from './split.mjs'
 import { dockerRun } from './runner.mjs'
+import { sealCheckout } from './seal.mjs'
 import { computeFixRate, isResolved } from './fixrate.mjs'
 import { planArms, buildArmCommand, runAB } from './ab.mjs'
 import { formatReport, summarize } from './report.mjs'
@@ -55,6 +56,14 @@ export function auditVerdict(rows) {
   return { errored, valid, vpass, opportunities, invalid: valid.length === 0 }
 }
 
+// A cached checkout carries a sealed/unsealed identity (the .whetstone-sealed sentinel). Reusing it under the
+// OPPOSITE --sealed setting is unsafe and must throw: a SEALED tree reused unsealed cannot reset to the real
+// base_commit (its SHA was wiped); an UNSEALED tree reused sealed silently leaves the upstream history
+// mineable while the banner says SEALED. Only meaningful on a cache hit (checkoutExists). Pure; caller throws.
+export function sealStateMismatch(checkoutExists, sentinelExists, sealed) {
+  return checkoutExists && sealed !== sentinelExists
+}
+
 const git = (dir, ...a) => spawnSync('git', ['-C', dir, ...a], { encoding: 'utf8' })
 
 // docker cp the repo out of the instance image at base_commit (design B: base only, no gold tests).
@@ -72,13 +81,24 @@ function extractCheckout(instance, dest) {
 
 // Build a V/C/T context for one instance: a clean base checkout + the node-set + split files the arm
 // commands and the offline grader need. Returns null if the instance can't form a V/C/T split.
-function setupInstance(instance, { workRoot }) {
+function setupInstance(instance, { workRoot, sealed }) {
   const sp = planSplit({ failToPass: instance.failToPass, passToPass: instance.passToPass })
   if (sp.excluded) return null
   const dir = join(workRoot, instance.instanceId.replace(/[^a-zA-Z0-9_.]/g, '_'))
   mkdirSync(dir, { recursive: true })
   const checkoutDir = join(dir, 'repo')
-  if (!existsSync(checkoutDir)) extractCheckout(instance, checkoutDir)
+  const sentinel = join(dir, '.whetstone-sealed') // marks a checkout this harness sealed (survives a resume)
+  if (sealStateMismatch(existsSync(checkoutDir), existsSync(sentinel), sealed)) {
+    throw new Error(`swe-evo: checkout ${checkoutDir} was materialized ${existsSync(sentinel) ? 'SEALED' : 'UNSEALED'} but --sealed is ${sealed ? 'on' : 'off'}; remove ${dir} or use a fresh --work dir`)
+  }
+  if (!existsSync(checkoutDir)) {
+    extractCheckout(instance, checkoutDir)
+    if (sealed) { sealCheckout(checkoutDir); writeFileSync(sentinel, '') } // wipe upstream history once, then mark it
+  }
+  // editorBase = the host-side editor checkout's base. When sealed, the original base_commit is gone from that
+  // tree's history, so the editor base IS the seed commit (current HEAD — correct on both a fresh seal and a
+  // resumed/cached sealed checkout); else it's the real base_commit.
+  const editorBase = sealed ? git(checkoutDir, 'rev-parse', 'HEAD').stdout.trim() : instance.baseCommit
   const instJson = join(dir, 'inst.json')
   writeFileSync(instJson, JSON.stringify({ instanceId: instance.instanceId, image: instance.image, baseCommit: instance.baseCommit, testCmds: instance.testCmds, testPatch: instance.testPatch, passToPass: instance.passToPass, repoDir: instance.repoDir || '/testbed', setup: instance.setup }))
   const allNodes = [...sp.V.nodes, ...sp.C.nodes, ...sp.T.nodes]
@@ -93,7 +113,7 @@ function setupInstance(instance, { workRoot }) {
   }
   return {
     dir, checkoutDir, paths, split: { vFiles: sp.V.files, cFiles: sp.C.files, allFiles, readOnly: ['tests/', 'test/'] },
-    tNodes: sp.T.nodes, tFiles: sp.T.files, baseCommit: instance.baseCommit,
+    tNodes: sp.T.nodes, tFiles: sp.T.files, baseCommit: instance.baseCommit, editorBase, sealed: !!sealed,
   }
 }
 
@@ -108,7 +128,7 @@ function runArm({ inst, arm, ctx }, { cap, budgetTokens, model, effort, timeoutM
   const full = [...argv, '--loop-dir', loopDir, '--mcp-config', join(REPO, 'empty-mcp.json')]
   let state
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    git(ctx.checkoutDir, 'reset', '--hard', ctx.baseCommit)
+    git(ctx.checkoutDir, 'reset', '--hard', ctx.editorBase) // sealed seed SHA, or the real base_commit
     git(ctx.checkoutDir, 'clean', '-fdxq')
     rmSync(loopDir, { recursive: true, force: true })
     rmSync(ctx.paths.storeDir, { recursive: true, force: true })
@@ -126,7 +146,7 @@ function runArm({ inst, arm, ctx }, { cap, budgetTokens, model, effort, timeoutM
 // (+ P2P via the runner), then Fix-Rate each slice. Held out from every arm, so this is pure measurement.
 function gradeArm({ inst, ctx }) {
   const instance = JSON.parse(readFileSync(ctx.paths.instJson, 'utf8'))
-  const map = dockerRun({ instance, treeDir: ctx.checkoutDir, testFiles: ctx.split.allFiles })
+  const map = dockerRun({ instance, treeDir: ctx.checkoutDir, testFiles: ctx.split.allFiles, editorBase: ctx.editorBase })
   const cNodes = JSON.parse(readFileSync(ctx.paths.cNodes, 'utf8')).failNodes
   return {
     C: computeFixRate({ results: map, failNodes: cNodes, passToPass: inst.passToPass }),
@@ -139,7 +159,7 @@ function gradeArm({ inst, ctx }) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const arg = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d }
   const mode = process.argv.includes('--audit') ? 'audit' : process.argv.includes('--run') ? 'run' : null
-  if (!mode) { process.stderr.write('usage: run-ab.mjs (--audit | --run) [--instances a,b] [--cap N] [--budget-tokens N] [--model sonnet] [--effort medium] [--out f.jsonl] [--work dir]\n'); process.exit(2) }
+  if (!mode) { process.stderr.write('usage: run-ab.mjs (--audit | --run) [--instances a,b] [--cap N] [--budget-tokens N] [--model sonnet] [--effort medium] [--sealed] [--out f.jsonl] [--work dir]\n'); process.exit(2) }
   const workRoot = arg('--work', join(REPO, '.loop', 'swe-evo-work'))
   const out = arg('--out', join(workRoot, `${mode}.jsonl`))
   const cap = Number(arg('--cap', '15'))
@@ -148,18 +168,19 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const effort = arg('--effort', 'medium')
   const timeoutMs = Number(arg('--timeout-ms', String(45 * 60 * 1000)))
   const want = (arg('--instances', '') || '').split(',').map((s) => s.trim()).filter(Boolean)
+  const sealed = process.argv.includes('--sealed') // wipe each checkout's upstream .git history (anti-retrieval)
   mkdirSync(workRoot, { recursive: true })
   writeFileSync(out, '')
 
   let all = loadInstances().filter((i) => !planSplit({ failToPass: i.failToPass, passToPass: i.passToPass }).excluded)
   if (want.length) all = all.filter((i) => want.includes(i.instanceId))
   const arms = mode === 'audit' ? planArms().filter((a) => a.id === 'baseline') : planArms()
-  process.stderr.write(`run-ab ${mode}: ${all.length} instance(s) x ${arms.length} arm(s), cap=${cap}, model=${model}, budget=${budgetTokens} tok\n`)
+  process.stderr.write(`run-ab ${mode}: ${all.length} instance(s) x ${arms.length} arm(s), cap=${cap}, model=${model}, budget=${budgetTokens} tok${sealed ? ', SEALED (git-history wiped)' : ''}\n`)
 
   const rows = await runAB({
     instances: all,
     arms,
-    setupInstance: async (inst) => { const c = setupInstance(inst, { workRoot }); return c },
+    setupInstance: async (inst) => { const c = setupInstance(inst, { workRoot, sealed }); return c },
     runArm: async (a) => runArm(a, { cap, budgetTokens, model, effort, timeoutMs, log: (m) => process.stderr.write(m + '\n') }),
     gradeTruthFn: async (a) => gradeArm(a),
     write: (line) => appendFileSync(out, line),
