@@ -84,3 +84,55 @@ test('extracts failing test names into the findings array (the gate-facing JSON)
   )
   assert.equal(j.findings[0].severity, 'high')
 })
+
+// --- F4: portable parsing for non-node:test runners (pytest) ---
+// The reference scorer claimed to be "the most portable scorer" but parsed only node:test
+// output (`ℹ pass N`). A pytest/jest/go-test project could not use it. node:test patterns are
+// tried FIRST so existing node:test behavior is unchanged; pytest is a fallback.
+
+test('parses a pytest summary and scores the pass fraction (portability)', () => {
+  const r = run(`echo '2 failed, 98 passed in 1.27s'; exit 1`)
+  assert.equal(r.status, 0)
+  assert.equal(JSON.parse(r.stdout).score, 98)
+})
+
+test('parses an all-passing pytest summary as 100', () => {
+  const r = run(`echo '5 passed in 0.10s'`)
+  assert.equal(r.status, 0)
+  const j = JSON.parse(r.stdout)
+  assert.equal(j.score, 100)
+  assert.match(j.critique, /all 5 tests pass/)
+})
+
+test('counts pytest collection errors as failures (not silently dropped)', () => {
+  // "1 error" during collection means the suite did NOT fully pass; it must lower the score.
+  const r = run(`echo '1 error in 0.10s'; exit 2`)
+  assert.equal(r.status, 0)
+  assert.equal(JSON.parse(r.stdout).score, 0)
+})
+
+test('failureDetail narrows pytest output to the assertion gradient, dropping noise', () => {
+  const sample = [
+    'tests/test_x.py::test_foo FAILED',
+    '    def test_foo():',
+    '>       assert grouped == expected',
+    'E       AssertionError: assert 1 == 2',
+    'FAILED tests/test_x.py::test_foo - AssertionError: assert 1 == 2',
+    '1 failed, 3 passed in 0.20s',
+  ].join('\n')
+  const d = failureDetail(sample)
+  assert.match(d, /E\s+AssertionError: assert 1 == 2/) // keeps the expected-vs-actual gradient
+  assert.match(d, /assert grouped == expected/) // keeps the failing expression
+  assert.match(d, /FAILED tests\/test_x\.py::test_foo/)
+  assert.doesNotMatch(d, /def test_foo/) // drops surrounding source noise
+  assert.doesNotMatch(d, /passed in/) // drops the summary line
+})
+
+test('extracts pytest FAILED test names into findings', () => {
+  const r = run(`printf 'FAILED tests/test_x.py::test_foo - boom\\n1 failed, 2 passed in 0.10s\\n'; exit 1`)
+  const j = JSON.parse(r.stdout)
+  assert.deepEqual(
+    j.findings.map((f) => f.area),
+    ['tests/test_x.py::test_foo'],
+  )
+})

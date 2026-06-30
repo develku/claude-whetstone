@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // Reference scorer (deterministic): score = 100 * passed / (passed + failed),
 // parsed from a test command's output. The most portable scorer — zero extra deps.
+// Recognizes node:test (`ℹ pass N`) AND pytest (`N passed, N failed`, plus collection `N error`)
+// output; node:test patterns are matched first so its behavior is unchanged. Teaching it another
+// runner (jest, go test) = one more pattern pair in parseCounts() + failingNames().
 //
 // The critique carries the ASSERTION DETAIL (expected vs actual) of each failing
 // test, not just its name — that diff IS the gradient the editor needs to climb.
@@ -41,12 +44,57 @@ export function buildSubGateArgs(cmd, area) {
 export function failureDetail(out) {
   const s = String(out)
   const i = s.search(/^\s*✖ failing tests:/m)
-  const section = i >= 0 ? s.slice(i) : s
-  return section
+  if (i >= 0) {
+    // node:test: the per-failure detail (AssertionError + expected vs actual) follows the marker
+    return s
+      .slice(i)
+      .split('\n')
+      .filter((l) => !/^\s+at\s/.test(l)) // drop stack-frame lines
+      .join('\n')
+      .trim()
+  }
+  // pytest: the failing expression (`>`), the error (`E `), and the FAILED summary line are the
+  // gradient; surrounding source context and the pass/fail tally are noise.
+  const py = s.split('\n').filter((l) => /^E\s/.test(l) || /^>\s/.test(l) || /^FAILED\s/.test(l))
+  if (py.length) return py.join('\n').trim()
+  // unknown runner: whole output, stack frames stripped
+  return s
     .split('\n')
-    .filter((l) => !/^\s+at\s/.test(l)) // drop stack-frame lines
+    .filter((l) => !/^\s+at\s/.test(l))
     .join('\n')
     .trim()
+}
+
+// Parse pass/fail counts from a test runner's output. node:test patterns are tried FIRST so the
+// long-standing node:test behavior is byte-identical; pytest (and jest-ish "N passed/failed") is a
+// fallback. Returns {pass, fail} or null when nothing parses. Exported for unit testing.
+export function parseCounts(out) {
+  const s = String(out)
+  // node:test / TAP-ish: "ℹ pass N", "# pass N"
+  const nPass = s.match(/(?:ℹ|#)\s*pass\s+(\d+)/i)
+  const nFail = s.match(/(?:ℹ|#)\s*fail\s+(\d+)/i)
+  if (nPass || nFail) return { pass: nPass ? Number(nPass[1]) : 0, fail: nFail ? Number(nFail[1]) : 0 }
+  // pytest / jest summary: "2 failed, 98 passed in 1.27s"; collection "1 error" counts as a failure.
+  const pPass = s.match(/(\d+) passed/)
+  const pFail = s.match(/(\d+) failed/)
+  const pErr = s.match(/(\d+) error(?:s|ed)?\b/)
+  if (pPass || pFail || pErr) {
+    return {
+      pass: pPass ? Number(pPass[1]) : 0,
+      fail: (pFail ? Number(pFail[1]) : 0) + (pErr ? Number(pErr[1]) : 0),
+    }
+  }
+  return null
+}
+
+// Failing test names for the findings array. node:test "✖ <name>" lines first (unchanged); pytest
+// "FAILED <nodeid>" as a fallback. Exported for unit testing.
+export function failingNames(out) {
+  const s = String(out)
+  const mainBody = s.split(/^\s*✖ failing tests:/m)[0]
+  const nodeNames = [...mainBody.matchAll(/^\s*✖\s+(.+?)(?:\s+\(\d|\s*$)/gm)].map((m) => m[1].trim()).slice(0, 10)
+  if (nodeNames.length) return nodeNames
+  return [...s.matchAll(/^FAILED\s+(\S+)/gm)].map((m) => m[1]).slice(0, 10)
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -58,12 +106,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const res = spawnSync(runCmd, { shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
   const out = `${res.stdout || ''}${res.stderr || ''}`
 
-  const passM = out.match(/(?:ℹ|#)\s*pass\s+(\d+)/i)
-  const failM = out.match(/(?:ℹ|#)\s*fail\s+(\d+)/i)
-  if (!passM && !failM) die('could not parse pass/fail counts from the test output')
+  const counts = parseCounts(out)
+  if (!counts) die('could not parse pass/fail counts from the test output')
 
-  const pass = passM ? Number(passM[1]) : 0
-  const fail = failM ? Number(failM[1]) : 0
+  const { pass, fail } = counts
   const total = pass + fail
   if (total === 0) die('test command reported zero tests')
   // A non-zero exit with ZERO reported failures is a contradiction: the run died for a reason the
@@ -75,8 +121,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
 
   const score = Math.round((100 * pass) / total * 100) / 100
-  const mainBody = out.split(/^\s*✖ failing tests:/m)[0]
-  const names = [...mainBody.matchAll(/^\s*✖\s+(.+?)(?:\s+\(\d|\s*$)/gm)].map((m) => m[1].trim()).slice(0, 10)
+  const names = failingNames(out)
   const critique =
     fail === 0 ? `all ${total} tests pass` : `${fail}/${total} tests failing.\n${failureDetail(out)}`.slice(0, 3000)
   const findings = names.map((n) => ({ area: n, severity: 'high', suggestion: 'make this failing test pass', scorer: buildSubGateArgs(cmd, n) }))
