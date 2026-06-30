@@ -107,6 +107,16 @@ Finders swept the last un-deeply-audited surface: the iso-runner/iso-frame sandb
 | — | — | — | `src/scope-act.mjs` | rejected | `enforceReadOnly`'s `reverted[]` porcelain mis-parse — the field is DEAD (zero consumers, never logged); enforcement runs on the readOnly pathspecs directly, so no behavioral impact at all. real=false. |
 | C4-05 | security | LOW | `src/iso-runner-child.mjs` | fixed | (Recovered from the scanner-killed security re-run.) The sandbox builtin-DENY scheme strip was case-SENSITIVE (`/^node:/`), so `import('NODE:V8')` dodged the deny set. **Empirically NOT exploitable today** — Node's loader rejects a cased scheme (ERR_UNKNOWN_BUILTIN_MODULE) on 26.4 / the ≥23.5 floor / CI 24+26 — but the deny set must not rely on that external assumption. Fixed `/^node:/i` (defense-in-depth, matching the file's own belt-and-suspenders scrub) + an outcome-pin regression test; the `getBuiltinModule` scrub stays the primary guard (`e694edf`). |
 
+### External dogfood (2026-06-30) — tracegram
+
+First use of whetstone on a real external target (the Python `tracegram` repo) surfaced a portability
+gap invisible from inside (whetstone's own suite is all node:test). Full friction log:
+[`dogfood-tracegram.md`](./dogfood-tracegram.md).
+
+| ID | Axis | Sev | File(s) | Status | Note / provenance |
+|----|------|-----|---------|--------|-------------------|
+| DF-01 | portability | HIGH | `scorers/test-pass-rate.mjs` | fixed | The "most portable scorer" parsed **only** node:test output (`ℹ pass N`) end-to-end — count regex, `✖ failing tests:` detail marker, `--test-name-pattern`. A pytest run errored at the scorer (`could not parse pass/fail counts`, 0 tokens, editor never spawned). Made multi-runner via TDD (5 RED→GREEN): `parseCounts()` node-first then pytest (`N passed/failed`, collection `N error`=failure); `failureDetail()`/`failingNames()` pytest branches. 999/999 green, coverage ≥ ratchet (branch 83.48→83.52), scorer not invariant. End-to-end: bundled scorer on real tracegram pytest → score 100. Branch `feat/portable-test-scorer`. |
+
 ---
 
 ## How findings enter
