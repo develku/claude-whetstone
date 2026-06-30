@@ -5,21 +5,30 @@
 <h1 align="center">claude-whetstone</h1>
 
 <p align="center">
-A deterministic <b>loop-engineering</b> driver for Claude Code — raise <i>one</i> artifact toward a
-measured score threshold, where <b>code owns the gate</b> and the <b>model owns only diagnosis + edits</b>.
+<b>whetstone keeps editing one file and re-scoring it until a number says it's good enough — or a limit stops it.</b><br>
+A deterministic <b>loop-engineering</b> driver for Claude Code: <b>code owns the gate</b>, the <b>model owns only diagnosis + edits</b>.
 </p>
 
-> Status: **v1.1.0 — the single-file core is stable; the orchestration layers are alpha.** Requires
-> **Node ≥ 23.5** (the behavioural-scorer isolation uses `module.registerHooks` + the Permission Model). See
-> [What's stable in v1](#whats-stable-in-v1). Matured by running it on itself (dogfooding); the cost,
-> auth, and security model are exercised end-to-end, not speculative.
+> Status: **v1.1.0** — the single-file core is **stable**; the multi-file and orchestration layers are
+> alpha. Matured by running it on itself (dogfooding), so the cost, auth, and security model are exercised
+> end-to-end, not speculative. Requires **Node ≥ 23.5** — the behavioural scorers isolate untrusted code
+> with `module.registerHooks` + the Permission Model. See [What's stable in v1](#whats-stable-in-v1).
 
 ## How the loop works
 
-<p align="center">
-  <img src="assets/whetstone-loop.svg" width="900"
-       alt="The whetstone loop — every decision: a code-owned pipeline (baseline → ACT edit → observe + score → keep-best → GATE) fanning out to five verdicts (running, done, capped, plateau, error), labelled with the model used at each step and the two budget dials.">
-</p>
+```mermaid
+flowchart TD
+    B["BASELINE · score iter_000 (code)"] --> A["ACT · one edit (model)"]
+    A --> O["OBSERVE · produce the real output"]
+    O --> S["SCORE · 0–100 + critique (scorer)"]
+    S --> P["PERSIST · record pass, keep-best (code)"]
+    P --> G{"GATE · gateVerdict (code)"}
+    G -->|"running · score &lt; target"| A
+    G -->|"done · score ≥ target"| DONE["DONE — confirm-veto checked"]
+    G -->|capped| CAPPED["CAPPED — cap or budget hit"]
+    G -->|plateau| PLATEAU["PLATEAU — one opus rescue, then it stops"]
+    G -->|error| ERROR["ERROR — invalid score / no-op"]
+```
 
 **In plain words.** whetstone keeps editing *one* file and re-scoring it until a number says it's good
 enough — or until a limit says stop. Each round a cheap model (haiku/sonnet) makes one small edit; an
@@ -54,6 +63,30 @@ decide whether it's done. Loop engineering's upgrade is to take that decision *a
 The model literally cannot vote itself done, because the `score >= target` branch lives in `gate.mjs`,
 not in a prompt.
 
+## Architecture — the whole stack
+
+That one loop is the foundation. Everything above it reuses the *same* code-owned gate, just at a
+wider scope — and the gate gets weaker (more subjective) the wider it reaches, which is why the upper
+layers are unsupported and two seats stay human. From the bottom up:
+
+<p align="center">
+  <img src="assets/whetstone-architecture.svg" width="900"
+       alt="The whetstone architecture as a stack of layers under one code-owned gate. Intake & launcher routes a request and blocks without a cost ceiling. The stable single-objective inner loop (baseline → ACT → observe+score → keep-best → GATE, five verdicts, only running loops back) is the core. The experimental whole-repo scope loop applies the same gate to a --scope dir with git-backed keep-best and the Forge per-file verifier learner. The alpha dynamic control plane (converge) adds multi-objective AND-gating, a tournament, an operator-authored hash-pinned global held-out truth, and a human-accepted replan. A cross-cutting scorers & isolation layer produces the 0–100 number the gate reads at every layer.">
+</p>
+
+| Layer | Adds | Gate owner | Keep-best unit |
+|---|---|---|---|
+| **Inner loop** (stable) | raise *one* file | `gateVerdict` (`gate.mjs`) | a per-pass artifact snapshot |
+| **Scope loop** (experimental) | raise a *whole repo* | the same `gateVerdict`, per project run | a **git** commit per pass (needs a clean git repo) |
+| **+ Forge** (experimental) | *learn* a per-file verifier when a `done` is vetoed | the recovered confirm signal | the learned check, stored outside the scope |
+| **Control plane** (alpha) | raise *N objectives* at once | `globalVerdict` (`converge-gate.mjs`) — `done` only when **every** objective is MET | a selective squash-merge per round |
+
+The two human seats (alpha): **authoring the global held-out truth** (the immutable, hash-pinned
+acceptance check `done` must also pass) and **accepting a replan** (the control plane only ever
+*proposes* a different decomposition — it never re-runs itself). Scorers feed the number into the gate
+at every layer; the behavioural `io-*` scorers run untrusted candidate code in a locked-down,
+out-of-process child.
+
 ## What's stable in v1
 
 whetstone is honest about maturity. **v1.1.0 declares the single-file core stable**; the multi-file and
@@ -86,6 +119,8 @@ held-out truth, and accepting a structural replan.
 The orchestration runtime is reimplemented in-repo as the **default** portable control plane (`--resume`,
 budgets, rollback, crash-recovery); the Claude Code Workflow tool is an *optional attended `act` drop-in*,
 never the orchestrator or the gate owner (see [Backends & the Workflow tool](#backends--the-claude-code-workflow-tool)).
+Caveat on "portable": only the single-file `driver` is VCS-free (any artifact, cron, no repo). `scope`
+and `converge` use **git** commits as their keep-best unit, so they require a clean git repo.
 
 ## Install as a Claude Code plugin
 
@@ -266,6 +301,14 @@ The done-edge `--confirm-scorer` re-runs a **held-out** suite from a *clean chec
 pass, so a model that games the visible score still can't reach done. It raises a fixed, measured bar —
 it is not (yet) an open-ended planner; that's the v2 tier in the design doc.
 
+**Forge — the verifier that learns (`--forge`, opt-in).** When the held-out confirm *vetoes* a `done`,
+that's evidence the visible scorer was gamed. Forge materialises the good (committed) and bad (vetoed)
+versions into separate worktrees and learns a new **per-file** check that tells them apart — corroborated
+by an independent oracle, regression-tested against the exploit it just caught, and auto-retired if it
+later turns flaky. The learned checks are stored *outside* the scope (`--forge-store`) so the editor
+can't reach them. It's how the gate gets *stronger* over a long run instead of staying a fixed target —
+experimental, and it needs `--confirm-scorer`.
+
 ## ⚠️ Cost, auth & budgets (read before the first live run)
 
 Directly measured on this machine (2026-06-22), **not** hand-waved:
@@ -363,6 +406,12 @@ scorers/test-pass-rate.mjs   reference scorer          test/scorer.test.mjs
 scorers/composite.mjs        min-combine N sub-scorers  test/composite.test.mjs
 scorers/llm-judge.mjs        opus-as-judge (subjective) test/judge.test.mjs
 scorers/doc-lint.mjs         doc-vs-repo claim gate     test/doc-lint.test.mjs
+scorers/io-*.mjs             behavioural scorers (run candidate code) test/io-*.test.mjs
+src/iso-*.mjs                locked-down out-of-process runner for io-* test/iso-execute.test.mjs
+
+# experimental — whole-repo loop (git-backed)
+src/scope-cli.mjs / scope-act.mjs   whole-dir loop · git keep-best · --read-only fence
+src/forge/          per-file verifier learning on a confirm-veto (--forge)
 
 # alpha — the dynamic control plane (multi-objective, repo-wide)
 src/converge*.mjs   multi-objective gate + tournament + global held-out truth + --parallel
