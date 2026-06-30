@@ -146,6 +146,7 @@ test('io-effect CLI: exits 2 on scorer errors (missing --sink, bad --calls JSON,
   assert.equal(runCli(f, ['--fn', 'f', '--sink', '[]', '--calls', 'not json', '--expect-sink', '[]']).status, 2) // bad --calls
   assert.equal(runCli(f, ['--fn', 'f', '--sink', '[]', '--calls', '[1,2]', '--expect-sink', '[]']).status, 2) // calls not array-of-arrays
   assert.equal(runCli(f, ['--fn', 'f', '--sink', '[]', '--calls', '[[]]']).status, 2) // missing --expect-sink
+  assert.equal(runCli(f, ['--fn', 'f', '--sink', '[]', '--calls', '[[]]', '--expect-sink', '[]', '--expect-returns', '5']).status, 2) // --expect-returns not an array (scalar)
 })
 
 test('io-effect CLI: --expect-returns asserts returns end-to-end; a length != calls length is a scorer error', () => {

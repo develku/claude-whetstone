@@ -259,7 +259,10 @@ export function parseConvergeCli(argv, defaults = {}) {
     model: get('--model', defaults.model ?? 'sonnet'),
     effort: get('--effort', defaults.effort ?? 'medium'),
     escalateModel: get('--model-escalate', defaults.escalateModel ?? 'opus'),
-    noEscalate: argv.includes('--no-escalate'),
+    // undefined (not false) when the flag is absent, so buildObjectiveCfg's `cfg.noEscalate ?? true` default
+    // applies: a converge child is its own objective unit and must not do a second opus escalation (matches
+    // decompose, and the outer-cli path which omits the key). A literal `false` here defeated that default.
+    noEscalate: argv.includes('--no-escalate') || undefined,
     mcpConfig: get('--mcp-config', defaults.mcpConfig ?? null),
     resume: argv.includes('--resume'),
     // Track B: BATCHED fan-out under the IDENTICAL gate — N disjoint objectives in ONE merged gated round (one

@@ -51,6 +51,36 @@ test('scope evaluate runs the scorer in cwd=scopeDir and returns its score', asy
   }
 })
 
+test('scope evaluate THROWS on a non-zero-exit project scorer (a broken gate is never a silent JSON.parse)', async () => {
+  const scopeDir = tempRepo()
+  const loopDir = mkdtempSync(join(tmpdir(), 'whet-loop-'))
+  try {
+    ensureLoopDir(loopDir)
+    const { evaluate } = scopeBuildContext(loopDir)
+    // a scorer that fails (non-zero exit) with garbage on stderr must surface as a thrown error, NOT be
+    // JSON.parse'd and trusted as a score (the gate-integrity guard, scope-context.mjs L20).
+    const s = stateFor(scopeDir, { scorer_cmd: 'sh -c "echo boom >&2; exit 7" #' })
+    await assert.rejects(() => evaluate(s), /scorer exited 7/)
+  } finally {
+    rmSync(scopeDir, { recursive: true, force: true }); rmSync(loopDir, { recursive: true, force: true })
+  }
+})
+
+test('scope evaluate THROWS when the project scorer overflows maxBuffer (res.error, not a parse)', async () => {
+  const scopeDir = tempRepo()
+  const loopDir = mkdtempSync(join(tmpdir(), 'whet-loop-'))
+  try {
+    ensureLoopDir(loopDir)
+    const { evaluate } = scopeBuildContext(loopDir)
+    // flooding stdout past maxBuffer (32MB) sets res.error -> the L19 'scorer failed' guard. (A non-existent
+    // binary would NOT reach L19 — shell:true makes it exit 127, the L20 path above.)
+    const s = stateFor(scopeDir, { scorer_cmd: `node -e "process.stdout.write('x'.repeat(40*1024*1024))" #` })
+    await assert.rejects(() => evaluate(s), /scorer failed/)
+  } finally {
+    rmSync(scopeDir, { recursive: true, force: true }); rmSync(loopDir, { recursive: true, force: true })
+  }
+})
+
 test('scope confirm scores the committed snapshot from a clean checkout, not the dirty tree (v1 Forge graft)', async () => {
   const scopeDir = tempRepo()
   const loopDir = mkdtempSync(join(tmpdir(), 'whet-loop-'))

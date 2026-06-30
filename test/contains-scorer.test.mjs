@@ -36,3 +36,10 @@ test('exits 2 (scorer error) when --needle or --output is missing', () => {
   assert.equal(spawnSync('node', [scorer, '--output', 'x'], { encoding: 'utf8' }).status, 2)
   assert.equal(spawnSync('node', [scorer, '--needle', 'x'], { encoding: 'utf8' }).status, 2)
 })
+
+test('exits 2 (scorer error) when --output is PRESENT but unreadable (not a silent score 0)', () => {
+  // a path typo / unreadable output is a scorer error (the harness gave a bad path), not a masquerading
+  // "needle absent" verdict — the same exit-2 discriminator as the missing-arg paths, for the read failure.
+  const r = spawnSync('node', [scorer, '--needle', 'DONE', '--output', '/nonexistent/path/xyz.txt', '--loop-dir', '.', '--pass', '000'], { encoding: 'utf8' })
+  assert.equal(r.status, 2)
+})

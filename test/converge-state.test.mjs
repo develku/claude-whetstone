@@ -114,3 +114,26 @@ test('globalBudgetExhausted reports when cumulative spend exceeds the pool, else
   assert.ok(globalBudgetExhausted({ global_budget_usd: 2, spent_usd: 3 }))
   assert.equal(globalBudgetExhausted({ global_budget_usd: null, global_budget_tokens: null, spent_tokens: 9e9 }), null)
 })
+
+test('initConvergeState enforces a MANIFEST-declared budget even when the CLI flag is absent', () => {
+  // The operator declares the budget IN THE MANIFEST (the shape validateManifest validates and
+  // convergeNeedsGlobalBudget requires) and passes NO --global-budget CLI flag — the canonical
+  // examples/converge-with-truth-gate.json shape. The enforced state budget MUST come from the
+  // manifest, else the >=2-objective fan-out runs unattended with no enforced pool cap.
+  const { manifest } = fixture()
+  const cfgNoFlag = { scope: '/repo', objectivesPath: '/elsewhere/objectives.json', globalCap: 20 }
+  const s = initConvergeState(cfgNoFlag, manifest)
+  assert.equal(s.global_budget_tokens, 4_000_000) // from manifest.global_budget_tokens, NOT null
+  assert.ok(globalBudgetExhausted({ ...s, spent_tokens: 5_000_000 })) // and enforcement trips
+  // the usd dial folds from the manifest too
+  const usdManifest = { ...manifest, global_budget_tokens: null, global_budget_usd: 12 }
+  const su = initConvergeState(cfgNoFlag, usdManifest)
+  assert.equal(su.global_budget_usd, 12)
+})
+
+test('initConvergeState lets a CLI budget flag OVERRIDE the manifest budget', () => {
+  const { manifest } = fixture() // manifest declares 4_000_000
+  const cfg = { scope: '/repo', objectivesPath: '/x.json', globalBudgetTokens: 1_000_000 }
+  const s = initConvergeState(cfg, manifest)
+  assert.equal(s.global_budget_tokens, 1_000_000) // explicit CLI flag wins over the manifest value
+})

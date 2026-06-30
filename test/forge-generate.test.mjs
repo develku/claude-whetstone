@@ -107,9 +107,11 @@ test('generateCandidates caps the number of proposals it processes at maxCandida
 
 // --- claudePropose (default adapter, fake claude shim — $0) ---
 
-const fakeClaude = (dir, { result, cost = 0.03, outTokens = 4, exit = 0 }) => {
+const fakeClaude = (dir, { result, cost = 0.03, outTokens = 4, exit = 0, raw }) => {
   const p = join(dir, 'fake-claude.mjs')
-  const body = exit !== 0
+  const body = raw != null
+    ? `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(raw)}); process.exit(0)\n` // exit 0 but non-JSON stdout
+    : exit !== 0
     ? `#!/usr/bin/env node\nprocess.stderr.write('boom\\n'); process.exit(${exit})\n`
     : `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ type: 'result', result: ${JSON.stringify(result)}, total_cost_usd: ${cost}, usage: { output_tokens: ${outTokens} } }))\n`
   writeFileSync(p, body); chmodSync(p, 0o755)
@@ -129,4 +131,13 @@ test('claudePropose throws on a non-zero claude exit (a failed proposal is never
   const dir = mkdtempSync(join(tmpdir(), 'forge-claude-'))
   const bin = fakeClaude(dir, { result: '', exit: 2 })
   assert.throws(() => claudePropose('hi', { claudeBin: bin }), /exited 2/)
+})
+
+test('claudePropose throws an actionable error on exit-0 non-JSON stdout (not a raw SyntaxError)', () => {
+  // claude -p can exit 0 yet emit a plain-text refusal / truncated stream / interleaved banner; the parse
+  // guard must convert that into an actionable "could not parse" message, not a bare SyntaxError or a silent
+  // empty proposal — the twin of the tested non-zero-exit guard.
+  const dir = mkdtempSync(join(tmpdir(), 'forge-claude-'))
+  const bin = fakeClaude(dir, { raw: 'sorry, I cannot propose checks' })
+  assert.throws(() => claudePropose('hi', { claudeBin: bin }), /could not parse claude output/)
 })

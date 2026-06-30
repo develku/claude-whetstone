@@ -1,7 +1,7 @@
 // State is the durable, code-owned record of a run. The model never writes it.
 // recordPass is a PURE immutable update (operator coding-style: new objects, no
 // mutation); the file I/O helpers are the only side-effecting functions here.
-import { readFileSync, writeFileSync, renameSync, mkdirSync, copyFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, mkdirSync, copyFileSync, realpathSync } from 'node:fs'
 import { join, extname, resolve, sep } from 'node:path'
 import { redactSecrets } from './redact.mjs'
 
@@ -65,10 +65,6 @@ export function recordPass(state, { score, critique = null, snapshot = null, rev
   }
 }
 
-export function setStatus(state, status, reason) {
-  return { ...state, status, status_reason: reason, updated_at: isoNow() }
-}
-
 // --- file I/O (the run directory is the durable record) ---
 
 export function ensureLoopDir(loopDir) {
@@ -101,6 +97,21 @@ export function safeSnapshotPath(loopDir, snap) {
   if (full !== base && !full.startsWith(base + sep)) {
     throw new Error(`snapshot ref escapes the run dir: ${snap}`)
   }
+  // The lexical guard above is realpath-blind: an in-dir SYMLINK whose target is OUTSIDE the run dir passes
+  // it, yet the consumers FOLLOW the link — driver.mjs copyFileSync's it over the artifact and forge/hook
+  // reads it, an out-of-dir file-read primitive from a tampered/shared state.json. Re-check containment on
+  // the REAL paths. A not-yet-materialized ref (realpathSync throws) has no symlink to follow — the lexical
+  // guard already held. Mirrors src/safe-rel.mjs resolveOutput.
+  let realFull
+  try {
+    realFull = realpathSync(full)
+  } catch {
+    return full
+  }
+  const realBase = realpathSync(base) // base must exist since `full` (under it) resolved
+  if (realFull !== realBase && !realFull.startsWith(realBase + sep)) {
+    throw new Error(`snapshot ref escapes the run dir via symlink: ${snap}`)
+  }
   return full
 }
 
@@ -115,5 +126,3 @@ export function writeReview(loopDir, pass, review) {
   writeFileSync(join(loopDir, rel), redactSecrets(JSON.stringify(review, null, 2)))
   return rel
 }
-
-export const snapshotExists = (loopDir, rel) => existsSync(join(loopDir, rel))

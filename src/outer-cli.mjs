@@ -91,18 +91,28 @@ export async function runOuterCli(cfg, deps = {}) {
 
   const allowlist = loadPlanAllowlist(cfg.scorerAllow)
   const repoFiles = lsFiles(cfg.scope)
-  const r = await runOuterLoop(
-    { manifest, scopeDir: cfg.scope, proposeOnStall: cfg.proposeOnStall, proposalOut: cfg.proposalOut, convergeDir: cfg.convergeDir, objectives: cfg.objectives, globalBudgetUsd: cfg.globalBudgetUsd, globalBudgetTokens: cfg.globalBudgetTokens, repoContext: buildRepoContext(cfg.scope, repoFiles), testDirs: cfg.testDirs, minTarget: cfg.minTarget, maxObjectives: cfg.maxObjectives },
-    {
-      runConverge,
-      proposeReplan,
-      planManifest: plan,
-      planCall: (prompt, o) => planCall(prompt, { model: cfg.plannerModel, mcpConfig: cfg.mcpConfig, ...o }),
-      allowlist, repoFiles,
-      writeProposal: (path, m) => writeFileSync(path, JSON.stringify(m, null, 2)),
-      log,
-    },
-  )
+  let r
+  try {
+    r = await runOuterLoop(
+      { manifest, scopeDir: cfg.scope, proposeOnStall: cfg.proposeOnStall, proposalOut: cfg.proposalOut, convergeDir: cfg.convergeDir, objectives: cfg.objectives, globalBudgetUsd: cfg.globalBudgetUsd, globalBudgetTokens: cfg.globalBudgetTokens, repoContext: buildRepoContext(cfg.scope, repoFiles), testDirs: cfg.testDirs, minTarget: cfg.minTarget, maxObjectives: cfg.maxObjectives },
+      {
+        runConverge,
+        proposeReplan,
+        planManifest: plan,
+        planCall: (prompt, o) => planCall(prompt, { model: cfg.plannerModel, mcpConfig: cfg.mcpConfig, ...o }),
+        allowlist, repoFiles,
+        writeProposal: (path, m) => writeFileSync(path, JSON.stringify(m, null, 2)),
+        log,
+      },
+    )
+  } catch (e) {
+    // A throw from the inner converge or the replan proposer (planManifest/proposeReplan throw exitCode=2 on an
+    // untrusted-planner refusal or a manifest-validation rejection) is a ROUTINE outcome, not a crash — surface
+    // it as a clean exit code + message (mirrors the loadManifest catch above and plan-cli), not an unhandled
+    // rejection that exits with a stack trace.
+    errlog(e.message)
+    return e.exitCode ?? 2
+  }
 
   log(`inner converge: ${r.verdict.status} — ${r.verdict.reason}`)
   if (r.proposal) {

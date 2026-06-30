@@ -83,6 +83,27 @@ test('runOuterCli: reports the REAL replan proposer spend (not a masked 0)', asy
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
+test('runOuterCli: a planner refusal during replan returns a clean exit 2 (no unhandled rejection)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'whet-outer-throw-'))
+  try {
+    const mPath = join(dir, 'm.json'); writeFileSync(mPath, JSON.stringify(PRIOR))
+    const out = []
+    // A replan-worthy stall drives proposeReplan -> planManifest, which throws exitCode=2 on a planner
+    // refusal (the reply is UNTRUSTED model output, so a refusal is routine). runOuterCli must surface that
+    // as a clean exit 2 + message — NOT let it become an unhandled promise rejection that crashes the CLI.
+    const code = await runOuterCli(
+      { scope: 'repo', objectives: mPath, proposalOut: join(dir, 'p.json'), proposeOnStall: true, testDirs: ['test'] },
+      {
+        runConverge: async () => ({ state: { structural_signal: 'held_out_fail' }, verdict: { status: 'capped', reason: 'decomposition insufficient' } }),
+        planManifest: async () => { throw Object.assign(new Error('planner reply unparseable'), { exitCode: 2 }) },
+        planCall: async () => '[]', lsFiles: () => [], log: (s) => out.push(s), errlog: (s) => out.push('ERR:' + s),
+      },
+    )
+    assert.equal(code, 2)
+    assert.match(out.join('\n'), /ERR:planner reply unparseable/)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
 test('runOuterCli: refuses when proposing is on but --propose-out is missing', async () => {
   const out = []
   const code = await runOuterCli(

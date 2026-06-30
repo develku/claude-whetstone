@@ -3,7 +3,7 @@
 // state.json, the Claude act step) into the pure loop. buildContext takes an
 // injectable `act` so the whole pipeline is testable without spending money.
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, readFileSync } from 'node:fs'
+import { copyFileSync, readFileSync, realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { resolve, join } from 'node:path'
 import { homedir } from 'node:os'
@@ -286,9 +286,15 @@ function parseResumeOverrides(argv) {
   return o
 }
 
-// Robust entry-point check: pathToFileURL percent-encodes the path (spaces, etc.)
-// so it matches import.meta.url even when the repo lives under a path with spaces.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Robust entry-point check: pathToFileURL percent-encodes the path (spaces, etc.) so it matches
+// import.meta.url even when the repo lives under a path with spaces. Node realpath-resolves
+// import.meta.url but leaves process.argv[1] as the launch path, so also compare argv[1]'s realpath —
+// otherwise a symlinked launch (`npm link`, or any `npm i -g` global bin) never matches and the CLI
+// silently no-ops. The `||` short-circuits, so the realpathSync only runs on the symlink path.
+if (process.argv[1] && (
+  import.meta.url === pathToFileURL(process.argv[1]).href ||
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+)) {
   const argv = process.argv
   const flag = (name) => {
     const i = argv.indexOf(name)

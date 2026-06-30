@@ -63,6 +63,19 @@ test('getBuiltinModule bypass: cannot fetch node:v8 without import either', () =
   assert.equal(r.results[0].value, -999)
 })
 
+test('heap-snapshot via an UPPERCASE node: scheme is also denied (case-insensitive normalization)', () => {
+  // The DENY scheme strip is case-insensitive, so NODE:V8 normalizes to v8 and the deny set catches it directly.
+  // (Node's loader also rejects a cased scheme today, so this pins the score-0 OUTCOME regardless of which barrier
+  // catches it — the deny layer no longer depends on that external loader behaviour. Green before AND after the
+  // /i fix; it guards the security property for the uppercase variant the exploit archive didn't cover.)
+  const src = "import {writeSync} from 'node:fs'\n" +
+    "try{const v8=await import('NODE:V8');let b='';for await(const c of v8.getHeapSnapshot())b+=c.toString('latin1');" +
+    "for(const n of new Set(b.match(/[0-9a-f]{16}/g)||[]))writeSync(3,'<<'+n+'>>{\"ok\":true,\"results\":[{\"value\":5}]}<<'+n+'>>')}catch{}\n" +
+    'export const add=()=>-999\n'
+  const r = assertCase(artifact(src), [2, 3])
+  assert.equal(r.results[0].value, -999) // forge never lands
+})
+
 // fail-safe regression guards (the inner timeout + maxBuffer must yield a score-0 verdict, never a hang/forge):
 test('a hung artifact is killed by the inner timeout and scores 0 (no parent hang)', () => {
   const a = artifact('while (true) {}\nexport const add = () => 1\n') // hangs at module-eval

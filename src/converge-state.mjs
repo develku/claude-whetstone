@@ -87,8 +87,13 @@ export function initConvergeState(cfg, manifest) {
     // done). held_out_truth_hash pins the package so a resume cannot silently weaken/drop a check.
     global_held_out: (manifest.global_held_out ?? []).map((c) => ({ id: c.id, scorer: c.scorer, target: c.target, score: null, met: false })),
     held_out_truth_hash: heldOutTruthHash(manifest.global_held_out),
-    global_budget_usd: cfg.globalBudgetUsd ?? null,
-    global_budget_tokens: cfg.globalBudgetTokens ?? null,
+    // The budget is enforced from here (globalBudgetExhausted reads state.global_budget_*). The operator may
+    // declare it in the MANIFEST (validateManifest validates it; convergeNeedsGlobalBudget REQUIRES it for any
+    // >=2-objective fan-out) OR via the --global-budget CLI flag. Fold both: the explicit CLI flag wins, else
+    // the manifest value. Without this fold a manifest-only budget (the canonical example shape) was validated
+    // then silently dropped — the unattended fan-out ran with NO enforced pool cap.
+    global_budget_usd: cfg.globalBudgetUsd ?? manifest.global_budget_usd ?? null,
+    global_budget_tokens: cfg.globalBudgetTokens ?? manifest.global_budget_tokens ?? null,
     spent_usd: 0,
     spent_tokens: 0,
     global_cap: cfg.globalCap ?? 20,

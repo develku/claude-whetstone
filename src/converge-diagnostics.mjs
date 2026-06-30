@@ -10,8 +10,11 @@
 // existing ledger shape so it composes around the gate step (no edits to runOneObjective / the 7 invariant files).
 // Leaf module (node stdlib only, in fact none needed) — importable without cycles.
 
-// Stall: the binding (worst-unmet) score gained < minProgress over the last `window` cycles — the same notion
-// globalVerdict's plateau verdict uses, computed here independently from binding_history so the detector is pure.
+// Stall: the binding (worst-unmet) score gained < minProgress over the last `window` cycles, as a RAW
+// first-vs-last delta. This is an INDEPENDENT, advisory heuristic — it intentionally differs from globalVerdict's
+// plateau, which measures improvement over a monotonic running-max; on a non-monotonic history (a dip then a
+// recovery) the two can disagree. The gate (globalVerdict) stays authoritative; this only feeds the advisory
+// structural signal, so the divergence changes no gating decision.
 export function plateaued(bindingHistory, window, minProgress) {
   if (!Array.isArray(bindingHistory) || bindingHistory.length < window + 1) return false
   const recent = bindingHistory.slice(-(window + 1))

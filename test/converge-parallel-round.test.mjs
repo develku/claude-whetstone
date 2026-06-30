@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { runConvergeParallel, convergeRoundParallel } from '../src/converge-parallel.mjs'
+import { runConvergeParallel, convergeRoundParallel, pickBatch } from '../src/converge-parallel.mjs'
 import { setupConvergeRun, reMeasureAll } from '../src/converge.mjs'
 import { loadConvergeState } from '../src/converge-state.mjs'
 import { globalVerdict } from '../src/converge-gate.mjs'
@@ -176,6 +176,42 @@ test('convergeRoundParallel flips parallel_disabled after maxBatchRegressions co
     const child = makeStubChild({ a: { 'a/feature.txt': 100, 'a/api.txt': 10 }, b: { 'b/feature.txt': 100 } })
     await convergeRoundParallel(state, cfg, scope, globalRO, { runChild: child, log: () => {} })
     assert.equal(state.parallel_disabled, true) // one strike with the cap at 1
+  } finally {
+    rmSync(scope, { recursive: true, force: true }); rmSync(sc.dir, { recursive: true, force: true })
+  }
+})
+
+// --- lone-survivor regression must NOT quarantine a singleton (it would bar a healthy objective forever) ---
+
+test('convergeRoundParallel does NOT quarantine a LONE survivor on regression (a singleton would bar it from every batch)', async () => {
+  const sc = writeScorer()
+  const scope = tempRepo({ 'a/feature.txt': '0', 'b/feature.txt': '0', 'a/api.txt': '95', 'c/x.txt': '0' })
+  const cfg = baseCfg(scope, sc.dir, { maxParallel: 2 })
+  try {
+    const manifest = rollbackManifest(sc) // a, b, c=keep a/api (met at baseline: 95)
+    const { state, globalRO } = baseline(scope, manifest, cfg)
+    const lastGood = state.last_good_sha
+    // batch is [a,b] (c is met). b's child CRASHES -> only a survives. a's solo edit breaks a/api (regresses
+    // the met c) -> whole-batch rollback with a LONE survivor ['a'].
+    const honest = makeStubChild({ a: { 'a/feature.txt': 100, 'a/api.txt': 10 } })
+    const child = async (childCfg) => {
+      if (childCfg.editScope === 'b') throw new Error('child b crashed')
+      return honest(childCfg)
+    }
+    await convergeRoundParallel(state, cfg, scope, globalRO, { runChild: child, log: () => {} })
+
+    assert.equal(state.last_good_sha, lastGood) // rolled back, never advanced
+    const last = state.rounds.at(-1)
+    assert.equal(last.rolledBack, true)
+    assert.deepEqual(last.survivors, ['a']) // exactly one survivor
+    assert.deepEqual(last.failed, ['b'])
+    // THE FIX: a 1-element survivor set is NOT a "combination" — a solo-edit fault must neither quarantine the
+    // objective (pickBatch line 55 would then bar it from every batch) NOR count toward parallel_disabled.
+    assert.deepEqual(state.quarantined_batches ?? [], []) // no singleton quarantine written
+    assert.equal(state.consecutive_batch_regressions ?? 0, 0) // a solo-edit fault does NOT disable batching
+    assert.notEqual(state.parallel_disabled, true)
+    assert.ok(pickBatch(state, 2).some((o) => o.id === 'a')) // 'a' stays schedulable
+    assert.equal(state.sequential_fallback_round, state.cycle) // but the next round IS pinned sequential
   } finally {
     rmSync(scope, { recursive: true, force: true }); rmSync(sc.dir, { recursive: true, force: true })
   }
@@ -393,6 +429,67 @@ test('runConvergeParallel TERMINATES when A,B pass alone but A+B together regres
     assert.ok(state.global_pass <= state.global_cap + 2) // bounded work, no runaway
   } finally {
     rmSync(scope, { recursive: true, force: true }); rmSync(sc.dir, { recursive: true, force: true }); rmSync(comboDir, { recursive: true, force: true })
+  }
+})
+
+// --- no-op round: every survivor edits only OUT-OF-SCOPE files -> no in-scope change, reservation released ---
+
+test('convergeRoundParallel records a no-op round and releases the reservation when no survivor makes an in-scope change', async () => {
+  const sc = writeScorer()
+  const scope = tempRepo({ 'a/val.txt': '0', 'b/val.txt': '0', 'z/keep.txt': '0' })
+  const cfg = baseCfg(scope, sc.dir, { maxParallel: 2 })
+  try {
+    const manifest = {
+      goal: 'g', floor: { cmd: 'true' }, global_budget_tokens: 100_000_000, objective_cap: 3,
+      objectives: [
+        { id: 'a', goal: 'raise a', scorer: `node ${sc.path} a/val.txt`, target: 90, editScope: 'a' },
+        { id: 'b', goal: 'raise b', scorer: `node ${sc.path} b/val.txt`, target: 90, editScope: 'b' },
+      ],
+    }
+    const { state, globalRO } = baseline(scope, manifest, cfg)
+    const lastGood = state.last_good_sha
+    // both children commit ONLY out-of-scope files (z/) -> squashIntegrateBatch filters them out -> no in-scope change
+    const child = makeStubChild({ a: { 'z/keep.txt': 1 }, b: { 'z/keep.txt': 2 } })
+    const v = await convergeRoundParallel(state, cfg, scope, globalRO, { runChild: child, log: () => {} })
+    const last = state.rounds.at(-1)
+    assert.equal(last.kind, 'batch')
+    assert.equal(last.merged_sha, null) // no candidate produced
+    assert.equal(last.accepted, false)
+    assert.equal(last.reason, 'no in-scope change')
+    assert.equal(state.last_good_sha, lastGood) // never advanced
+    assert.equal(state.reserved_tokens, 0) // the batch reservation was released
+    assert.equal(state.inflight, null) // inflight cleared
+    assert.ok(state.objectives.find((o) => o.id === 'a').retries >= 1) // genuine non-progress -> retry bumped
+    assert.ok(state.objectives.find((o) => o.id === 'b').retries >= 1)
+    assert.equal(v.status, 'running') // both still unmet
+  } finally {
+    rmSync(scope, { recursive: true, force: true }); rmSync(sc.dir, { recursive: true, force: true })
+  }
+})
+
+// --- terminal cap: pickBatch empty (all unmet objectives skipped) -> capped, not an empty-batch run ---
+
+test('convergeRoundParallel CAPS when every unmet objective has exhausted its retries (empty pickBatch)', async () => {
+  const sc = writeScorer()
+  const scope = tempRepo({ 'a/val.txt': '0', 'b/val.txt': '0' })
+  const cfg = baseCfg(scope, sc.dir, { maxParallel: 2 })
+  try {
+    const manifest = {
+      goal: 'g', floor: { cmd: 'true' }, global_budget_tokens: 100_000_000, objective_cap: 3,
+      objectives: [
+        { id: 'a', goal: 'raise a', scorer: `node ${sc.path} a/val.txt`, target: 90, editScope: 'a' },
+        { id: 'b', goal: 'raise b', scorer: `node ${sc.path} b/val.txt`, target: 90, editScope: 'b' },
+      ],
+    }
+    const { state, globalRO } = baseline(scope, manifest, cfg)
+    // every unmet objective has been skipped (retries exhausted) -> pickBatch is empty while the verdict is
+    // still 'running' (both below target). The round must CAP, never run an empty batch or loop forever.
+    state.objectives.forEach((o) => { o.status = 'skipped' })
+    const v = await convergeRoundParallel(state, cfg, scope, globalRO, { runChild: () => { throw new Error('must not launch a child') }, log: () => {} })
+    assert.equal(v.status, 'capped')
+    assert.match(v.reason, /exhausted their retries/)
+  } finally {
+    rmSync(scope, { recursive: true, force: true }); rmSync(sc.dir, { recursive: true, force: true })
   }
 })
 

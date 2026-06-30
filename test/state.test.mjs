@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, existsSync, readFileSync, mkdirSync, writeFileSync, symlinkSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, isAbsolute } from 'node:path'
 import { ensureLoopDir, saveState, loadState, safeSnapshotPath, initState, recordPass } from '../src/state.mjs'
@@ -37,6 +37,27 @@ test('safeSnapshotPath accepts an internal ref and rejects traversal/absolute re
   assert.ok(safeSnapshotPath(dir, 'snapshots/iter_000.txt').endsWith('/snapshots/iter_000.txt'))
   assert.throws(() => safeSnapshotPath(dir, '../../../../etc/passwd'), /escapes/)
   assert.throws(() => safeSnapshotPath(dir, '/etc/passwd'), /escapes/)
+})
+
+// On --resume the snapshot ref comes from a possibly-tampered/shared state.json. A lexical-only guard is
+// realpath-blind: an in-dir SYMLINK whose target is OUTSIDE the run dir passes it, yet copyFileSync FOLLOWS
+// the link and reads an arbitrary file into the artifact. Mirror safe-rel.mjs's realpath re-check.
+test('safeSnapshotPath rejects an in-dir symlink whose target escapes the run dir', () => {
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), 'whetstone-snap-'))
+  mkdirSync(join(dir, 'snapshots'))
+  const outside = join(mkdtempSync(join(realpathSync(tmpdir()), 'whetstone-outside-')), 'secret.txt')
+  writeFileSync(outside, 'top secret')
+  symlinkSync(outside, join(dir, 'snapshots', 'iter_000.txt')) // in-scope link, out-of-scope target
+  assert.throws(() => safeSnapshotPath(dir, 'snapshots/iter_000.txt'), /escapes/)
+})
+
+test('safeSnapshotPath allows a not-yet-materialized ref and a genuine in-dir file', () => {
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), 'whetstone-snap-'))
+  mkdirSync(join(dir, 'snapshots'))
+  // not yet written: lexical guard holds, realpathSync throws -> fall through to the lexical result
+  assert.ok(safeSnapshotPath(dir, 'snapshots/iter_000.txt').endsWith('/snapshots/iter_000.txt'))
+  writeFileSync(join(dir, 'snapshots', 'iter_001.txt'), 'ok') // a real in-dir file passes
+  assert.ok(safeSnapshotPath(dir, 'snapshots/iter_001.txt').endsWith('/snapshots/iter_001.txt'))
 })
 
 // Token budget is a second, parallel cost dial to spent_usd — initialized and accumulated the same way.

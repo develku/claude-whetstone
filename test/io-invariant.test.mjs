@@ -6,7 +6,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseInvariant, assertInvariants, judgeInvariants } from '../scorers/io-invariant.mjs'
+import { parseInvariant, assertInvariants, judgeInvariants, canonicalKey } from '../scorers/io-invariant.mjs'
 import { executeInvariants } from '../src/iso-execute.mjs'
 
 const IO = join(dirname(fileURLToPath(import.meta.url)), '..', 'scorers', 'io-invariant.mjs')
@@ -22,6 +22,26 @@ const ev = (fn, argLists, names, opts = {}) => {
   if (!obs.ok) return { pass: false, failing: { error: obs.error || obs.reason } }
   return judgeInvariants(obs, argLists, names.map(parseInvariant), opts)
 }
+
+// ---- canonicalKey (the multiset/uniqueness engine behind permutation-of-input / unique / input-unchanged) ----
+test('canonicalKey type-prefixes prevent multiset collisions and canonicalize object key order', () => {
+  // Load-bearing anti-gaming properties: a TYPE PREFIX so 1 and "1" never collapse to the same multiset key
+  // (else a gamed impl returning ['1','2'] for input [1,2] would PASS permutation-of-input), and a KEY-SORT so
+  // object property order doesn't matter. Every other test reaches canonicalKey only via flat NUMERIC arrays.
+  assert.notEqual(canonicalKey(1), canonicalKey('1')) // n:1 vs s:1 — no number/string collision
+  assert.notEqual(canonicalKey(true), canonicalKey('true')) // b:true vs s:true
+  assert.equal(canonicalKey(null), 'null')
+  assert.equal(canonicalKey({ a: 1, b: 2 }), canonicalKey({ b: 2, a: 1 })) // key order canonicalized
+  assert.notEqual(canonicalKey({ a: 1, b: 2 }), canonicalKey({ a: 1, b: 3 }))
+  assert.throws(() => canonicalKey(NaN), /non-finite/)
+  assert.throws(() => canonicalKey(undefined), /non-JSON/)
+  assert.throws(() => { const o = {}; o.self = o; canonicalKey(o) }, /cyclic/)
+})
+
+test('permutation-of-input rejects a string-typed output of a numeric input (anti-gaming, end-to-end)', () => {
+  // f([1,2]) -> ['1','2']: same VALUES but different TYPES, so NOT a permutation of the numeric input.
+  assert.equal(ev(() => ['1', '2'], [[[1, 2]]], ['permutation-of-input']).pass, false)
+})
 
 // ---- parseInvariant ----
 test('parseInvariant splits name:JSONparam on the first colon', () => {
@@ -60,6 +80,13 @@ test('sorted: type-gates a single non-finite element ([NaN]) and passes a single
   assert.equal(ev(() => [NaN], [[[0]]], ['sorted']).pass, false) // [NaN] must NOT pass vacuously
   assert.equal(ev(() => [5], [[[0]]], ['sorted']).pass, true)
   assert.equal(ev(() => [], [[[0]]], ['sorted']).pass, true) // empty array is vacuously sorted
+})
+
+test('sorted: admits a correctly-sorted STRING array (allStr branch) and rejects an unsorted one', () => {
+  // the type gate admits all-string arrays and compares lexicographically — a real supported path that
+  // every other `sorted` test (all numeric) leaves unexercised.
+  assert.equal(ev(() => ['a', 'b', 'c'], [[['c', 'a', 'b']]], ['sorted']).pass, true)
+  assert.equal(ev(() => ['b', 'a'], [[['a', 'b']]], ['sorted']).pass, false)
 })
 
 // ---- permutation-of-input (snapshot-before-call mutation defense, codex #1) ----
