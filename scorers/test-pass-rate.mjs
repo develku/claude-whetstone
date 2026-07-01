@@ -11,7 +11,7 @@
 // Contract (every whetstone scorer honors this): read --output/--target/--loop-dir/--pass,
 // print {score, critique, findings} JSON to stdout, exit 0 on success, exit 2 on scorer error.
 import { spawnSync } from 'node:child_process'
-import { pathToFileURL } from 'node:url'
+import { isMainModule } from '../src/is-main.mjs'
 
 const arg = (name, def = undefined) => {
   const i = process.argv.indexOf(name)
@@ -97,7 +97,7 @@ export function failingNames(out) {
   return [...s.matchAll(/^FAILED\s+(\S+)/gm)].map((m) => m[1]).slice(0, 10)
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const cmd = arg('--cmd')
   if (!cmd) die('--cmd "<test command>" is required')
 

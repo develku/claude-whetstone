@@ -7,7 +7,7 @@
 import { writeFileSync, readFileSync, unlinkSync } from 'node:fs'
 import { resolve, sep, dirname, basename, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { pathToFileURL } from 'node:url'
+import { isMainModule } from './is-main.mjs'
 import { planManifest } from './plan.mjs'
 import { loadPlanAllowlist } from './plan-allowlist.mjs'
 import { realPlanCall } from './plan-call.mjs'
@@ -179,7 +179,7 @@ async function convergeBackend(cfg, manifest) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const cfg = parsePlanCli(process.argv)
   const code = await runPlanCli(cfg, { converge: convergeBackend })
   process.exit(code)

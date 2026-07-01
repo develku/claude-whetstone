@@ -7,7 +7,8 @@
 // unsafe shape is REFUSED at start (exit 2), never silently coerced — the gate's integrity starts here.
 import { readFileSync, openSync, writeSync, closeSync, unlinkSync, mkdirSync } from 'node:fs'
 import { resolve, dirname, join, sep } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
+import { isMainModule } from './is-main.mjs'
 import { isUnsafeScorer } from './scorer-safety.mjs'
 // Path/footprint helpers live in a leaf module so converge / converge-cli / converge-state do not import
 // each other in a cycle (which would deadlock the CLI entry's top-level await). Re-exported here so existing
@@ -305,7 +306,7 @@ export function acquireRunLock(convergeDir) {
 // --- CLI entry. Dynamic imports of converge.mjs / scope-cli.mjs / driver.mjs keep this file's TOP-LEVEL
 // imports cycle-free (converge.mjs statically imports THIS module). The per-objective child IS the
 // unmodified scope loop: runFromConfig(childCfg, scopeDeps(childCfg)) — the same seam decompose uses.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const argv = process.argv
   const cfg = parseConvergeCli(argv)
   if (!cfg.scope || !cfg.objectivesPath) {

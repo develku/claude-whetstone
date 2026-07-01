@@ -24,7 +24,7 @@
 // score 100/0; exit 2 on SCORER error (unknown invariant, bad param, zero case/invariant, missing export,
 // bad JSON). An applicable invariant the output VIOLATES is score 0 (admit then rejects a check that can't
 // discriminate the right way).
-import { pathToFileURL } from 'node:url'
+import { isMainModule } from '../src/is-main.mjs'
 import { resolveOutput } from '../src/safe-rel.mjs'
 import { runIsolated, classifyObservation } from '../src/iso-runner.mjs'
 
@@ -134,7 +134,7 @@ export function judgeInvariants(observation, argLists, invariants, { basis = 0 }
   return { pass: true }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   let output = arg('--output')
   const fnName = arg('--fn')
   if (!output) die('--output <path> is required')

@@ -9,7 +9,7 @@
 // exists; use this only when "good" can't be checked by code.
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { pathToFileURL } from 'node:url'
+import { isMainModule } from '../src/is-main.mjs'
 import { makeNonce, fenceUntrusted } from '../src/prompt-fence.mjs'
 
 export { makeNonce } // re-exported: the artifact fence's nonce comes from the shared anti-injection primitive
@@ -82,7 +82,7 @@ export function reviewFromSpawn(res) {
   return parseJudgeResponse(resultText)
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const output = arg('--output')
   const goal = arg('--goal', 'meet the rubric')
   const model = arg('--model', 'opus')

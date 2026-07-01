@@ -14,7 +14,7 @@
 // trust class as test-pass-rate's --cmd. floor.mjs is in scope-cli's SUBGATE_UNSAFE denylist so a decompose
 // finding can't name it with a model-chosen --cmd (which would be shell injection).
 import { spawnSync } from 'node:child_process'
-import { pathToFileURL } from 'node:url'
+import { isMainModule } from '../src/is-main.mjs'
 import { shq } from '../src/shq.mjs'
 
 // Pure grading core. floorExit !== 0 -> blocked (0). Else the chained scorer's review if present, else 100.
@@ -36,7 +36,7 @@ export function floorConfirmCmd({ floorPath, floorCmd, confirmCmd = null }) {
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d }
 const die = (m) => { process.stderr.write(`floor: ${m}\n`); process.exit(2) }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const cmd = arg('--cmd')
   if (!cmd) die('--cmd "<deterministic command>" is required')
   const res = spawnSync(cmd, { shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })

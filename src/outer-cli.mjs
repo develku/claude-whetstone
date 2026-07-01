@@ -6,7 +6,7 @@
 import { writeFileSync, readFileSync } from 'node:fs'
 import { resolve, sep, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { pathToFileURL } from 'node:url'
+import { isMainModule } from './is-main.mjs'
 import { runOuterLoop } from './outer.mjs'
 import { planManifest } from './plan.mjs'
 import { proposeReplan } from './replan.mjs'
@@ -126,7 +126,7 @@ export async function runOuterCli(cfg, deps = {}) {
   return r.verdict.status === 'done' ? 0 : 1
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const cfg = parseOuterCli(process.argv, { stamp: new Date().toISOString().replace(/[:.]/g, '').slice(0, 15) })
   const code = await runOuterCli(cfg)
   process.exit(code)

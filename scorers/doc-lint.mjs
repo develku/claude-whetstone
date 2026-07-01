@@ -24,7 +24,7 @@
 // (plan-allowlist), not here.
 import { readFileSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { isMainModule } from '../src/is-main.mjs'
 import { resolveOutput } from '../src/safe-rel.mjs'
 
 const SHELL_LANGS = new Set(['bash', 'sh', 'shell', 'console', 'zsh'])
@@ -146,7 +146,7 @@ export function refResolves(repoDir, ref) {
   return false
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const arg = (name, def) => {
     const i = process.argv.indexOf(name)
     return i >= 0 ? process.argv[i + 1] : def

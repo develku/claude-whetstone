@@ -7,7 +7,8 @@
 import { spawnSync } from 'node:child_process'
 import { readdirSync } from 'node:fs'
 import { dirname, basename, join, resolve as rpath, sep } from 'node:path'
-import { pathToFileURL, fileURLToPath } from 'node:url'
+import { fileURLToPath } from 'node:url'
+import { isMainModule } from './is-main.mjs'
 import { runFromConfig, parseCli, loadConfig, editorEffort } from './driver.mjs'
 import { scopeBuildContext } from './scope-context.mjs'
 import { makeScopeAct } from './scope-act.mjs'
@@ -157,7 +158,7 @@ export function scopeDeps(cfg) {
   return deps
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const argv = process.argv
   const cfg = parseScopeCli(argv, loadConfig())
   if (!cfg.goal || !cfg.scope || !cfg.scorerCmd) {

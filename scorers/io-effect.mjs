@@ -25,7 +25,7 @@
 // undefined, cycles — and returns INERT data. The oracle (assert.deepEqual vs --expect-sink/--expect-returns)
 // then runs HERE in this clean process. So a gamed `sink.toJSON = () => expectedSink`, a getter forge, OR a
 // child-side oracle monkeypatch all fail: the comparison is out of the artifact's reach.
-import { pathToFileURL } from 'node:url'
+import { isMainModule } from '../src/is-main.mjs'
 import assert from 'node:assert/strict'
 import { resolveOutput } from '../src/safe-rel.mjs'
 import { runIsolated, classifyObservation } from '../src/iso-runner.mjs'
@@ -44,7 +44,7 @@ export function judgeEffect({ returns, finalSink }, expectSink, expectReturns) {
   return { pass: true }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   let output = arg('--output')
   const fnName = arg('--fn')
   if (!output) die('--output <path> is required')

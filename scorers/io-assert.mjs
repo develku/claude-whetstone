@@ -13,7 +13,7 @@
 // child returns the INERT return value, and the oracle (assert.deepEqual) runs HERE in this clean process. The
 // artifact can no longer monkeypatch the comparison, hijack stdout, or steal the result frame — it is the
 // out-of-process boundary, not the data-only args, that makes this safe to import a model's code.
-import { pathToFileURL } from 'node:url'
+import { isMainModule } from '../src/is-main.mjs'
 import assert from 'node:assert/strict'
 import { resolveOutput } from '../src/safe-rel.mjs'
 import { runIsolated, classifyObservation } from '../src/iso-runner.mjs'
@@ -41,7 +41,7 @@ export function judgeCases(results, cases) {
   return { pass: true }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   let output = arg('--output')
   const fnName = arg('--fn')
   if (!output) die('--output <path> is required')

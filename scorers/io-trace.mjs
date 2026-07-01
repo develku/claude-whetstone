@@ -18,7 +18,7 @@
 // Contract: --output <path>; exactly one of --new <ClassExport> | --factory <fnExport>; optional
 // --init '<JSON args>' (constructor/factory args); --trace '<JSON [[method,...args],...]>'; --expect
 // '<JSON [returnValue,...]>'. Prints {score,critique,findings} JSON, exit 0; exit 2 on scorer error.
-import { pathToFileURL } from 'node:url'
+import { isMainModule } from '../src/is-main.mjs'
 import assert from 'node:assert/strict'
 import { resolveOutput } from '../src/safe-rel.mjs'
 import { runIsolated, classifyObservation } from '../src/iso-runner.mjs'
@@ -34,7 +34,7 @@ export function judgeTrace(returns, expect) {
   return { pass: true }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   let output = arg('--output')
   const newName = arg('--new')
   const factoryName = arg('--factory')

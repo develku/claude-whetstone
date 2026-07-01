@@ -12,7 +12,8 @@
 // the still-alpha converge/scope modes onto the supported surface, which the v1 tiering deliberately withholds.
 import { spawnSync } from 'node:child_process'
 import { resolve, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
+import { isMainModule } from './is-main.mjs'
 
 const ENTRY = { converge: 'converge-cli.mjs', scope: 'scope-cli.mjs', driver: 'driver.mjs' }
 
@@ -37,7 +38,7 @@ const USAGE = `usage: whet <target> [entry-point flags...]
 The selected entry point validates the rest of the flags. Under-specified or ambiguous intent is refused here
 (route up) rather than guessed — name a target, or run a design phase first to produce a manifest.\n`
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const argv = process.argv.slice(2)
   const { mode, reason } = routeIntake(argv)
   if (!mode) {

@@ -6,7 +6,7 @@
 import { writeFileSync, readFileSync, unlinkSync } from 'node:fs'
 import { resolve, sep, dirname, basename, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { pathToFileURL } from 'node:url'
+import { isMainModule } from './is-main.mjs'
 import { planManifest as realPlanManifest } from './plan.mjs'
 import { proposeReplan, replanTruthPreserved } from './replan.mjs'
 import { loadPlanAllowlist } from './plan-allowlist.mjs'
@@ -128,7 +128,7 @@ export async function runReplanCli(cfg, deps = {}) {
   return 0
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const code = await runReplanCli(parseReplanCli(process.argv))
   process.exit(code)
 }
