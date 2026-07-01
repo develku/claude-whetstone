@@ -2,14 +2,13 @@
 // round, merges into ONE candidate, and calls the verbatim reMeasureAll/globalVerdict — sequential stays the
 // default, --parallel selects it, the gate path is never forked.
 //
-// HONESTY (finding #9/#10): the value here is STRUCTURAL, not wall-clock. The win is fewer GATE RE-MEASURES —
-// N disjoint objectives clear in ONE merged gated round instead of N sequential rounds. Editor EXECUTION is
-// currently SERIAL: the injected runChild ultimately calls the blocking `spawnSync` editor (act-claude), which
-// holds the event loop, so the Promise.allSettled fan-out below does NOT yield wall-clock concurrency — the
-// children's edits happen one after another. True concurrency would need an async editor (child_process.spawn);
-// that is a DEFERRED enhancement. Relatedly, raceChild's timeout + the killChild hook are the harness for that
-// future async editor and are DORMANT today (the setTimeout can't fire while a sibling's spawnSync blocks, and
-// converge-cli does not wire killChild); the real per-child cap today is spawnSync's own timeout+SIGKILL.
+// CONCURRENCY: the win is BOTH structural AND wall-clock. Structural — N disjoint objectives clear in ONE
+// merged gated round instead of N sequential rounds. Wall-clock — the injected runChild's editor now spawns
+// ASYNC (src/spawn-editor.mjs, via makeScopeAct's detached path), so it YIELDS the event loop and the
+// Promise.allSettled fan-out below genuinely overlaps the children's edits. raceChild's timeout is now LIVE
+// (it fires while siblings run) and converge-cli wires killChild (a per-objective detached-pgid SIGKILL). The
+// per-child cap is the editor's own timeoutMs (self-kills its process group), with killChild as the
+// orchestrator-level belt-and-suspenders when raceChild's cap trips first.
 // This slice is the PURE batch-selection +
 // pre-launch budget reservation + the (literally-reused) regression predicate, plus the single-commit N-way
 // merge (squashIntegrateBatch) and the worktree-admin mutex (withWorktreeLock); the orchestration round lands
@@ -28,9 +27,12 @@ import { gitMaterialize, gitCleanup, gitHead, isSha } from './git-snapshot.mjs'
 
 const git = (dir, args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim()
 
-// Hard wall-clock cap on a fan-out child (mirrors converge.mjs's re-measure timeout) so a hung nested
-// claude -p can't wedge the barrier (Promise.allSettled alone awaits a hung child forever, §3.5/§5 finding #6).
-const CHILD_TIMEOUT_MS = 5 * 60 * 1000
+// Per-PASS last-resort ceiling for a fan-out child, set ABOVE the editor's own per-pass self-kill (the scope
+// editor's makeScopeAct default is 15 min) so raceChild NEVER preempts a healthy pass — the editor's own
+// timeoutMs is the primary cap. The whole-child raceChild timeout is this × the objective's `cap` (a child
+// runs up to cap editor passes), so it only trips if a child blows its ENTIRE legitimate budget; that keeps
+// killChild a true last-resort instead of routinely firing mid-pass. --child-timeout-ms overrides per child.
+const CHILD_PASS_TIMEOUT_MS = 20 * 60 * 1000
 
 // The next batch: the K least-attempted unmet objectives, sorted by pickNextObjective's EXACT comparator
 // (attempts asc → priority desc → stable manifest order), capped at maxParallel. Disjoint by the global
@@ -166,12 +168,12 @@ export function withWorktreeLock(fn) {
 
 // === the parallel round (convergeRoundParallel) ===
 
-// Race a child producer against a hard timeout. NOTE (finding #10): this layer is DORMANT under today's
-// blocking-spawnSync editor — the setTimeout can't fire while a sibling child's spawnSync holds the event loop,
-// and converge-cli does not wire `killChild` (so onTimeout no-ops). It is the harness for a FUTURE async
-// (non-blocking) editor; today the real per-child cap is spawnSync's own timeout+SIGKILL (see makeClaudeAct).
-// When the editor becomes async: allSettled alone awaits a HUNG child forever and a hung claude -p keeps
-// spending, so on timeout we fire onTimeout (the detached-pgid SIGKILL hook) and drop the child this round.
+// Race a child producer against a hard timeout. This layer is now LIVE: the editor spawns async
+// (src/spawn-editor.mjs), so the setTimeout fires while siblings run, and converge-cli wires `killChild`
+// (a detached-pgid SIGKILL by objective id). allSettled alone would await a HUNG child forever and a hung
+// claude -p keeps spending, so on timeout we fire onTimeout (the killChild hook) and drop the child this
+// round. The editor's own timeoutMs (self-kills its process group) is the primary cap; killChild is the
+// orchestrator-level belt-and-suspenders when raceChild's cap trips first.
 // The producer NEVER rejects (it catches internally), so the rejection arm is defensive only.
 // Returns { timedOut:true } | { timedOut:false, value }.
 function raceChild(producer, timeoutMs, onTimeout) {
@@ -232,7 +234,6 @@ async function runOneFallback(state, cfg, scopeDir, globalRO, deps) {
 async function runBatchRound(state, cfg, scopeDir, globalRO, batch, reservedTokens, deps) {
   const log = deps.log ?? (() => {})
   const reMeasure = deps.reMeasure ?? reMeasureAll
-  const timeoutMs = cfg.childTimeoutMs ?? CHILD_TIMEOUT_MS
 
   state.cycle += 1
   state.global_pass += batch.length // each launched child is one objective-pass (bounds the global cap)
@@ -250,13 +251,15 @@ async function runBatchRound(state, cfg, scopeDir, globalRO, batch, reservedToke
   saveConvergeState(cfg.convergeDir, state)
 
   // FAN-OUT: children are pure producers; each races a hard timeout. Worktree materialize/cleanup is serialized
-  // by withWorktreeLock (inside childProducer). NOTE: the runChild edits run SERIALLY today, not concurrently —
-  // the editor is a blocking spawnSync, so each child's edit holds the event loop until it returns (finding #9).
-  // The value of this round is the single batched gate re-measure for N objectives, not wall-clock speedup.
+  // by withWorktreeLock (inside childProducer). The runChild edits run CONCURRENTLY: the editor spawns async
+  // (src/spawn-editor.mjs), so each child's edit yields the event loop and siblings overlap in wall clock. The
+  // round gives BOTH a single batched gate re-measure for N objectives AND real wall-clock speedup.
   const usdSlice = objectiveBudgetSlice(state).usd
   const settled = await Promise.allSettled(batch.map((obj) => {
     const perChildSlice = { tokens: (obj.cap ?? 4) * ONE_PASS_TOKENS, usd: usdSlice }
-    return raceChild(childProducer(obj, state, cfg, scopeDir, globalRO, lastGood, perChildSlice, deps), timeoutMs, () => deps.killChild?.(obj.id))
+    // Whole-child last-resort cap: cap passes × the per-pass ceiling (the editor self-kills each pass first).
+    const childTimeoutMs = cfg.childTimeoutMs ?? ((obj.cap ?? 4) * CHILD_PASS_TIMEOUT_MS)
+    return raceChild(childProducer(obj, state, cfg, scopeDir, globalRO, lastGood, perChildSlice, deps), childTimeoutMs, () => deps.killChild?.(obj.id))
   }))
   try { git(scopeDir, ['worktree', 'prune']) } catch { /* reclaim any killed-mid-add admin entry */ }
 

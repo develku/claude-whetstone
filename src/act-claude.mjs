@@ -3,7 +3,7 @@
 // exists to measure (headless `claude -p` spend, auth, and whether the nested
 // edit is actually permitted). The loop treats it as a black box returning
 // { changed, costUsd }; everything else stays testable with a stub.
-import { spawnSync } from 'node:child_process'
+import { spawnEditorAsync } from './spawn-editor.mjs'
 import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { dirname, resolve, isAbsolute } from 'node:path'
@@ -169,7 +169,10 @@ export function buildClaudeArgs({ prompt, maxTurns = 12, model = null, mcpConfig
 // context tax (loading every MCP server). Strongly recommended for cost control.
 // timeoutMs: hard wall-clock cap so a hung/stalled editor can't wedge an unattended
 // loop forever (and keep a paid session open). Default 10 min.
-export function makeClaudeAct({ artifactPath, maxTurns = 12, model = null, claudeBin = 'claude', mcpConfig = null, effort = null, timeoutMs = 10 * 60 * 1000 } = {}) {
+// detached/onSpawn default off; they exist so a concurrent fan-out (converge --parallel) can run this
+// editor async with a process-group kill + pid capture. The single-file loop leaves them off, so its
+// behaviour is unchanged (it awaits one act at a time regardless).
+export function makeClaudeAct({ artifactPath, maxTurns = 12, model = null, claudeBin = 'claude', mcpConfig = null, effort = null, timeoutMs = 10 * 60 * 1000, detached = false, onSpawn = null, onExit = null } = {}) {
   return async (state) => {
     const before = hashFile(artifactPath)
     const prompt = buildEditorPrompt(state, artifactPath)
@@ -181,7 +184,7 @@ export function makeClaudeAct({ artifactPath, maxTurns = 12, model = null, claud
     // config — not whatever cwd the driver was launched from. (A driver launched inside
     // another project's session would otherwise hand the child a restrictive deny layer
     // that silently blocks the edit; validated 2026-06-22.)
-    const res = spawnSync(claudeBin, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, cwd: dirname(artifactPath), timeout: timeoutMs, killSignal: 'SIGKILL' })
+    const res = await spawnEditorAsync(claudeBin, args, { cwd: dirname(artifactPath), timeoutMs, detached, onSpawn, onExit })
     // res.error is set on spawn failure, timeout (ETIMEDOUT), or maxBuffer overflow. Surface the
     // code so the loop's error handler records an actionable reason instead of a silent hang.
     if (res.error) throw new Error(`editor ${claudeBin} failed (${res.error.code || res.error.message})`)

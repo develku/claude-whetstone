@@ -131,7 +131,10 @@ export function decomposeNeedsBudget(cfg) {
 // high floor, mirroring driver's editorEffort. When --decompose is set, the escalated slot becomes a
 // decompose fan-out that spawns child loops per finding, then falls back to rescue on non-plateau.
 export function scopeDeps(cfg) {
-  const common = { scopeDir: cfg.scope, mcpConfig: cfg.mcpConfig, readOnly: cfg.readOnly, editScope: cfg.editScope }
+  // detached/onSpawn are set only by the parallel converge launcher (converge-cli) on the child cfg, so a
+  // concurrent fan-out runs each editor async with a process-group kill + pid capture; the ?? defaults keep
+  // every sequential/single-file caller behaviourally unchanged.
+  const common = { scopeDir: cfg.scope, mcpConfig: cfg.mcpConfig, readOnly: cfg.readOnly, editScope: cfg.editScope, detached: cfg.editorDetached ?? false, onSpawn: cfg.onEditorSpawn ?? null, onExit: cfg.onEditorExit ?? null }
   const deps = {
     buildContext: scopeBuildContext,
     act: makeScopeAct({ ...common, model: cfg.model, effort: cfg.effort }),

@@ -3,7 +3,8 @@
 // changed-detection (git status, not one sha256), and the read-only gate guard are new. As with
 // act-claude, the spawn itself is live-validated, not unit-tested; the three exports below are the
 // testable seams.
-import { spawnSync, execFileSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
+import { spawnEditorAsync } from './spawn-editor.mjs'
 import { buildLedger } from './ledger.mjs'
 import { extractCost, extractTokens, resolveMcpConfig, buildClaudeArgs, editorFailureReason, editorExitDisposition } from './act-claude.mjs'
 import { makeNonce, fenceUntrusted } from './prompt-fence.mjs'
@@ -72,11 +73,15 @@ export function buildScopePrompt(state, { scopeDir, readOnly = [], editScope = n
 // act-claude's argv/cost/token helpers. After the editor: enforce the read-only gate (revert any
 // tampering) BEFORE judging "changed", so a pure gate-tampering pass reads as a clean no-op.
 // editScope, when set, narrows the editor prompt to a sub-directory (used by decompose children).
-export function makeScopeAct({ scopeDir, maxTurns = 16, model = null, claudeBin = 'claude', mcpConfig = null, effort = null, readOnly = [], editScope = null, timeoutMs = 15 * 60 * 1000 } = {}) {
+// detached/onSpawn support true wall-clock concurrency in the parallel fan-out: the spawn is async (yields
+// the event loop so siblings overlap), detached makes the child a process-group leader for a clean pgid
+// kill, and onSpawn(pid) lets the orchestrator record the pid for its killChild hook. All default off, so
+// the sequential single-objective path is behaviourally unchanged.
+export function makeScopeAct({ scopeDir, maxTurns = 16, model = null, claudeBin = 'claude', mcpConfig = null, effort = null, readOnly = [], editScope = null, timeoutMs = 15 * 60 * 1000, detached = false, onSpawn = null, onExit = null } = {}) {
   return async (state) => {
     const prompt = buildScopePrompt(state, { scopeDir, readOnly, editScope })
     const args = buildClaudeArgs({ prompt, maxTurns, model, mcpConfig: resolveMcpConfig(mcpConfig), effort })
-    const res = spawnSync(claudeBin, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, cwd: scopeDir, timeout: timeoutMs, killSignal: 'SIGKILL' })
+    const res = await spawnEditorAsync(claudeBin, args, { cwd: scopeDir, timeoutMs, detached, onSpawn, onExit })
     if (res.error) throw new Error(`editor ${claudeBin} failed (${res.error.code || res.error.message})`)
     // error_max_turns is a NON-fatal truncation (incremental acceptEdits applied) — score it and continue;
     // any other non-zero exit is a real failure. See editorExitDisposition.

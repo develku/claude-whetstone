@@ -327,7 +327,25 @@ if (isMainModule(import.meta.url)) {
   }
   // The objectives manifest is the meta-gate; it must live OUTSIDE the scope (checked here AND by the
   // refusal suite) so the editor cannot rewrite it.
-  const runChild = (childCfg) => runFromConfig(childCfg, scopeDeps(childCfg))
+  // Per-run pid map for the parallel fan-out's killChild hook: on the parallel path the child editor spawns
+  // detached and reports its pid via onEditorSpawn, so raceChild's timeout can SIGKILL the child's whole
+  // process group by objective id. On the sequential path detached/onSpawn stay unset — behaviour unchanged.
+  const childPids = new Map()
+  const runChild = (childCfg) => {
+    if (cfg.parallel) {
+      childCfg.editorDetached = true
+      // A child runs up to `cap` editor passes; record the CURRENT pass's pid on spawn and drop it on exit,
+      // so the map only ever holds a live pid (never a stale/recycled one killChild could mis-target).
+      childCfg.onEditorSpawn = (pid) => { if (childCfg.objectiveId != null && pid) childPids.set(childCfg.objectiveId, pid) }
+      childCfg.onEditorExit = (pid) => { if (childCfg.objectiveId != null && childPids.get(childCfg.objectiveId) === pid) childPids.delete(childCfg.objectiveId) }
+    }
+    return runFromConfig(childCfg, scopeDeps(childCfg))
+  }
+  const killChild = (id) => {
+    const pid = childPids.get(id)
+    if (pid) { try { process.kill(-pid, 'SIGKILL') } catch { /* already exited (ESRCH) */ } }
+    childPids.delete(id)
+  }
 
   // A FRESH run validates the manifest BEFORE taking the lock (refuse fast, no lock churn); a resume reads the
   // ledger instead. Then a per-run advisory lock guards the convergeDir against a concurrent second invocation.
@@ -353,9 +371,9 @@ if (isMainModule(import.meta.url)) {
   try {
     let result
     if (cfg.resume) {
-      result = cfg.parallel ? await prepareGlobalResumeParallel(cfg, { runChild }) : await prepareGlobalResume(cfg, { runChild })
+      result = cfg.parallel ? await prepareGlobalResumeParallel(cfg, { runChild, killChild }) : await prepareGlobalResume(cfg, { runChild })
     } else {
-      result = cfg.parallel ? await runConvergeParallel(cfg, manifest, { runChild }) : await runConverge(cfg, manifest, { runChild })
+      result = cfg.parallel ? await runConvergeParallel(cfg, manifest, { runChild, killChild }) : await runConverge(cfg, manifest, { runChild })
     }
     process.stdout.write(`\n${result.verdict.reason}\n`)
     code = result.verdict.status === 'done' ? 0 : 1

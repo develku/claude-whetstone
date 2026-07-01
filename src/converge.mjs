@@ -328,6 +328,7 @@ export const rollbackToLastGood = (scopeDir, lastGoodSha) => {
 
 export function buildObjectiveCfg(obj, state, cfg, wt, globalRO, slice) {
   return {
+    objectiveId: obj.id, // carried so the parallel launcher can key its killChild pid-map by objective
     goal: obj.goal,
     scope: wt,
     artifactPath: wt,
