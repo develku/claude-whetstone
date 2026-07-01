@@ -11,7 +11,7 @@
 // print {score, critique, findings} JSON to stdout, exit 0 on success, exit 2 on error.
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { pathToFileURL } from 'node:url'
+import { isMainModule } from '../src/is-main.mjs'
 
 const arg = (n, d) => {
   const i = process.argv.indexOf(n)
@@ -76,7 +76,7 @@ export function combine(results) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const file = arg('--scorers-file')
   if (!file) die('--scorers-file <path> is required')
 

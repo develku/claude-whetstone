@@ -14,6 +14,7 @@ import { rmSync } from 'node:fs'
 import { resolve, dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gitMaterialize, gitCleanup, gitHead, isSha } from './git-snapshot.mjs'
+import { parseScorerJson } from './parse-scorer.mjs'
 import { pathsIntersect, globalReadOnly } from './converge-shared.mjs'
 import { objectiveScore, objectiveMet, globalVerdict, globalRegressed } from './converge-gate.mjs'
 import { initConvergeState, ensureConvergeDir, saveConvergeState, loadConvergeState, globalBudgetExhausted, inflightList, LAST_GOOD_REF, heldOutTruthHash } from './converge-state.mjs'
@@ -117,7 +118,7 @@ function defaultRunScorer(scorerCmd, cwd) {
   const res = spawnSync(full, { shell: true, cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: CHILD_TIMEOUT_MS, killSignal: 'SIGKILL' })
   if (res.error) throw new Error(`scorer failed (${res.error.code || res.error.message})`)
   if (res.status !== 0) throw new Error(`scorer exited ${res.status}: ${(res.stderr || '').slice(0, 300)}`)
-  return JSON.parse(res.stdout)
+  return parseScorerJson(res, scorerCmd)
 }
 
 // Floor with a one-shot REPLICA GATE: a fail on attempt 1 is re-run once in a FRESH worktree (transient

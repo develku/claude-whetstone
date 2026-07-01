@@ -9,7 +9,7 @@
 A deterministic <b>loop-engineering</b> driver for Claude Code: <b>code owns the gate</b>, the <b>model owns only diagnosis + edits</b>.
 </p>
 
-> Status: **v1.1.0** — the single-file core is **stable**; the multi-file and orchestration layers are
+> Status: **v1.1.1** — the single-file core is **stable**; the multi-file and orchestration layers are
 > alpha. Matured by running it on itself (dogfooding), so the cost, auth, and security model are exercised
 > end-to-end, not speculative. Requires **Node ≥ 23.5** — the behavioural scorers isolate untrusted code
 > with `module.registerHooks` + the Permission Model. See [What's stable in v1](#whats-stable-in-v1).

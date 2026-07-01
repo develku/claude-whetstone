@@ -23,6 +23,7 @@ const SELF_EXEC_SCORERS = [
   'io-effect.mjs',
   'io-invariant.mjs',
   'io-trace.mjs',
+  'composite.mjs',
 ]
 
 for (const name of SELF_EXEC_SCORERS) {

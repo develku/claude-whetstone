@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { resolve, join } from 'node:path'
 import { homedir } from 'node:os'
 import { shq } from './shq.mjs'
+import { parseScorerJson } from './parse-scorer.mjs'
 import {
   initState,
   recordPass,
@@ -53,7 +54,7 @@ function runScorer(scorerCmd, { output, loopDir, pass }) {
   const res = spawnSync(full, { shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: CHILD_TIMEOUT_MS, killSignal: 'SIGKILL' })
   if (res.error) throw new Error(`scorer failed (${res.error.code || res.error.message})`)
   if (res.status !== 0) throw new Error(`scorer exited ${res.status}: ${(res.stderr || '').slice(0, 500)}`)
-  return JSON.parse(res.stdout)
+  return parseScorerJson(res, scorerCmd)
 }
 
 function runObserve(observeCmd, loopDir) {

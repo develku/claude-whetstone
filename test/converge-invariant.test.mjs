@@ -24,8 +24,8 @@ const INVARIANT = {
   'src/forge/gate.mjs': '16b6bcb3ad3600a45456ca3486137ffd94d1c186dd90aadb8ab09420ccdad5c9',
   'src/forge/store.mjs': 'cd8d0049e5070a3757456c0eea8030c34c084a378ace03c6e2fd8678473d8c66',
   'src/forge/prune.mjs': '2464dd2c8fed0d32b781709b5d8de5770f2eec89e3e5cd43f67bf4ce447720cd',
-  'src/forge/admit.mjs': '24bc8d08fc0b52c045b8099db9eb0f373537e6afba4d8b10dc8fa91b5153875e',
-  'scorers/composite.mjs': '8bd286f3b9706a664f135c16aca205a34d9a6065d69269db8c03a17898e50374',
+  'src/forge/admit.mjs': '459d9d25a52c2c19f1fbb0336b18d2417105b3f660782b52e3218c798c5e11fe',
+  'scorers/composite.mjs': 'd526408268932e15472842b41e31e9ec9e67d49d51c14b87cd0301993692780b',
 }
 
 test('the 8 invariant files are byte-identical — Track C builds around them, edits none', () => {

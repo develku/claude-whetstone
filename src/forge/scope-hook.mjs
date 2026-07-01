@@ -17,6 +17,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { extname, join } from 'node:path'
 import { shq } from '../shq.mjs'
+import { parseScorerJson } from '../parse-scorer.mjs'
 import { gitMaterialize, gitCleanup, gitDiffNames, gitHead, isSha } from '../git-snapshot.mjs'
 import { admitCheck, scorerRunCheck } from './admit.mjs'
 import { corroborateLabels } from './corroborate.mjs'
@@ -48,7 +49,7 @@ function scopeOracleRunCheck(cmd, artifact, { target = 100 } = {}) {
     const full = `${cmd} --output ${shq(artifact)} --loop-dir ${shq(dir)} --pass 000`
     const res = spawnSync(full, { shell: true, cwd: artifact, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 5 * 60 * 1000, killSignal: 'SIGKILL' })
     if (res.status !== 0) throw new Error(`scope oracle exited ${res.status}: ${(res.stderr || '').slice(0, 300)}`)
-    return { pass: JSON.parse(res.stdout).score >= target }
+    return { pass: parseScorerJson(res, full).score >= target }
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

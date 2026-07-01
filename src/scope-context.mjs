@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process'
 import { writeReview, recordPass, saveState, zeroPad } from './state.mjs'
 import { gitSnapshot, gitVerifyAt } from './git-snapshot.mjs'
 import { shq } from './shq.mjs'
+import { parseScorerJson } from './parse-scorer.mjs'
 
 const CHILD_TIMEOUT_MS = 5 * 60 * 1000
 
@@ -18,7 +19,7 @@ function runScopeScorer(scorerCmd, { scopeDir, loopDir, pass }) {
   const res = spawnSync(full, { shell: true, cwd: scopeDir, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: CHILD_TIMEOUT_MS, killSignal: 'SIGKILL' })
   if (res.error) throw new Error(`scorer failed (${res.error.code || res.error.message})`)
   if (res.status !== 0) throw new Error(`scorer exited ${res.status}: ${(res.stderr || '').slice(0, 500)}`)
-  return JSON.parse(res.stdout)
+  return parseScorerJson(res, scorerCmd)
 }
 
 export function scopeBuildContext(loopDir) {
