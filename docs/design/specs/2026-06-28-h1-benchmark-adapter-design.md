@@ -1,7 +1,7 @@
 # H1 — SWE-EVO Benchmark Adapter + Gated-vs-Baseline A/B (design)
 
 - **Date:** 2026-06-28
-- **Status:** REVISED per codex review (thread `019f0bf3-9383-7671-9077-e8815bb86eef`, verdict REVISE — folded in below). Ready to build the `$0` pilot harness; the full paid run is gated behind a veto-opportunity audit (§5).
+- **Status:** REVISED per Codex review (verdict REVISE — folded in below). Ready to build the `$0` pilot harness; the full paid run is gated behind a veto-opportunity audit (§5).
 - **Part of:** the **H milestone** (gate hardening + a benchmark number) of the re-plan **H → C → B → A**. See `docs/2026-06-28-loop-engineering-competitive-positioning.md`.
 
 ## 1. Why

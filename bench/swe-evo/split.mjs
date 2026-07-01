@@ -1,12 +1,12 @@
 // bench/swe-evo/split.mjs
 // V/C/T behaviour-cluster split for the SWE-EVO benchmark adapter (H1). See
-// docs/superpowers/specs/2026-06-28-h1-benchmark-adapter-design.md §3.
+// docs/design/specs/2026-06-28-h1-benchmark-adapter-design.md §3.
 //
 // SWE-EVO holds its grading tests out from the agent, so whetstone's loop needs a MANUFACTURED
 // in-loop scorer. We leak a subset of FAIL_TO_PASS as the visible scorer (V) and hold the rest out
 // as a confirm set (C, the gated arm's finish-line check) and a truth set (T, held out from EVERY
 // arm and used only for the final grade — this is what makes the gated-vs-baseline Δ identifiable;
-// codex REVISE, thread 019f0bf3…).
+// Codex review (REVISE)).
 //
 // We cluster at FILE level (pytest node id -> file). Whole files go to V/C/T so the C/T test bodies
 // can be PHYSICALLY removed from the editor's tree (read-only stops *weakening* a test, not *reading*

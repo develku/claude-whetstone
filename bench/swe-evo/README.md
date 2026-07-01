@@ -4,7 +4,7 @@ Runs whetstone's scope-mode loop on real SWE-EVO repo tasks to answer one questi
 code-owned gate raise held-out truth?** — i.e. is the gated arm's Fix-Rate on a truth set *the editor
 never sees* higher than a baseline that gates on the visible scorer alone.
 
-Design + codex review: [`docs/superpowers/specs/2026-06-28-h1-benchmark-adapter-design.md`](../../docs/superpowers/specs/2026-06-28-h1-benchmark-adapter-design.md).
+Design + codex review: [`docs/design/specs/2026-06-28-h1-benchmark-adapter-design.md`](../../docs/design/specs/2026-06-28-h1-benchmark-adapter-design.md).
 Part of the **H → C → B → A** re-plan ([`docs/2026-06-28-loop-engineering-competitive-positioning.md`](../../docs/2026-06-28-loop-engineering-competitive-positioning.md)).
 
 ## Why a manufactured scorer
@@ -16,7 +16,7 @@ task's `FAIL_TO_PASS` tests into three disjoint behaviour clusters:
 - **V (visible)** — the in-loop scorer for ALL arms (the editor's gradient).
 - **C (confirm)** — the held-out finish-line check for the gated arms (source-isolated).
 - **T (truth)** — held out from EVERY arm; the final grade. T-held-out-from-all is what makes the
-  gated-vs-baseline Δ **identifiable** (codex REVISE, thread `019f0bf3`): a positive Δ means the gate
+  gated-vs-baseline Δ **identifiable** (Codex review, REVISE): a positive Δ means the gate
   generalized, not that it had oracle access.
 
 `PASS_TO_PASS` regression applies in every metric (any P2P fail → Fix-Rate 0, per SWE-EVO Eq. 1).
@@ -64,6 +64,32 @@ the cache **synchronously** — no network during editing/scoring (codex Q4: no-
    no false-done events for the gate to catch → the A/B is underpowered → report + pivot, do **not**
    spend 4×N.
 4. **Pilot** (~5 × 4 arms) → **full** (~N × 4 arms) with the official `evaluate_instance.py` cross-check.
+
+## Sealing (`--sealed`) — the cheapest contamination control
+
+Pass `--sealed` to wipe each materialized checkout's upstream `.git` history down to a single seed commit
+([`seal.mjs`](seal.mjs)) before the editor ever runs. This is the **sealed-slice** layer: it closes the
+git-history-mining leak Cursor measured (9% of Opus 4.8 resolutions on an *unsealed* harness came from the
+bundled history; 57% more from the web — the test run already pins `--network none`). With the retrieval
+shortcut gone, the only path to the oracle is *deriving* the patch, so the gate is tested under real gaming
+pressure and the soft Fix-Rate stays an honest metric — without needing harder tasks.
+
+- The working **tree** is untouched, so the editor still starts from the exact `base_commit` content; the
+  seal only removes the commit graph / branches / remotes / reflog.
+- The editor's host checkout is then based on the **seed SHA** (`editorBase`), threaded through the per-attempt
+  reset and the patch-capture diff. The ephemeral grading container keeps the **real** `base_commit` (its own
+  `.git` is separate), and the captured patch applies cleanly because the two base trees are byte-identical.
+- Network posture: the test run is `--network none` (already); the editor runs with `--mcp-config empty-mcp.json`
+  (no MCP fetch tools). Confirm the editor has no web tools enabled for a fully sealed run.
+
+```bash
+node bench/swe-evo/run-ab.mjs --run --sealed --cap 15 --budget-tokens 600000 \
+  --instances <id1>,...,<id12> --model sonnet --out .loop/swe-evo-work/sealed.jsonl
+```
+
+Report the result as an **N-instance sealed-slice soft-Fix-Rate** (or the paired gated−baseline Δ), never as
+"X% on SWE-EVO/SWE-bench-Live" — N is far below a full split. The seal makes gaming *possible*; it does not by
+itself prove gaming *resistance* (a helpful model may simply derive the honest fix).
 
 ## Running the paid A/B (from a plain terminal)
 
