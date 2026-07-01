@@ -103,7 +103,7 @@ evaluateEffect(mod, { fnName, sink, calls, expectSink, expectReturns }) -> {pass
 3. Paid `bench/forge-effect-realmodel.mjs --model sonnet` — NON-NULL (a real model proposes io-effect).
 4. `git diff` confirms the 7 invariant files (and io-trace.mjs) untouched.
 
-## Codex cross-model review (gpt-5.5, session 019f0991) — folded
+## Codex cross-model review — folded
 
 Codex's sharpest finding was a genuine TRUST-BOUNDARY hole, since io-effect is a verifier scorer and the gamed
 artifact CONTROLS the sink object it mutates:

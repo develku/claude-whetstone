@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-28
 **Status:** design → codex review → implementation
-**Builds on:** `docs/superpowers/specs/2026-06-27-mutation-backed-admission-DEFERRED.md` (the converged DEFERRED note) and frontier 2a (`src/forge/corroborate.mjs` oracle machinery).
+**Builds on:** `docs/design/specs/2026-06-27-mutation-backed-admission.md` (the converged DEFERRED note) and frontier 2a (`src/forge/corroborate.mjs` oracle machinery).
 
 ## Problem (the finding that motivates it)
 
@@ -132,7 +132,7 @@ confirmed mutant is `1 + |oracles|` scorer runs; `maxMutants` + the per-operator
 3. Paid `bench/forge-mutation-realmodel.mjs --model sonnet` — NON-NULL effect.
 4. `git diff` confirms the 7 invariant files untouched.
 
-## Codex cross-model review (gpt-5.5 xhigh, session 019f096c) — folded
+## Codex cross-model review — folded
 
 Codex returned 9 findings (VERDICT: directionally good, two places could "look hardened while admitting the
 same weak checks"). Folded:

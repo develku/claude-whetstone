@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-27
 **Status:** approved (codex-revised) → implementation
-**Cross-model review:** codex (gpt-5.5, xhigh) session `019f0936-2b63-7002-b180-358337912b24` — VERDICT REVISE, 9 changes folded in.
+**Cross-model review:** Codex — VERDICT REVISE, 9 changes folded in.
 
 ## Problem
 

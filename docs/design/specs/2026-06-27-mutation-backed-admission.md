@@ -1,8 +1,8 @@
-# Mutation-backed admission (frontier) — DEFERRED design note
+# Mutation-backed admission (frontier) — design note
 
-**Status:** DEFERRED (not built). Cross-model converged (Opus + codex, 2026-06-27): close-now is gold-plating;
-build as its OWN scoped feature when the frontier is the goal. This note preserves the converged design so it is
-executable later without re-deriving it.
+**Status:** Originally deferred (2026-06-27): a cross-model design review judged close-now gold-plating and
+recommended building it as its own scoped feature. **Later built** — see
+`2026-06-28-verifier-forge-mutation-backed-admit-design.md`. This note preserves the original design reasoning.
 
 ## The finding that motivates it
 
