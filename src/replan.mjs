@@ -2,8 +2,8 @@
 //
 // When a converge run stalls with a structural signal (Inc 2: impossibility / contradiction / held_out_fail), the
 // loop's CURRENT decomposition is insufficient. proposeReplan regenerates a DIFFERENT decomposition via the Track A
-// planner (planManifest) and returns it as a PROPOSAL for human review. Two safety invariants from the cross-model
-// DCA (~/.claude/dca/20260629T141245_inc3-outer-loop-replan-safety.md, Option B):
+// planner (planManifest) and returns it as a PROPOSAL for human review. Two safety invariants from the
+// cross-model design review (Option B):
 //   1. PROPOSER-ONLY / HUMAN-ONLY acceptance — proposeReplan NEVER runs converge. It returns a manifest; a human
 //      reviews it and re-runs converge if they accept (the second permanently-human atom).
 //   2. The immutable GLOBAL held-out truth is CARRIED VERBATIM — a replan revises the decomposition ("HOW"), never

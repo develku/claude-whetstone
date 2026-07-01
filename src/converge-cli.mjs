@@ -75,7 +75,7 @@ export function convergeObjectivesNeedCap(cfg) {
   return null
 }
 
-// editScopes must be pairwise DISJOINT (DCA refinement #3): without this, "A edits B's source" is possible
+// editScopes must be pairwise DISJOINT (design-review refinement #3): without this, "A edits B's source" is possible
 // (two overlapping scopes), and the positive-allowlist isolation claim is unsound. A declared shared-source
 // overlap is a later (sharedSource) track.
 export function convergeEditScopeOverlap(cfg) {
@@ -132,7 +132,7 @@ export function convergeUnsafeObjectiveScorer(cfg) {
 }
 
 // Gate/measurement files (scorer scripts, floor footprint, declared read-only paths) must lie OUTSIDE every
-// editScope (DCA refinement #2/#3): this is how the floor-footprint protection is delivered — package.json/
+// editScope (design-review refinement #2/#3): this is how the floor-footprint protection is delivered — package.json/
 // jest.config in floor.readOnly can never sit inside an editScope, so an editor cannot rewrite what the
 // floor measures. Footprint COMPLETENESS stays the operator's contract (disclosed in the report).
 export function manifestEditScopeReadOnlyCollision(cfg) {
@@ -146,7 +146,7 @@ export function manifestEditScopeReadOnlyCollision(cfg) {
   return null
 }
 
-// The floor's measurement footprint must be DECLARED read-only (DCA refinement #2 — the headline
+// The floor's measurement footprint must be DECLARED read-only (design-review refinement #2 — the headline
 // `npm test -> echo ok` floor-evasion path). We cannot enumerate what an arbitrary `floor.cmd` reads, so we
 // enforce the operator CONTRACT: a floor with a command MUST declare a non-empty floor.readOnly listing the
 // config/script files it depends on (package.json, jest.config.js, Makefile, conftest.py, ...). Those then

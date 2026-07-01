@@ -12,7 +12,7 @@
 // mutant the oracle accepts (equivalent) or errors on (non-parsing) is excluded. We never ask the candidate
 // whether a mutant is bad (that would exclude exactly the sibling behaviour a weak check fails to observe).
 //
-// Codex-folded discipline (gpt-5.5, session 019f096c): runCheck's {pass} is lossy, so classify() separates
+// Codex-folded discipline (cross-model review): runCheck's {pass} is lossy, so classify() separates
 // pass | reject | error | flaky. A candidate CRASH is NOT a kill (else a broken check earns crash-credit and
 // still misses the real behavioural mutant). Usable oracles pass good REPRODUCIBLY. FILE-mode only.
 import { readFileSync, writeFileSync, rmSync } from 'node:fs'

@@ -14,7 +14,7 @@ import { isJudgeClass } from './converge-shared.mjs'
 // Inc 3a: a stable content hash of the operator-authored GLOBAL held-out truth package — its scorers, targets,
 // AND membership (the SET). Canonicalizes each check's keys (order-insensitive) but preserves array membership, so
 // weakening a target OR dropping/adding a check changes the hash. Recorded at init; the truth bar cannot move
-// within a run (a replan may revise the decomposition, never this — DCA 20260629T141245).
+// within a run (a replan may revise the decomposition, never this — per the cross-model design review).
 export function heldOutTruthHash(globalHeldOut) {
   // Hash ONLY the truth-defining triple in a fixed key order (not the mutable score/met), so the SAME hash is
   // computed at init (manifest items) and on resume (state items carry extra score/met fields).

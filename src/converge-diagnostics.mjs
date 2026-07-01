@@ -2,7 +2,7 @@
 //
 // It reads a converge run's OBSERVABLE history (binding_history + the per-objective vector + the rounds ledger)
 // and classifies it into a `structuralSignal` — the kind of feedback that means "the DECOMPOSITION is wrong, not
-// just this pass". The outer loop (Inc 3, DEFERRED + DCA-gated) would consume this to decide whether to escalate
+// just this pass". The outer loop (Inc 3, deferred, human-gated) would consume this to decide whether to escalate
 // for a REPLAN; for now it is surfaced only as an advisory field on the final state.
 //
 // DIAGNOSTIC ONLY — it never changes a verdict. globalVerdict (converge-gate.mjs) remains the SOLE gate authority;

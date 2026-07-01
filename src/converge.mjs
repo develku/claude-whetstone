@@ -347,7 +347,7 @@ export function buildObjectiveCfg(obj, state, cfg, wt, globalRO, slice) {
   }
 }
 
-// The done-edge STABILITY gate (DCA refinement #6, the concrete "stable"): re-run the FULL vector + floor at
+// The done-edge STABILITY gate (design-review refinement #6, the concrete "stable"): re-run the FULL vector + floor at
 // last-good (global_stability_runs total readings); done stands only if EVERY reading keeps all objectives
 // met and the floor passing. A flaky deterministic-labelled scorer that spiked to target once does not certify.
 export function stabilityHolds(scopeDir, state, reMeasure, deps = {}) {

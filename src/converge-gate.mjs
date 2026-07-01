@@ -39,7 +39,7 @@ function runningMax(scores) {
   return out
 }
 
-// The FULL-VECTOR monotonic regression guard (DCA refinement #1). Used by the orchestrator AFTER a
+// The FULL-VECTOR monotonic regression guard (design-review refinement #1). Used by the orchestrator AFTER a
 // re-measure to decide rollback; the gate itself never sees a regressing state (the orchestrator rolls it
 // back first). Regresses iff: the deterministic floor failed; OR a previously-MET objective fell below its
 // target; OR ANY objective (met or unmet) dropped more than min_delta below its pre-integration score —
