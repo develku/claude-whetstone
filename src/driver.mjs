@@ -195,8 +195,8 @@ export async function resumeFromConfig(cfg, deps = {}) {
 // especially --budget-tokens, which is awkward to size by hand because each pass burns ~100-150K
 // tokens. CLI flags still override (parseCli's `defaults` arg). cwd/home are injectable for test.
 // Malformed JSON throws a clear error rather than silently running with surprise defaults; a MISSING
-// file is fine. Recognized keys (camelCase): budgetTokens, budgetUsd, hardCap, targetScore, model,
-// effort, escalateModel, mcpConfig.
+// file is fine. Recognized keys (camelCase): budgetTokens, budgetUsd, hardCap, targetScore,
+// plateauWindow, minDelta, model, effort, escalateModel, mcpConfig.
 export function loadConfig(cwd = process.cwd(), home = homedir()) {
   let merged = {}
   for (const p of [join(home, '.config', 'whetstone', 'config.json'), join(cwd, 'whetstone.config.json')]) {
@@ -240,6 +240,11 @@ export function parseCli(argv, defaults = {}) {
     budgetUsd: get('--budget') ? Number(get('--budget')) : defaults.budgetUsd,
     budgetTokens: get('--budget-tokens') ? Number(get('--budget-tokens')) : defaults.budgetTokens,
     stabilityRuns: get('--stability-runs') ? Number(get('--stability-runs')) : defaults.stabilityRuns,
+    // Plateau knobs (consumed by initState -> gate.mjs). Previously unreadable here, so they were pinned
+    // to initState's 3 / 1 fallback; exposing them lets a long overnight run widen the window / lower the
+    // min improvement so a hard target keeps grinding instead of stalling out early.
+    plateauWindow: get('--plateau-window') ? Number(get('--plateau-window')) : defaults.plateauWindow,
+    minDelta: get('--min-delta') ? Number(get('--min-delta')) : defaults.minDelta,
     model: get('--model', defaults.model ?? 'sonnet'),
     effort: get('--effort', defaults.effort ?? 'medium'),
     escalateModel: get('--model-escalate', defaults.escalateModel ?? 'opus'),
@@ -278,12 +283,16 @@ function parseResumeOverrides(argv) {
   const target = get('--target')
   const model = get('--model')
   const stability = get('--stability-runs')
+  const plateauWindow = get('--plateau-window')
+  const minDelta = get('--min-delta')
   if (cap !== undefined) o.hard_cap = Number(cap)
   if (budget !== undefined) o.budget_usd = Number(budget)
   if (budgetTokens !== undefined) o.budget_tokens = Number(budgetTokens)
   if (target !== undefined) o.target_score = Number(target)
   if (model !== undefined) o.model = model
   if (stability !== undefined) o.stability_runs = Number(stability)
+  if (plateauWindow !== undefined) o.plateau_window = Number(plateauWindow)
+  if (minDelta !== undefined) o.min_delta = Number(minDelta)
   return o
 }
 
@@ -328,7 +337,7 @@ if (process.argv[1] && (
   if (argv.includes('--resume')) {
     const loopDir = flag('--loop-dir')
     if (!loopDir) {
-      process.stderr.write('usage: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--stability-runs N] [--target T] [--model M] [--model-escalate opus | --no-escalate] [--mcp-config <path>]\n')
+      process.stderr.write('usage: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--stability-runs N] [--plateau-window N] [--min-delta X] [--target T] [--model M] [--model-escalate opus | --no-escalate] [--mcp-config <path>]\n')
       process.exit(2)
     }
     try {
@@ -349,7 +358,7 @@ if (process.argv[1] && (
 
   const cfg = parseCli(argv, loadConfig())
   if (!cfg.goal || !cfg.artifactPath || !cfg.scorerCmd) {
-    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--budget-tokens N] [--stability-runs N] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>] [--forge --forge-store <path> --scorer-allow <scorer.mjs,...> [--forge-oracle "<scorer cmd>" ...] [--forge-mutation-admit [--forge-mutation-threshold 0.75]]]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--stability-runs N] [--target T] [--model M]\n')
+    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--budget-tokens N] [--stability-runs N] [--plateau-window N] [--min-delta X] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>] [--forge --forge-store <path> --scorer-allow <scorer.mjs,...> [--forge-oracle "<scorer cmd>" ...] [--forge-mutation-admit [--forge-mutation-threshold 0.75]]]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--stability-runs N] [--plateau-window N] [--min-delta X] [--target T] [--model M]\n')
     process.exit(2)
   }
   // Mutation-backed admit needs an independent oracle (codex finding 7): refuse the explicit flag without one
