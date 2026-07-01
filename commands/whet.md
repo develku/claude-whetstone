@@ -2,7 +2,7 @@
 description: Launch a whetstone loop — raise one artifact toward a measured score threshold, with cost guardrails and confirm-before-run
 argument-hint: '[goal | resume]'
 disable-model-invocation: true
-allowed-tools: Bash(node:*), Read, AskUserQuestion
+allowed-tools: Bash(node:*), Read, AskUserQuestion, mcp__visualize__read_me, mcp__visualize__show_widget
 ---
 
 You are the `/whet` launcher for **whetstone** — a deterministic loop-engineering driver
@@ -51,11 +51,23 @@ ALWAYS append `--mcp-config ${CLAUDE_PLUGIN_ROOT}/empty-mcp.json` — the driver
 editor under strict MCP mode automatically, suppressing the ~44K-token per-spawn MCP context
 tax the project measured.
 
-Then **show the user the fully assembled command and a worst-case cost estimate**
-(cap × per-call cost for the chosen model; if the scorer is llm-judge, add its own per-pass
-spend — roughly cap × (editor + judge)) and ask for explicit confirmation. Only after they
-confirm, run it with Bash. Pass an **absolute** `--artifact` and an absolute `--loop-dir <dir>`
-to choose where the `.loop/` run state lands, so the run does not depend on the cwd:
+Then **present a readable run-plan summary as the headline** — a compact block, not a raw flag
+string (the flag soup is what users find unfriendly):
+
+```
+▶ goal      <goal>
+▶ artifact  <abs path>
+▶ scorer    <name> (deterministic | ⚠ spends money per pass)
+▶ target    <N> / 100   ·   cap <N> passes
+▶ budget    <--budget-tokens N | --budget X | cap-only>
+▶ est. cost worst-case ≈ cap × per-call for the chosen model
+            (if the scorer is llm-judge, add its own per-pass spend — roughly cap × (editor + judge))
+```
+
+Show the **exact command in a fenced block *below* the summary** (transparency — the user must be
+able to see precisely what will run), then ask for explicit confirmation with AskUserQuestion.
+Only after they confirm, run it with Bash. Pass an **absolute** `--artifact` and an absolute
+`--loop-dir <dir>` to choose where the `.loop/` run state lands, so the run does not depend on the cwd:
 
 ```
 node ${CLAUDE_PLUGIN_ROOT}/src/driver.mjs "<goal>" \
@@ -63,7 +75,15 @@ node ${CLAUDE_PLUGIN_ROOT}/src/driver.mjs "<goal>" \
   --model <model> --mcp-config ${CLAUDE_PLUGIN_ROOT}/empty-mcp.json --loop-dir <abs run dir>
 ```
 
-Report the final verdict + score trajectory the driver prints.
+Report the final verdict the driver prints, then render the run trajectory:
+
+- **If `mcp__visualize__show_widget` is available**, read `<loop-dir>/state.json` and show an
+  inline chart instead of the raw text trajectory — a metric-card row (best `best_score` @
+  `best_pass`, `history.length` passes / `hard_cap`, spend from `spent_tokens`/`spent_usd`, and
+  `status`) above a Chart.js line of `history[].score` per pass with a dashed `target_score`
+  line. Call `mcp__visualize__read_me` with module `chart` once first for the widget conventions.
+- **Otherwise** (widget tool absent — headless run, other host), report the text score
+  trajectory the driver prints. This is the fallback, never an error.
 
 ## RESUME
 
@@ -76,6 +96,9 @@ above what stopped the run. Only the flags you pass override; everything else is
 node ${CLAUDE_PLUGIN_ROOT}/src/driver.mjs --resume --loop-dir <dir> \
   [--cap N] [--budget X] [--target T] [--model M]
 ```
+
+After it finishes, render the trajectory the same way as **NEW RUN** — the chart widget if
+`mcp__visualize__show_widget` is available, else the text trajectory the driver prints.
 
 ## SAFETY — never skip
 
