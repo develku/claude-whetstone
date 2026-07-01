@@ -37,7 +37,7 @@ The loop must not drop below the latest column; ratchet upward as coverage impro
 | Q-003 | coverage | LOW | `scorers/io-effect.mjs` | fixed | Branch 55%→58%; scalar `--expect-returns` guard test added (cycle 1, `86c92e1`). |
 | Q-004 | correctness/security | MEDIUM | `src/act-claude.mjs` | fixed | NaN-coercion `|| 0` guard pinned for present-but-non-numeric cost/token fields (cycle 1, `86c92e1`). |
 | Q-005 | simplification | LOW | `src/safe-rel.mjs`, `src/plan-resolve.mjs`, `src/scope-cli.mjs` | wontfix | Adversarial verify CONFIRMED the differences are load-bearing (throw-vs-null, realpath-vs-pure, root-allowed-vs-rejected); unifying would re-open the symlink import-RCE the io-* epic closed. No change. |
-| Q-006 | coverage | LOW | `src/outer-cli.mjs`, `src/replan-cli.mjs`, `src/plan-cli.mjs` | deferred | Function coverage 64–71% on alpha-tier CLIs (Track A / dynamic control plane, operator-marked alpha-unsupported). Lower value until those graduate. |
+| Q-006 | coverage | LOW | `src/outer-cli.mjs`, `src/replan-cli.mjs`, `src/plan-cli.mjs` | deferred | Function coverage 64–71% on alpha-tier CLIs (Track A / dynamic control plane, maintainer-marked alpha-unsupported). Lower value until those graduate. |
 | Q-007 | security | LOW | `src/iso-frame.mjs` | open | Theoretical frame-forgery: nonce extraction via `indexOf` twice; 16-hex-char random nonce makes collision implausible. Not re-surfaced by the cycle-1 security finder. Verify next cycle, likely wontfix. |
 
 ### Cycle 1 (2026-06-30) — adversarial 4-axis audit (13 candidates → 12 verified → 11 fixed)
@@ -76,7 +76,7 @@ Finders targeted the cycle-1-untouched modules (planner/outer/replan, converge r
 | C2-10 | security | LOW | `src/redact.mjs` | wontfix | AWS_SECRET_ACCESS_KEY-style + credential-URL redaction misses — but the module DOCUMENTS best-effort over a self-gitignored run dir (zero exfil path); broadening risks false-positive redactions. Verifier: not worth. |
 | C2-11 | coverage | LOW | `src/converge-parallel.mjs` | deferred | Done-edge stability 'unstable' branch untested — but it's a SYMMETRIC gap (sequential analog also untested), reachable only with stability_runs>1 + a non-empty held-out stub. Verifier: not worth (would need both paths). |
 | C2-12 | coverage | LOW | `src/iso-runner.mjs` | wontfix | Artifact-resolve early-return single line untested — but the reason→score-zero contract IS tested in iso-runner-contract.test.mjs; verifier judged the addition over-claimed and not worth. |
-| C2-13 | coverage | — | `src/scope-context.mjs` | wontfix | confirm() no-snapshot fallback is DEAD in real execution (a persist-with-snapshot always precedes confirm); per the operator's "no defensive code/tests for impossible cases" rule, rejected. |
+| C2-13 | coverage | — | `src/scope-context.mjs` | wontfix | confirm() no-snapshot fallback is DEAD in real execution (a persist-with-snapshot always precedes confirm); per the maintainer's "no defensive code/tests for impossible cases" rule, rejected. |
 | C2-14 | correctness | LOW | `src/converge-parallel.mjs` | deferred | Surfaced by the cycle-2 self-review: `consecutive_batch_regressions` resets only on an accepted BATCH, never on a successful sequential fallback — so a combo regression, a successful sequential round, then an unrelated combo regression hits the cap "consecutively". Pre-existing asymmetry (NOT introduced by C2-01); separate question from the increment guard. Revisit if premature parallel-disable is observed. |
 
 ### Cycle 3 (2026-06-30) — forge non-invariant + iso sandbox + data-inertness audit (11 candidates → 6 verified NEW → 5 fixed)
@@ -107,15 +107,15 @@ Finders swept the last un-deeply-audited surface: the iso-runner/iso-frame sandb
 | — | — | — | `src/scope-act.mjs` | rejected | `enforceReadOnly`'s `reverted[]` porcelain mis-parse — the field is DEAD (zero consumers, never logged); enforcement runs on the readOnly pathspecs directly, so no behavioral impact at all. real=false. |
 | C4-05 | security | LOW | `src/iso-runner-child.mjs` | fixed | (Recovered from the scanner-killed security re-run.) The sandbox builtin-DENY scheme strip was case-SENSITIVE (`/^node:/`), so `import('NODE:V8')` dodged the deny set. **Empirically NOT exploitable today** — Node's loader rejects a cased scheme (ERR_UNKNOWN_BUILTIN_MODULE) on 26.4 / the ≥23.5 floor / CI 24+26 — but the deny set must not rely on that external assumption. Fixed `/^node:/i` (defense-in-depth, matching the file's own belt-and-suspenders scrub) + an outcome-pin regression test; the `getBuiltinModule` scrub stays the primary guard (`e694edf`). |
 
-### External dogfood (2026-06-30) — tracegram
+### External dogfood (2026-06-30) — running it on an external project (dogfooding)
 
-First use of whetstone on a real external target (the Python `tracegram` repo) surfaced a portability
+First use of whetstone on a real external target (a Python project) surfaced a portability
 gap invisible from inside (whetstone's own suite is all node:test). Full friction log:
 [`dogfood-tracegram.md`](./dogfood-tracegram.md).
 
 | ID | Axis | Sev | File(s) | Status | Note / provenance |
 |----|------|-----|---------|--------|-------------------|
-| DF-01 | portability | HIGH | `scorers/test-pass-rate.mjs` | fixed | The "most portable scorer" parsed **only** node:test output (`ℹ pass N`) end-to-end — count regex, `✖ failing tests:` detail marker, `--test-name-pattern`. A pytest run errored at the scorer (`could not parse pass/fail counts`, 0 tokens, editor never spawned). Made multi-runner via TDD (5 RED→GREEN): `parseCounts()` node-first then pytest (`N passed/failed`, collection `N error`=failure); `failureDetail()`/`failingNames()` pytest branches. 999/999 green, coverage ≥ ratchet (branch 83.48→83.52), scorer not invariant. End-to-end: bundled scorer on real tracegram pytest → score 100. Branch `feat/portable-test-scorer`. |
+| DF-01 | portability | HIGH | `scorers/test-pass-rate.mjs` | fixed | The "most portable scorer" parsed **only** node:test output (`ℹ pass N`) end-to-end — count regex, `✖ failing tests:` detail marker, `--test-name-pattern`. A pytest run errored at the scorer (`could not parse pass/fail counts`, 0 tokens, editor never spawned). Made multi-runner via TDD (5 RED→GREEN): `parseCounts()` node-first then pytest (`N passed/failed`, collection `N error`=failure); `failureDetail()`/`failingNames()` pytest branches. 999/999 green, coverage ≥ ratchet (branch 83.48→83.52), scorer not invariant. End-to-end: bundled scorer on a real external project's pytest → score 100. Branch `feat/portable-test-scorer`. |
 
 ---
 

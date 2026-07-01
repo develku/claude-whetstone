@@ -82,7 +82,7 @@ The field splits into four camps; whetstone occupies a fifth that is rare in pra
 
 **Cross-model note (codex, Q4 — AGREE):** codex agrees with this section's core conclusion across all four capabilities — each is feasible **only inside the "has a faithful measurable scorer" boundary**, and the hard blocker is scorer **sufficiency** (and, per codex's biggest-risk, scorer **integrity against indirect capture**), *not* loop mechanics. The condition is stricter than "a scorer exists": the scorer must be faithful, stable, isolated, cheap enough, AND hard to game.
 
-### Self-engineering / dogfooding
+### Self-engineering / dogfooding (running it on its own codebase)
 **Requirement:** a faithful scorer for whetstone's *own* codebase (it already has 509 green tests + $0 ledgers + real-model elicitation benches — a genuinely strong oracle by the standards of this domain). The DGM/HGM/Live-SWE-agent genre proves a measured score *can* drive self-modification (SWE-bench 20%→50% for DGM; HGM 61.4%).
 **Hard blockers/risks:** (1) **Myopia.** HGM's central lesson — Clade-Metaproductivity, that immediate-score selection mis-ranks long-horizon value (correlation 0.285–0.444 for naive score-following) — is a direct warning: whetstone's per-pass score is a myopic proxy, and self-engineering against it risks optimizing the loop into its own scorer's blind spots. (2) **Read-only guard on its own gate** is load-bearing and must hold under self-edit (the scope mode already hard-reverts edits to tests/scorer — good, but this is the highest-stakes invariant). **Self-engineering is also the worst-case scorer-capture surface (codex):** the editor *is* the system that writes the artifacts a self-scorer reads, so indirect capture is most acute exactly here. (3) **The seven invariant files** must stay untouched; the overnight loop already demonstrated an investigation-only agent unexpectedly writing code — *review agent output as a PR, never trust it unreviewed* is a learned rule that must scale. **Verdict: feasible and partly demonstrated, but the riskiest of the four — the system grading its own gate is the canonical reward-hacking setup, mitigated only by the code-owned invariant boundary, and that boundary does not yet cover indirect capture.**
 
@@ -167,7 +167,7 @@ The landscape still supplies the proof for the C-before-B half: every system tha
 
 ## 9. Cross-model (codex) critique
 
-**Provenance (verbatim):** `model: gpt-5.5 (codex CLI default; the --json event stream emits only thread.started with no model field, so model id is the configured codex default per task brief); thread_id: 019f0b84-a7e4-7db2-811b-e7d4850978c9`. Codex leg: AVAILABLE and executed.
+**Provenance:** cross-model critique by a second model. Cross-model leg: AVAILABLE and executed.
 
 ### Per-question dispositions
 
@@ -198,7 +198,7 @@ Codex **corroborates the central thesis** (code-owned measured gate is the right
 
 ## 10. Product Positioning — the Workflow + Loop-Engineer Fusion
 
-> Sections 1–9 judged whetstone as a *loop-engineering driver* — a single-artifact tool on a research-grade axis. This section re-frames it through the operator's stated **product** lens: the fused tool. The competitive verdict shifts, but the conclusions do not invert — they sharpen the same sequencing the report already argued.
+> Sections 1–9 judged whetstone as a *loop-engineering driver* — a single-artifact tool on a research-grade axis. This section re-frames it through the maintainer's stated **product** lens: the fused tool. The competitive verdict shifts, but the conclusions do not invert — they sharpen the same sequencing the report already argued.
 >
 > **Editor's note (verify before external use):** several recent citations in this section are web-research claims from the synthesis agent and are NOT independently verified — notably *SpecBench (arXiv 2605.21384)*, *Cursor 3 / "35% agent-written PRs"*, and the Workflow tool's *GA date / v2.1.154+ / entitlement tiers*. The structural argument is sound; spot-check the specific numbers/IDs before quoting them.
 
@@ -231,7 +231,7 @@ The external literature says that cession to a human/model judge is where qualit
 - **Orchestration breadth** — the single biggest gap. Whetstone has only a *reactive sequential seed* (decompose fires on a plateau, one child per scorer finding). Competitors ship 10–16 parallel agents and whole-repo/500-file fan-out as baseline.
 - **Cloud/managed infrastructure** — Devin/Cursor/Copilot run agents in hosted isolated VMs/sandboxes; whetstone runs on the user's own terminal/quota with no provisioning or scaling.
 - **Rich PR/artifact UX** — Cursor attaches video/screenshots/logs to PRs; Copilot is PR/issue-native; Workflow has a live progress TUI. Whetstone is headless CLI with no comparable review surface.
-- **Distribution & adoption proof** — competitors live where developers already are (PRs, the IDE) with public proof (Cursor: 35% of its own merged PRs are agent-written; Devin: hundreds of thousands of merged PRs). Whetstone is effectively unranked, single-operator, zero external users.
+- **Distribution & adoption proof** — competitors live where developers already are (PRs, the IDE) with public proof (Cursor: 35% of its own merged PRs are agent-written; Devin: hundreds of thousands of merged PRs). Whetstone is effectively unranked, single-maintainer, zero external users.
 - **An external benchmark NUMBER** — whetstone's lone credible lead (the verifier-lifecycle / self-hardening gate) has no third-party score (a SpecBench-style visible-vs-held-out gap, or SWE-bench). Without a number the differentiator — and the "empty intersection" claim itself — is an *assertion, not a proof*; this is the recommended pre-planner hardening milestone.
 - **Repo-scale global convergence gate** — the measured gate is proven on single-file and per-file (scope) modes; a repo-wide deterministic floor + global convergence (track C) is not yet shipped and must precede the planner (track A).
 - **Permissions/safety UX for unattended breadth** — allowlist/sandbox/kill-switch ergonomics that competitors already provide (Actions human-approval gate, VM isolation, self-host options).
@@ -264,7 +264,7 @@ The product lens does not introduce a new conclusion — it **raises the stakes 
 
 ### 10.x Cross-model (codex) critique
 
-**Provenance.** `codex exec -s read-only --json`, thread_id `019f0bbb-2b26-70f3-8581-ec6aba12e068`, exit 0 (output `/tmp/wf_plens_last.txt`, 4114 bytes; prompt `/tmp/wf_plens_prompt.txt`, 18066 bytes). Available: yes.
+**Provenance.** Cross-model critique run read-only, exit 0. Available: yes.
 
 **Overall verdict on the fork — AGREE.** Reimplement orchestration control as the portable default; do NOT make Workflow the orchestrator or gate-owner; keep Workflow as a possible *attended* `act` backend only after the gate is hardened and repo-scale convergence exists. One verbatim caveat, load-bearing and folded into §10.4: *"I would soften 'reimplement Workflow-style breadth' into 'reimplement the minimum portable control plane needed for measured repo convergence.' Full Workflow parity is a trap. The differentiated asset is not fan-out; it is fan-out under a durable code-owned gate."*
 
@@ -277,3 +277,28 @@ The product lens does not introduce a new conclusion — it **raises the stakes 
 - **Q3 (missed risk / competitor move) — REFINE.** The draft named Anthropic absorption but underweighted a nastier, more probable move: **GitHub/Copilot or Cursor turns the measured gate into a native PR/CI required-check loop** (agent opens PR → Actions runs hidden/held-out/mutation/scorer checks → agent loops until target passes → branch protection still requires human approval → enterprise buyers keep governance). This is more dangerous than Devin copying the verifier idea because it reframes "code-owned done" as just another required check, not a standalone category, and it blunts the "human PR gate is the anti-pattern" framing (*"for many teams, human approval is not a weakness; it is governance"*). Positioning fix (applied in §10.5 item 3): **sell stronger merge-readiness evidence, not the replacement of human review.**
 
 **Biggest product risk (codex, verbatim core).** *"An incumbent with distribution ships whetstone's gate as a feature before whetstone proves the gate is uniquely valuable."* Most dangerous concrete version: GitHub/Copilot or Anthropic adds **durable resume PLUS external scorer/target hooks**, making measured convergence a native CI/agent required-check — *"Then whetstone is left with the hardest work already copied, but without distribution, hosted infra, or benchmark proof."* This sharpens the report's standing conclusion: the external benchmark number, not the planner, is the urgent next move — it is the only artifact that proves the gate is worth more than a commodity required-check before an incumbent ships one.
+
+## 11. 2026-06-30 Reconciliation — what the post-report build-out actually closed
+
+Between 2026-06-28 and 2026-06-30, **102 commits** landed (v1.0.0 + v1.1.0). This section reconciles §3–§5's gap list against the *shipped* code, verified by a 10-agent adversarial pass (each gap checked against source, defaulting to "not closed" unless the evidence was strong). **Net: 1 CLOSED · 5 PARTIAL · 4 OPEN** — the engineering arcs were built, but almost none *close* a gap in the competitive sense, because every new layer is deliberately fenced as `alpha`/`experimental`/`unproven` and the one rank-moving lever (an external number) is still absent.
+
+| Gap (§3–§5) | Built | Verdict | Note |
+|---|---|---|---|
+| Planner / orchestration | Track A + outer/replan | **PARTIAL** | reactive, human-gated proposal-only, alpha, bin-unregistered — not a proactive orchestrator |
+| Single-artifact | scope + converge | **PARTIAL** | scope=Experimental, converge=Alpha, excluded from the `/whet` launcher |
+| Global convergence (C gate) | Track C `globalVerdict` + mandatory floor | **PARTIAL** | gate code + deterministic floor shipped & tested, but per-objective *disjoint editScope* only — not whole-repo shared-source convergence |
+| Scorer capture (§9 #1 risk) | H2 nonce fence | **PARTIAL** | DIRECT prompt-injection blocked on llm-judge + scope-act; INDIRECT capture (artifact-reading deterministic scorers, logs, context) still open; one crude real-model red-team only |
+| Pointwise-admit hole | mutation-admit | **PARTIAL** | fully built + tested but **opt-in** (`--forge-mutation-admit`), not DEFAULT as §7 required |
+| io-* import-capture (post-report CRITICAL #2) | out-of-process isolation | **CLOSED** | iso-runner child + nonce frame + canonical-data; 41 isolation tests + exploit archive + 77-attack red-team, 0 holes |
+| External benchmark number | SWE-EVO harness only | **OPEN** | harness built + Docker-validated, never run to a number; no external figure exists |
+| External-IO behavioural scorers | — | **OPEN** | DATA-only by design; files/network/process explicitly out of scope |
+| JS-centric behavioural depth | — | **OPEN** | all io-* depend on Node APIs; zero porting commits |
+| External adoption | v1.0.0/v1.1.0 shipped | **OPEN** | single-maintainer, zero external users/PRs; releases are honest *about* the gap, not a fix *of* it |
+
+**Two record corrections:**
+1. **io-* out-of-process isolation is a genuine new closure** the original report did not cover (it was a post-report CRITICAL, #2). It is the single fully-closed item and a security property no surveyed competitor ships.
+2. **The H1 "shelved for cost" decision was session-recorded, not committed.** The cost audit (one editor pass ≈ 2.0–2.7M tokens / $1.82–3.10; a full 4×18 run ≈ $300+, exceeding the 2M `--budget-tokens` so the loop runs a single pass → V=0) is real but lived only in the maintainer's memory; the committed repo shows the harness as *built and unexecuted*. Recording it here closes that provenance gap.
+
+**Net verdict — unchanged rank, moved bottleneck.** The report's "early spike, arcs unbuilt" framing is now stale: whetstone is repo-wide-capable, multi-objective, self-hardening, and dynamically orchestrated *in code*. But the external ranking is unmoved — the lever that would move it (one contamination-resistant benchmark number) is still OPEN, and the maintainer's own honest tiering withholds every new layer from the supported surface "until an external benchmark proves them." The bottleneck has moved from **engineering → validation**. The standing recommendation holds and sharpens: **do not build more arcs; get one cheap external number, and accumulate real-usage evidence by running the stable `driver` tier on real work.**
+
+*Method: adversarial verification workflow (10 Explore agents, source-grounded, skeptic-default), run 2026-06-30 (`wf_4a91214d-b36`).*
