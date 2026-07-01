@@ -15,7 +15,7 @@ const sha256 = (p) => createHash('sha256').update(readFileSync(join(root, p))).d
 // part of that deliberate, reviewed change, never to silence a surprise. NOTE (scope): this is a byte-drift
 // tripwire that FORCES a surprise core edit into deliberate review — NOT a runtime/security boundary (the hash
 // is dev-updatable) and NOT a semantic-soundness guarantee (it can't see drift via callers/scorer inputs/new
-// paths that bypass the gate). src/gate.mjs added per DCA 20260629T221942 (#8): loop.mjs was pinned but
+// paths that bypass the gate). src/gate.mjs added per a cross-model design review (#8): loop.mjs was pinned but
 // imports its verdict fn (gateVerdict/validScore) from the then-unpinned gate — the actual "code owns the gate" core.
 const INVARIANT = {
   'src/gate.mjs': 'b0cb2139ef36bbed304e6a6cf10e9ed02209e3488fd6ce03b4079d2f3819ac11',

@@ -4,7 +4,7 @@ import { assembleReplanManifest, replanTruthPreserved, replanGoal, proposeReplan
 
 // --- Inc 3b: automate the re-decomposition PROPOSAL on a stall — proposer-only, HUMAN-ONLY acceptance, and the
 // immutable GLOBAL held-out truth is CARRIED VERBATIM (a replan revises the decomposition, never the truth bar).
-// DCA 20260629T141245 Option B. proposeReplan NEVER runs converge; it returns a manifest for human review.
+// a cross-model design review, Option B. proposeReplan NEVER runs converge; it returns a manifest for human review.
 
 const PRIOR = {
   goal: 'achieve the feature',

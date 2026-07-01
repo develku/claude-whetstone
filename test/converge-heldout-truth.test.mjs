@@ -12,7 +12,7 @@ import { runConverge, prepareGlobalResume } from '../src/converge.mjs'
 // --- Inc 3a: the operator-authored, replan-IMMUTABLE GLOBAL held-out truth gate ---
 // A top-level acceptance requirement SEPARATE from the per-objective confirms: even if every (mutable) objective
 // is met, `done` is withheld unless the operator's immutable global held-out truth also passes. This is the
-// semantic backstop against "decomposition capture" (DCA 20260629T141245).
+// semantic backstop against "decomposition capture" (per a cross-model design review).
 
 const base = (over = {}) => ({
   objectives: [{ id: 'a', judgeClass: false, primaryScore: 100, confirmScore: null, target: 90 }],

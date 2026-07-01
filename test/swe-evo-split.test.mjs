@@ -1,6 +1,6 @@
 // test/swe-evo-split.test.mjs
 // Pins the V/C/T behaviour-cluster split for the SWE-EVO benchmark adapter (H1).
-// codex review (REVISE, thread 019f0bf3…) required: hold out WHOLE behaviour clusters at FILE level
+// Codex review (REVISE) required: hold out WHOLE behaviour clusters at FILE level
 // (so C/T test bodies can be physically removed from the editor's tree — clean source isolation),
 // exclude tasks with < 3 FAIL_TO_PASS files, keep V/C/T disjoint, and be deterministic.
 import { test } from 'node:test'
