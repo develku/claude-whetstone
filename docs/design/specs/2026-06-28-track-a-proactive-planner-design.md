@@ -6,7 +6,7 @@ provenance:
   brainstorm: attended (operator decisions A1–A5 below)
   design_workflow: wf_a14fc97b-8c8 (7 design lenses + 3 adversarial refuters + 1 completeness critic; 11 agents, 1.3M tokens). Synthesized BY HAND from the journal (the Track-B lesson: never trust a degraded synthesis agent).
   adversarial_findings_folded: G1–G15 (completeness critic) + BREAK#1/#2 (safety-capture refuter: tautological io-* cases, provenance lie, G8 math) + BREAK#1/#2/#3 (coverage refuter: reMeasureAll red-repo brick, barbell scorer-misassignment, root-editScope canonicalization) + BREAK#1/#2/#3 (night-run refuter: test-pass-rate shell scorer, unguarded floor.cmd, git-stash hidden state).
-  builds_on: Track C (docs/superpowers/specs/2026-06-28-track-c-global-convergence-design.md) + Track B (docs/superpowers/specs/2026-06-28-track-b-concurrency-design.md), HEAD 270b7c1
+  builds_on: Track C (docs/design/specs/2026-06-28-track-c-global-convergence-design.md) + Track B (docs/design/specs/2026-06-28-track-b-concurrency-design.md), HEAD 270b7c1
 ---
 
 # Track A — Proactive Allowlist-Bound Model Planner
@@ -179,7 +179,7 @@ Each increment: RED test first → implement the named module → **full `node -
 - **Verify gate (the per-increment "done"):** `node --test test/*.test.mjs` ALL green (includes the `converge-invariant` baked-sha256 tripwire). If RED → do NOT commit, do NOT proceed.
 - **NO `git stash`, NO skip-to-"independent".** `git stash` is hidden state outside `git log` (refuter night BREAK#3); the increment DAG is linear (inc 0→9). On a blocked increment: **STOP the session entirely**, leave the WIP uncommitted with a one-line BLOCKED note, and leave it for the operator. Do NOT barrel to later increments.
 - **Resume point:** the first increment whose commit is not in `git log`. Each committed increment is a clean checkpoint (green suite at commit time).
-- **STOP-list (do NOT do autonomously even in bypass):** edit any of the 7 invariant files; edit any `converge-*.mjs` EXCEPT inc 0's named additive thread; change gate semantics; reopen the H3 DCA; let a model author a scorer command, a judge rubric, or `floor.cmd`; add a shell scorer to the allowlist; flip `objectives_sufficiency`. Hitting any of these → STOP and leave for the operator.
+- **STOP-list (do NOT do autonomously even in bypass):** edit any of the 7 invariant files; edit any `converge-*.mjs` EXCEPT inc 0's named additive thread; change gate semantics; reopen the H3 cross-model design review; let a model author a scorer command, a judge rubric, or `floor.cmd`; add a shell scorer to the allowlist; flip `objectives_sufficiency`. Hitting any of these → STOP and leave for the operator.
 - **Spend:** inc 0–8 are $0 (pure + injected spawn + stub child + real git/fs). Only inc 9's PAID arm spends, gated behind its $0 `--stub` arm, run LAST as a terminal background job.
 - **Commit-per-increment to `main`** (the established rhythm); never bundle destructive git ops.
 

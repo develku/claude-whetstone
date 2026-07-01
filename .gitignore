@@ -14,5 +14,5 @@ bench/reports/
 # only the small PINNED.json manifest is tracked.
 bench/swe-evo/data/instances-*.json
 
-# Tier-3 plan files — ephemeral per-session reasoning trace; design intent lives in docs/superpowers/specs/ (tracked)
-docs/superpowers/plans/
+# Tier-3 plan files — ephemeral per-session reasoning trace; design intent lives in docs/design/specs/ (tracked)
+docs/design/plans/

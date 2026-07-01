@@ -253,7 +253,7 @@ EXPLOIT ARTIFACTS — the candidate must be FAIL-SAFE (never report pass) on eac
 dodge hole. The archive's exports are NON-CALLABLE (so behavioural checks always error→survive — zero false
 rejection); the active bite is a brittle `contains` check whose needle is a generic token present as DEAD TEXT in
 `text-rich-broken`. Opt-in: `--forge-exploit-regression`. (Design:
-`docs/superpowers/specs/2026-06-28-verifier-forge-exploit-regression-design.md`; codex review folded the framing —
+`docs/design/specs/2026-06-28-verifier-forge-exploit-regression-design.md`; codex review folded the framing —
 this is known-exploit REGRESSION survival over a finite archive, NOT taxonomy closure; the read-only "isolation"
 is a regression test, not a sandbox guarantee.)
 
@@ -282,7 +282,7 @@ return is `undefined`. `scorers/io-effect.mjs` asserts the POST-CALL STATE of a 
 --expect-sink '<JSON>' [--expect-returns '<JSON [...]>']`. SECURITY: the artifact controls the sink, so the
 post-call state is read by a strict own-data-property walker (`canonicalData`), NOT `JSON.stringify` — it never
 invokes a getter or `toJSON` and rejects accessors / non-plain prototypes / symbols / BigInt / cycles, so a gamed
-artifact cannot forge the observed state. (Design: `docs/superpowers/specs/2026-06-28-verifier-forge-io-effect-design.md`;
+artifact cannot forge the observed state. (Design: `docs/design/specs/2026-06-28-verifier-forge-io-effect-design.md`;
 codex review folded the toJSON/getter forge defense; power-code-reviewer 0 CRITICAL/HIGH, 2 MEDIUM fixed.)
 
 ```bash
@@ -313,7 +313,7 @@ base gate first (so it can never be MORE permissive) and then also requires the 
 (default 0.75) of an **oracle-confirmed mutant neighbourhood** of the good artifact (`src/forge/mutate.mjs`).
 Equivalent/non-parsing mutants are excluded by the 2a oracle-filter, NOT by candidate I/O. A candidate CRASH is
 NOT a kill (codex finding 3). Opt-in: `--forge-mutation-admit` (requires `--forge-oracle`) `[--forge-mutation-threshold 0.75]`.
-(Design: `docs/superpowers/specs/2026-06-28-verifier-forge-mutation-backed-admit-design.md`; codex cross-model
+(Design: `docs/design/specs/2026-06-28-verifier-forge-mutation-backed-admit-design.md`; codex cross-model
 review, verdict directionally-good — 9 findings folded: classify pass|reject|error|flaky, crash≠kill, reproducible
 oracle usability, FILE-mode guard enforced, no-oracle config error, etc.)
 
@@ -371,7 +371,7 @@ non-code, then path — never excludes, only sets truncation priority), learns f
 (default 8) and SURFACES the rest as a coverage gap (`coverageComplete`/`skippedFiles` + a `log()` line, not a
 silent drop). `admitCheck` is the correctness filter for free — a refactor-only file's candidates pass good AND
 bad, so it's rejected; only gamed files yield stored checks. A per-file `runForge` that throws is isolated to a
-`perFile` `status:'error'` entry without aborting the fire. (Design: `docs/superpowers/specs/2026-06-27-verifier-forge-scope-multifile-design.md`,
+`perFile` `status:'error'` entry without aborting the fire. (Design: `docs/design/specs/2026-06-27-verifier-forge-scope-multifile-design.md`,
 codex-revised — codex corrected the false "cap never costs a catch" claim, hence the honest coverage signal.)
 
 **$0 ledger** (`forge-scope-ledger.mjs`, `multi(double+max)` scenario): a 2-gamed-file recovery **learns 2/2**

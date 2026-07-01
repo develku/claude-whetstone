@@ -8,7 +8,7 @@
 //   capability     — V scorer = the FULL suite (oracle upper bound, NOT an external SWE-EVO number)
 // Outputs, all on T (identifiable because T is held out from EVERY arm): (confirm)-(baseline) = the
 // confirm contribution; (confirm-forge)-(confirm) = the forge's marginal; (confirm-forge)-(baseline) =
-// the full gate's ΔFix-Rate. See docs/superpowers/specs/2026-06-28-h1-benchmark-adapter-design.md §3.
+// the full gate's ΔFix-Rate. See docs/design/specs/2026-06-28-h1-benchmark-adapter-design.md §3.
 //
 // This module is the ORCHESTRATION + command construction + truth grading — all $0-testable via injected
 // seams (setupInstance / runArm / gradeTruthFn). The real seams (docker checkout, spawn scope-cli, spawn
