@@ -44,7 +44,7 @@ different-strategy* edit (still one file) rather than a pricier version of the s
 strength must change the edit STRATEGY, not just the model name. No retry ladder: one decisive
 jump, because a plateau is evidence the cheaper config is already exhausted at this point.
 Strength rises on BOTH dials in that one jump: the rescue editor steps **effort** up to a `high`
-**floor** (`RESCUE_EFFORT` via `editorEffort` — never *below* the operator's `--effort`, so escalation
+**floor** (`RESCUE_EFFORT` via `editorEffort` — never *below* your `--effort`, so escalation
 only ever raises or holds effort), while forward passes run at `--effort` (default `medium`, validated against
 `low|medium|high|xhigh|max`). Editing is the easy half, so the editor stays cheap and `max` is
 reserved for a judge scorer or a deliberate deep-stall override — never a fixed `max` every pass
@@ -116,7 +116,7 @@ regression recovery, best-pass restore, and convergence study.
 
 ## Configuration (persistent defaults)
 
-The cost/model knobs an operator repeats every run can live in a JSON config so they aren't retyped.
+The cost/model knobs you repeat every run can live in a JSON config so they aren't retyped.
 `loadConfig` reads `~/.config/whetstone/config.json` (personal) then `./whetstone.config.json`
 (project — wins on conflict) and hands the merged object to `parseCli` as its defaults. Precedence:
 **CLI flag > config file > built-in default**. Recognized keys (camelCase): `budgetTokens`,
@@ -126,7 +126,7 @@ defaults. This is the answer to "`--budget-tokens` is awkward to size by hand" �
 pass burns ~100–150K tokens, so a per-run budget is roughly `cap × 150000`). Example:
 `examples/whetstone.config.json`.
 
-## Open questions for the dogfooding phase
+## Open questions for the self-hosting phase (running whetstone on its own codebase — dogfooding)
 
 - Cost control: wire `--mcp-config <empty>` by default? detect OAuth vs API-key auth?
 - Regression policy: **decided — keep-best is the enforced default.** `restoreTarget`

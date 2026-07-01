@@ -41,7 +41,7 @@
   <rect x="836" y="199" width="72" height="17" rx="5" fill="none" stroke="#D08770" stroke-width="1"/><text x="872" y="211" font-size="10" fill="#D08770" text-anchor="middle">ALPHA</text>
   <circle cx="92" cy="234" r="4.5" fill="#81A1C1"/><text x="103" y="238" font-size="11" fill="#CED4DE">globalVerdict = AND of every objective MET (never min) · mandatory deterministic floor</text>
   <circle cx="92" cy="252" r="4.5" fill="#81A1C1"/><text x="103" y="256" font-size="11" fill="#CED4DE">tournament  --candidates K  → winner picked on the HELD-OUT signal · winner's-curse guard</text>
-  <circle cx="92" cy="270" r="4.5" fill="#B48EAD"/><text x="103" y="274" font-size="11" fill="#CED4DE">global held-out truth: operator-authored · SHA-pinned · immutable · outside every editScope</text>
+  <circle cx="92" cy="270" r="4.5" fill="#B48EAD"/><text x="103" y="274" font-size="11" fill="#CED4DE">global held-out truth: user-authored · SHA-pinned · immutable · outside every editScope</text>
   <circle cx="92" cy="288" r="4.5" fill="#B48EAD"/><text x="103" y="292" font-size="11" fill="#CED4DE">--parallel batched fan-out (N objectives → 1 gated round) · diagnostics (advisory) · replan = proposer-only, human accepts</text>
 
   <!-- ===== EXPERIMENTAL · SCOPE + FORGE ===== -->

@@ -1,7 +1,7 @@
 # whetstone-scope — open-ended repo-agent orchestrator design
 
 > Status: **shipped** — MVP + v1 scope loop merged (PR #1), and the v2 planner tier (`decompose.mjs`)
-> merged 2026-06-25 (implementation spec: `docs/superpowers/specs/2026-06-25-decompose-v2-design.md`).
+> merged 2026-06-25 (implementation spec: `docs/design/specs/2026-06-25-decompose-v2-design.md`).
 > Build order was MVP → v1 → v2. Produced by a 6-agent design workflow (4 candidate architectures →
 > judge → synthesis; run `wf_bae667c2`). This file is the durable plan; commit bodies carry per-step provenance.
 
@@ -43,7 +43,7 @@ the scorer CLI contract + `composite`/`parseSubResult`/`combine` (already N-sign
   min over test/lint/typecheck). `runLoop` drives it unchanged; `gateVerdict` decides done/plateau/capped;
   keep-best rolls a regressing pass back via git.
 - **GUARDRAIL (load-bearing for detached):** refuse to start on a dirty tree the orchestrator did not
-  create, or scope to its own branch — else an unattended git restore clobbers the operator's uncommitted
+  create, or scope to its own branch — else an unattended git restore clobbers your uncommitted
   work.
 - This is a complete, useful product (take a repo red → green, unattended) but is **NOT yet an
   orchestrator** and must be labeled so.
@@ -61,7 +61,7 @@ sub-findings is necessary but **never sufficient**. If the scorer emits only a s
 
 **Project-level done stays code-owned:** at every level `done == project scorer's score >= target_score`,
 computed by `gateVerdict` over numbers a code-owned command produced. `target_score` and the verify
-command set are operator-frozen at launch (not in resume's overridable list) so the model cannot move
+command set are frozen by the maintainer at launch (not in resume's overridable list) so the model cannot move
 goalposts mid-run.
 
 ## Phased plan
@@ -123,7 +123,7 @@ gate, not the hands.**
 1. **Editor edits the gate it is scored by — direct moat breach.** Tests + scorer config MUST be
    READ-ONLY, outside the editable scope. Highest severity.
 2. **git keep-best correctness + worktree safety.** commit/stash + reset-to-ref must be airtight; an
-   unattended restore can clobber the operator's uncommitted work → hard clean-tree-or-own-branch guard.
+   unattended restore can clobber your uncommitted work → hard clean-tree-or-own-branch guard.
    The single riskiest net-new piece; load-bearing for detached operation.
 3. Open-ended target is a proxy (green-but-thin) — mitigate, not solvable.
 4. Decomposition coverage gap (v2) — defended by the whole-repo re-measure, not eliminated.
@@ -133,11 +133,11 @@ gate, not the hands.**
 7. Coarse-signal honesty gap — no findings → no decomposition → honest plateau (may disappoint).
 8. Moat downgrade for judge-only goals — keep a deterministic floor in the min-composite.
 
-## North star — self-hosting (the operator's intent)
+## North star — self-hosting (the maintainer's intent)
 
 Once the MVP/v1 exists, use **whetstone-scope to finish whetstone-scope** — an unattended overnight run
 that edits this repo toward a green gate and **self-commits each best pass** (git keep-best *is*
-self-commit). The ultimate dogfood: the loop building the loop, with the code-owned gate (not the model)
+self-commit). The ultimate self-hosting test: the loop building the loop, with the code-owned gate (not the model)
 deciding when a night's work is actually done. v1's git-commit-per-best-pass + detached operation are
 exactly what this needs; the held-out confirm suite is what makes an unattended self-edit trustworthy.
 

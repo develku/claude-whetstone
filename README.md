@@ -71,7 +71,7 @@ layers are unsupported and two seats stay human. From the bottom up:
 
 <p align="center">
   <img src="assets/whetstone-architecture.svg" width="900"
-       alt="The whetstone architecture as a stack of layers under one code-owned gate. Intake & launcher routes a request and blocks without a cost ceiling. The stable single-objective inner loop (baseline → ACT → observe+score → keep-best → GATE, five verdicts, only running loops back) is the core. The experimental whole-repo scope loop applies the same gate to a --scope dir with git-backed keep-best and the Forge per-file verifier learner. The alpha dynamic control plane (converge) adds multi-objective AND-gating, a tournament, an operator-authored hash-pinned global held-out truth, and a human-accepted replan. A cross-cutting scorers & isolation layer produces the 0–100 number the gate reads at every layer.">
+       alt="The whetstone architecture as a stack of layers under one code-owned gate. Intake & launcher routes a request and blocks without a cost ceiling. The stable single-objective inner loop (baseline → ACT → observe+score → keep-best → GATE, five verdicts, only running loops back) is the core. The experimental whole-repo scope loop applies the same gate to a --scope dir with git-backed keep-best and the Forge per-file verifier learner. The alpha dynamic control plane (converge) adds multi-objective AND-gating, a tournament, a user-authored hash-pinned global held-out truth, and a human-accepted replan. A cross-cutting scorers & isolation layer produces the 0–100 number the gate reads at every layer.">
 </p>
 
 | Layer | Adds | Gate owner | Keep-best unit |
@@ -112,7 +112,7 @@ held-out truth, and accepting a structural replan.
 | Surface | What it adds | Safety |
 |---|---|---|
 | **tournament** (`converge --candidates K`) | K independent candidate editors per objective; the winner is picked on the **held-out** signal, never the gameable visible score | defeats the *winner's curse* (max-over-N on a soft gate optimizes into its blind spots); the held-out bar can never be lowered |
-| **global held-out truth gate** (`global_held_out` in a converge manifest) | a top-level acceptance check **separate** from the per-objective confirms — `done` requires it too | backstops *decomposition capture* (every objective met yet the real goal unmet); operator-authored, run-immutable (hash-pinned), outside every editScope |
+| **global held-out truth gate** (`global_held_out` in a converge manifest) | a top-level acceptance check **separate** from the per-objective confirms — `done` requires it too | backstops *decomposition capture* (every objective met yet the real goal unmet); user-authored, run-immutable (hash-pinned), outside every editScope |
 | **structural-feedback detector** (`converge-diagnostics`) | classifies a stalled run: `held_out_fail` / `contradiction` / `impossibility` / `plateau` | diagnostic only — never an authority over the gate |
 | **replan proposal** (`replan-cli` / `outer-cli`) | on a decomposition-fault stall, a model proposes a **different** decomposition | proposer-only: the proposal is *written for human review*, never auto-applied; the immutable truth is carried verbatim |
 
