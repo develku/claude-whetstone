@@ -43,7 +43,11 @@ Collect these (use AskUserQuestion; treat any other inline `$ARGUMENTS` text as 
    system-prompt tax plus cache), so a small number caps after a single pass. Persistent defaults for
    these knobs (`budgetTokens`, `budgetUsd`, `hardCap`, `model`, `effort`) can live in
    `~/.config/whetstone/config.json` or `./whetstone.config.json` (the driver loads them; CLI flags
-   override) — values the config already supplies don't need to be re-asked.
+   override) — values the config already supplies don't need to be re-asked. Treat the loaded config
+   as the **starting point**, then propose a **per-task delta** on top of it. When your proposal
+   differs from a value the config supplies (e.g. a tight `--cap 3` for a one-shot doc edit vs. a
+   configured `hardCap: 40`), **state the delta and the reason in the run-plan** — never silently
+   override the operator's configured standard.
 6. **model** — default `sonnet`; suggest `haiku` for mechanical artifacts; warn that `opus`
    is ~$0.22+/call.
 
@@ -66,7 +70,10 @@ string (the flag soup is what users find unfriendly):
 
 Show the **exact command in a fenced block *below* the summary** (transparency — the user must be
 able to see precisely what will run), then ask for explicit confirmation with AskUserQuestion.
-Only after they confirm, run it with Bash. Pass an **absolute** `--artifact` and an absolute
+The confirmation is a **go / adjust** decision on the assembled plan — *Run it*, or *Adjust a knob*
+(scorer/target/cap/budget/model). Do **not** offer "edit the file directly instead" or "don't use
+whet" as options: invoking `/whet` already chose the loop. Declining the go/no-go is the abort path;
+no tool re-vote. Only after they confirm, run it with Bash. Pass an **absolute** `--artifact` and an absolute
 `--loop-dir <dir>` to choose where the `.loop/` run state lands, so the run does not depend on the cwd:
 
 ```
