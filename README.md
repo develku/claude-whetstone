@@ -14,6 +14,24 @@ A deterministic <b>loop-engineering</b> driver for Claude Code: <b>code owns the
 > end-to-end, not speculative. Requires **Node ≥ 23.5** — the behavioural scorers isolate untrusted code
 > with `module.registerHooks` + the Permission Model. See [What's stable in v1](#whats-stable-in-v1).
 
+## Introduction
+
+whetstone is easy to mistake for two adjacent things it isn't:
+
+- **Not a soft/goal-seeking loop.** A prompt that says "keep going until it's good" lets the same
+  model that wants to stop decide whether it's done. whetstone's stop/continue decision belongs to
+  **code**, not the model — see [The one idea](#the-one-idea) for the mechanics.
+- **Not the Claude Code Workflow tool.** Workflow is deterministic multi-agent orchestration for an
+  *attended* session — it has no code-owned quality gate of its own. whetstone owns the gate on
+  *one artifact* and can run detached/unattended/cron; a Workflow script can optionally be dropped
+  in as its `act` backend, but Workflow is never the gate owner (see
+  [Backends & the Workflow tool](#backends--the-claude-code-workflow-tool)).
+
+The feature set built on top of that one gate: pluggable 0–100 scorers, automatic **keep-best**
+rollback when an edit makes things worse, a **plateau → one Opus escalation** before giving up,
+dual **token/USD budgets with crash-resume**, and an optional **confirm-scorer** layer that
+re-checks the artifact only at the done branch to catch reward-hacking.
+
 ## How the loop works
 
 ```mermaid
