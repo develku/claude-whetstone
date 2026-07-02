@@ -5,7 +5,7 @@
 // a multi-file editor with the read-only gate guard (scope-act), and git keep-best restore. The scope
 // dir is carried in cfg.artifactPath (the "artifact" is the directory).
 import { spawnSync } from 'node:child_process'
-import { readdirSync } from 'node:fs'
+import { readdirSync, realpathSync } from 'node:fs'
 import { dirname, basename, join, resolve as rpath, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isMainModule } from './is-main.mjs'
@@ -71,8 +71,14 @@ const SCORERS_DIR = rpath(dirname(fileURLToPath(import.meta.url)), '..', 'scorer
 // is shared with the Forge denylist (src/forge/hook.mjs) so the two trust boundaries cannot drift.
 // floor joins composite: its --cmd is an operator-provided shell command, so a decompose finding that named
 // it with a MODEL-chosen --cmd would reach a shell. Denied from both the AUTO set and operator extraPaths.
-const SUBGATE_UNSAFE = new Set(['composite', 'floor'])
-const SUBGATE_UNSAFE_PATHS = [join(SCORERS_DIR, 'composite.mjs'), join(SCORERS_DIR, 'floor.mjs')]
+// llm-judge joins them (DCA 20260702T110808): it takes a model-authored --rubric/--mcp-config and spawns
+// claude — a model-authored capability path with NO legitimate decompose sub-gate. This set is DELIBERATELY
+// narrower than the canonical SHELL_SCORERS (src/scorer-safety.mjs): test-pass-rate is EXCLUDED here because
+// it IS the legitimate per-test sub-gate — its --cmd is not model-trusted at the allowlist layer but PINNED
+// to the run's code-owned command by resolveSubGate's typed policy (src/decompose.mjs). Do NOT widen this to
+// SHELL_SCORERS wholesale (that would break decomposition); the two layers divide the labour.
+const SUBGATE_UNSAFE = new Set(['composite', 'floor', 'llm-judge'])
+const SUBGATE_UNSAFE_PATHS = [join(SCORERS_DIR, 'composite.mjs'), join(SCORERS_DIR, 'floor.mjs'), join(SCORERS_DIR, 'llm-judge.mjs')]
 
 // The scorer-id allowlist a child sub-gate is resolved against: every shipped scorer (by basename) plus
 // any operator-provided path via --scorer-allow. A finding can only ever name an id in this map [CR#4].
@@ -87,6 +93,37 @@ export function buildAllowlist(extraPaths = []) {
     m.set(basename(p).replace(/\.[^.]+$/, ''), rpath(p))
   }
   return m
+}
+
+// Trust boundary (DCA 20260702T110808 — defense-in-depth for the model-authored-scorer fence). The run dir
+// holds the review/findings files a plateau decompose reads back (src/decompose.mjs readLatestFindings). If it
+// nests INSIDE --scope, the editor — spawned `--permission-mode acceptEdits`, not fs-sandboxed — can overwrite
+// those files and author a finding. resolveSubGate's typed policy is the ROOT-cause fence; this guard removes
+// the precondition for ALL scope runs (not just --decompose) by refusing a run dir inside the scope, so the
+// default `.loop/` under `whet --scope .` fails loud instead of exposing the review file. Realpath-aware
+// (mirrors state.mjs safeSnapshotPath / safe-rel.mjs, NOT the lexical-only forgeStoreInsideScope): it also
+// catches a run dir reachable via a symlinked ancestor that resolves into the scope. It cannot catch a symlink
+// PLANTED mid-run (that residual is closed by resolveSubGate's --cmd pinning, not here).
+export function loopDirInsideScope(cfg) {
+  if (!cfg.scope || !cfg.loopDir) return false
+  const base = rpath(cfg.scope)
+  const loop = rpath(cfg.loopDir)
+  const inside = (b, p) => p === b || p.startsWith(b + sep)
+  if (inside(base, loop)) return true // lexical containment
+  // realpath re-check: the run dir usually does not exist yet, so resolve its DEEPEST EXISTING ancestor and
+  // re-attach the not-yet-created suffix; compare against the realpath'd scope (the scope may itself be a link).
+  let realBase; try { realBase = realpathSync(base) } catch { realBase = base }
+  let probe = loop; let rest = ''
+  while (probe !== dirname(probe)) {
+    try {
+      const realLoop = rest ? join(realpathSync(probe), rest) : realpathSync(probe)
+      return inside(realBase, realLoop)
+    } catch {
+      rest = rest ? join(basename(probe), rest) : basename(probe)
+      probe = dirname(probe)
+    }
+  }
+  return false
 }
 
 // The Verifier Forge IS supported on scope runs (per-file scope checks; src/forge/scope-hook.mjs, injected as
@@ -171,6 +208,10 @@ if (isMainModule(import.meta.url)) {
   const guard = cleanTreeGuard(cfg.scope)
   if (!guard.ok) {
     process.stderr.write(`refusing to start: ${guard.reason}\n`)
+    process.exit(2)
+  }
+  if (loopDirInsideScope(cfg)) {
+    process.stderr.write(`refusing to start: --loop-dir (${cfg.loopDir}) is inside --scope (${cfg.scope}). The editor can write inside the scope and would be able to overwrite the run's review/findings files — a model-authored-scorer risk. Pass --loop-dir <dir OUTSIDE the scope>.\n`)
     process.exit(2)
   }
   if (decomposeNeedsConfirm(cfg)) {

@@ -8,6 +8,7 @@ import { gateVerdict } from './gate.mjs'
 import { gitHead, gitTreeChanged, gitRestore } from './git-snapshot.mjs'
 import { scopeChanged } from './scope-act.mjs'
 import { shq } from './shq.mjs'
+import { SHELL_SCORERS } from './scorer-safety.mjs'
 
 const key = (f) => String(f?.area ?? '')
 
@@ -33,11 +34,25 @@ export function readLatestFindings(parentLoopDir, state) {
   }
 }
 
+// The one model-supplied DATUM a test-pass-rate sub-gate may carry: which test to narrow to (test-pass-rate
+// routes it to --test-name-pattern as a single-quoted literal regex, injection-safe). Everything else the
+// model wrote into the finding — crucially a --cmd — is DISCARDED. Returns null when the flag is absent.
+const argVal = (args, name) => { const i = args.indexOf(name); return i >= 0 && i + 1 < args.length ? args[i + 1] : null }
+
 // Build a child sub-gate from a finding, or null when it is not SAFELY decomposable. The scorer id is
 // resolved against an operator-owned allowlist (never executed as a raw string) and every arg is
-// shq-quoted [CR#4]; an optional scope must stay inside the repo [CR#5]. This is the whole injection
-// fence — a finding can only ever name a known scorer and pass quoted args to it.
-export function resolveSubGate(finding, { repoDir, allowlist }) {
+// shq-quoted [CR#4]; an optional scope must stay inside the repo [CR#5].
+//
+// TYPED SUB-GATE ARG POLICY (DCA 20260702T110808 — the model-authored-RCE fence). The findings this reads
+// can be MODEL-authored (an editor that reached the review file overwrites them), so the id-allowlist + shq
+// are NOT enough: a SHELL-executing scorer (SHELL_SCORERS) runs its args AS a command, so a model-chosen
+// --cmd/--rubric would reach a shell downstream of shq. Rules by scorer class:
+//   - test-pass-rate — the ONE legit shell sub-gate: re-run the run's CODE-OWNED scorer command
+//     (`trustedScorerCmd`, threaded from parentCfg), narrowed by the model's --only DATUM only; the model's
+//     own --cmd is discarded. Fail-closed (reject) when no trusted command is available.
+//   - any other shell scorer (composite/floor/llm-judge) — no safe adapter -> reject.
+//   - data-only scorers (contains/io-*/doc-lint) — args are DATA, not a command; pass them through as before.
+export function resolveSubGate(finding, { repoDir, allowlist, trustedScorerCmd = null }) {
   const sg = finding?.scorer
   if (!sg || typeof sg.id !== 'string' || !Array.isArray(sg.args)) return null
   const scriptPath = allowlist.get(sg.id)
@@ -49,7 +64,14 @@ export function resolveSubGate(finding, { repoDir, allowlist }) {
     if (full !== base && !full.startsWith(base + sep)) return null // escapes the repo -> refuse
     editScope = String(finding.scope)
   }
-  const scorerCmd = ['node', shq(scriptPath), ...sg.args.map(shq)].join(' ')
+  let scorerCmd
+  if (SHELL_SCORERS.has(sg.id)) {
+    if (sg.id !== 'test-pass-rate' || !trustedScorerCmd) return null
+    const only = argVal(sg.args, '--only')
+    scorerCmd = trustedScorerCmd + (only != null ? ' --only ' + shq(only) : '')
+  } else {
+    scorerCmd = ['node', shq(scriptPath), ...sg.args.map(shq)].join(' ')
+  }
   return { editScope, scorerCmd }
 }
 
@@ -123,7 +145,9 @@ const cleanTree = (dir) => !scopeChanged(dir)
 // regardless of how many parent passes re-fire the fan-out.
 export function makeDecomposeAct({ repoDir, parentLoopDir, parentCfg, runChild, rescueAct, allowlist, maxChildren = 4, childCap = 3, log = () => {} }) {
   const seen = new Set() // [CR#3] dedupe finding-areas across parent passes within a run
-  const ctx = { repoDir, allowlist }
+  // trustedScorerCmd = the run's CODE-OWNED primary scorer command; a test-pass-rate sub-gate re-uses it
+  // instead of any --cmd a model wrote into the finding (resolveSubGate's typed policy, DCA 20260702T110808).
+  const ctx = { repoDir, allowlist, trustedScorerCmd: parentCfg?.scorerCmd ?? null }
   return async (state) => {
     if (!coarseSignalPlateau(state)) { log({ event: 'decompose-skip', reason: 'not-plateau' }); return rescueAct(state) }
     const fresh = decomposable(readLatestFindings(parentLoopDir, state), seen, ctx)

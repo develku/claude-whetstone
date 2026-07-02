@@ -16,11 +16,11 @@ intentional / not worth the cost).
 
 Via `npm run coverage` (src + scorers, deterministic). Ratcheted up by cycle 1.
 
-| Metric | Cycle 0 | Cycle 1 | Cycle 2 | Cycle 3 | Cycle 4 (2026-06-30) |
-|--------|---------|---------|---------|---------|----------------------|
-| Line | 96.03% | 96.10% | 96.27% | 96.31% | **96.31%** |
-| Branch | 82.15% | 82.54% | 82.89% | 83.11% | **83.48%** |
-| Function | 91.83% | 92.12% | 92.28% | 93.73% | **93.89%** |
+| Metric | Cycle 0 | Cycle 1 | Cycle 2 | Cycle 3 | Cycle 4 (2026-06-30) | Audit (2026-07-02) |
+|--------|---------|---------|---------|---------|----------------------|--------------------|
+| Line | 96.03% | 96.10% | 96.27% | 96.31% | 96.31% | **96.31%** |
+| Branch | 82.15% | 82.54% | 82.89% | 83.11% | 83.48% | **83.92%** |
+| Function | 91.83% | 92.12% | 92.28% | 93.73% | 93.89% | **94.19%** |
 
 The loop must not drop below the latest column; ratchet upward as coverage improves.
 
@@ -116,6 +116,17 @@ gap invisible from inside (whetstone's own suite is all node:test). Full frictio
 | ID | Axis | Sev | File(s) | Status | Note / provenance |
 |----|------|-----|---------|--------|-------------------|
 | DF-01 | portability | HIGH | `scorers/test-pass-rate.mjs` | fixed | The "most portable scorer" parsed **only** node:test output (`ℹ pass N`) end-to-end — count regex, `✖ failing tests:` detail marker, `--test-name-pattern`. A pytest run errored at the scorer (`could not parse pass/fail counts`, 0 tokens, editor never spawned). Made multi-runner via TDD (5 RED→GREEN): `parseCounts()` node-first then pytest (`N passed/failed`, collection `N error`=failure); `failureDetail()`/`failingNames()` pytest branches. 999/999 green, coverage ≥ ratchet (branch 83.48→83.52), scorer not invariant. End-to-end: bundled scorer on a real external project's pytest → score 100. Branch `feat/portable-test-scorer`. |
+
+### Full-repo audit (2026-07-02) — post-v1.3.0 surface (spawn-editor concurrency + plateau knobs) + drift re-check
+
+A user-requested full audit (3 parallel finders: architecture map, dead-code sweep, correctness/robustness) + source re-verification + an independent `security-auditor` pass + a bidirectional DCA (cross-model codex leg) on the fix. Headline: the correctness finder's 3 CRITICAL / 3 HIGH mostly EVAPORATED on source inspection (nonce-forge = nonce-secrecy not marker-distinctness; gitHead "race" is inside the try; state JSON.parse already wrapped on the resume path driver.mjs:185; held_out hash re-validated at converge.mjs:447; iso-runner IS e2e-tested via io-*.test.mjs real child spawn) — confirming the cores are sound (matches the cycle 1–4 convergence). One real HIGH survived every check.
+
+| ID | Axis | Sev | File(s) | Status | Note / provenance |
+|----|------|-----|---------|--------|-------------------|
+| AUD-01 | security | **HIGH** | `src/decompose.mjs`, `src/scope-cli.mjs` | fixed | **Model-authored RCE on the scope-decompose boundary** — the same class as C3-01, on the THIRD boundary the C3-01 fix never reached. `scope-cli.mjs buildAllowlist` used a narrower `SUBGATE_UNSAFE={composite,floor}` than canonical `SHELL_SCORERS`, so a decompose finding naming `test-pass-rate`/`llm-judge` with a model-authored `--cmd`/`--rubric` resolved and ran via `spawnSync(...,{shell:true})`. Reachable because the default loopDir `.loop/run_*` (driver.mjs:253) nests inside `--scope` under `whet --scope .`, and the editor (`--permission-mode acceptEdits`) can overwrite the review file to author the finding. **Root-cause fix (DCA `20260702T110808`, ship C):** (B) `resolveSubGate` typed arg policy — a `test-pass-rate` sub-gate PINS its `--cmd` to the run's code-owned scorer command and carries only the model's `--only` datum; any other shell scorer rejects; data-only scorers unchanged. (A, defense-in-depth) a realpath-aware `loopDirInsideScope` refusal so the run dir cannot nest in the scope. (C) `llm-judge` added to `SUBGATE_UNSAFE`. Independent `security-auditor` CONFIRMED; codex cross-model concurred (B mandatory root-cause, A defense-in-depth). TDD RED→GREEN; 1045/1045; branch 83.48→83.92, fn 93.89→94.19; 8 invariant files byte-untouched. |
+| AUD-hygiene | hygiene | LOW | `README.md`, `.gitignore` | fixed | README status badge v1.1.1 → v1.3.0 (package.json/plugin.json drift); `.superpowers/` (ephemeral SDD artifacts, was untracked+non-ignored) gitignored. Committed separately (branch `chore/hygiene-version-superpowers`). |
+
+Dead-code sweep: **clean** (no unused exports, TODO/FIXME 0, all fixtures/scorers referenced, bench/ properly shelved+isolated). Architecture: the "3× allowlist builder" duplication is NOT unifiable (distinct threat models — plan positive fail-closed, forge operator-path denylist, scope-decompose needs test-pass-rate); the security core (`SHELL_SCORERS`+`isUnsafeScorer`) is already single-sourced. Deferred (unchanged): F2 `--target-repo` preflight (next increment), config-fragmentation (alpha), converge.mjs 731 LOC (core sound, risk>reward).
 
 ---
 

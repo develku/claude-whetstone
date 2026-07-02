@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, symlinkSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { parseScopeCli, cleanTreeGuard, buildAllowlist, decomposeNeedsConfirm, decomposeNeedsBudget, scopeDeps, forgeStoreInsideScope, forgeNeedsStoreAndConfirm, forgeMaxFilesInvalid } from '../src/scope-cli.mjs'
+import { parseScopeCli, cleanTreeGuard, buildAllowlist, decomposeNeedsConfirm, decomposeNeedsBudget, scopeDeps, forgeStoreInsideScope, forgeNeedsStoreAndConfirm, forgeMaxFilesInvalid, loopDirInsideScope } from '../src/scope-cli.mjs'
 
 const git = (dir, ...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim()
 
@@ -81,8 +81,34 @@ test('buildAllowlist: excludes composite from the auto set AND refuses to re-add
   assert.equal(buildAllowlist(['/x/composite.mjs']).has('composite'), false)
   assert.equal(buildAllowlist(['/x/composite.v2.mjs']).has('composite.v2'), false)
   assert.equal(buildAllowlist(['/x/Composite.mjs']).has('Composite'), false)
-  // test-pass-rate IS a legitimate decompose sub-gate (a child's test command), so it stays allowed.
+  // test-pass-rate IS a legitimate decompose sub-gate (a child's test command), so it stays allowed
+  // (its --cmd is pinned to the code-owned parent command by resolveSubGate — DCA 20260702T110808).
   assert.equal(buildAllowlist(['/x/test-pass-rate.mjs']).has('test-pass-rate'), true)
+  // llm-judge has NO legit decompose sub-gate (it takes model-authored --rubric/--mcp-config and spawns
+  // claude), so it is denied from the auto set AND non-re-addable via --scorer-allow (defense-in-depth
+  // above resolveSubGate's typed reject — DCA 20260702T110808).
+  assert.equal(buildAllowlist([]).has('llm-judge'), false)
+  assert.equal(buildAllowlist(['/x/llm-judge.mjs']).has('llm-judge'), false)
+})
+
+test('loopDirInsideScope: refuses a run dir lexically inside --scope, allows one outside (model-authored-scorer fence)', () => {
+  assert.equal(loopDirInsideScope({ scope: '/r', loopDir: '/r/.loop/run_x' }), true)   // the default `.loop/` under `whet --scope .`
+  assert.equal(loopDirInsideScope({ scope: '/r', loopDir: '/r' }), true)                // equal path
+  assert.equal(loopDirInsideScope({ scope: '/r', loopDir: '/outside/.loop/run_x' }), false)
+  assert.equal(loopDirInsideScope({ scope: '/repo', loopDir: '/repo-sibling/.loop' }), false) // prefix-trap: not inside
+  assert.equal(loopDirInsideScope({ loopDir: '/x' }), false)                            // no scope -> nothing to contain
+})
+
+test('loopDirInsideScope: realpath-aware — a loopDir reachable via a symlinked ancestor resolving INTO scope is refused', () => {
+  const real = realpathSync(mkdtempSync(join(tmpdir(), 'whet-scope-')))
+  const link = join(tmpdir(), `whet-lnk-${process.pid}-${real.split('/').pop()}`)
+  try {
+    symlinkSync(real, link)                                  // link -> real scope
+    const loopDir = join(link, '.loop', 'run_x')             // lexically under `link`, NOT under `real`
+    assert.equal(loopDirInsideScope({ scope: real, loopDir }), true) // but realpath resolves into scope -> refuse
+  } finally {
+    rmSync(link, { force: true }); rmSync(real, { recursive: true, force: true })
+  }
 })
 
 test('forgeStoreInsideScope: refuses a --forge-store located inside --scope (trust boundary)', () => {

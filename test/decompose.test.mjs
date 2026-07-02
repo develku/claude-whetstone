@@ -59,12 +59,38 @@ test('readLatestFindings: reads findings from the last review file; [] when abse
 })
 
 const allow = new Map([['test-pass-rate', '/abs/scorers/test-pass-rate.mjs']])
-const ctx = { repoDir: '/repo', allowlist: allow }
+// The run's CODE-OWNED primary scorer command (test-pass-rate in a decompose run). A test-pass-rate
+// sub-gate must re-use THIS --cmd, never one the model wrote into the review file (DCA 20260702T110808).
+const TRUSTED = "node '/abs/scorers/test-pass-rate.mjs' --cmd 'npm test'"
+const ctx = { repoDir: '/repo', allowlist: allow, trustedScorerCmd: TRUSTED }
 
-test('resolveSubGate: builds a shq-quoted command from an allowlisted id', () => {
-  const sg = resolveSubGate({ area: 'a', scorer: { id: 'test-pass-rate', args: ['--cmd', 'node --test', '--only', "weird ' name"] } }, ctx)
-  assert.equal(sg.scorerCmd, "node '/abs/scorers/test-pass-rate.mjs' '--cmd' 'node --test' '--only' 'weird '\\'' name'")
+test('resolveSubGate: a test-pass-rate sub-gate PINS --cmd to the trusted parent command and carries only the model --only datum (model --cmd discarded) [RCE fence]', () => {
+  const sg = resolveSubGate({ area: 'a', scorer: { id: 'test-pass-rate', args: ['--cmd', 'touch /tmp/pwned', '--only', "weird ' name"] } }, ctx)
+  // the attacker's `touch /tmp/pwned` never appears; the command is the trusted base + the shq-quoted --only
+  assert.equal(sg.scorerCmd, "node '/abs/scorers/test-pass-rate.mjs' --cmd 'npm test' --only 'weird '\\'' name'")
+  assert.ok(!sg.scorerCmd.includes('pwned'), 'model-authored --cmd must not reach the sub-gate command')
   assert.equal(sg.editScope, null)
+})
+
+test('resolveSubGate: a test-pass-rate sub-gate with no model --only runs the bare trusted command', () => {
+  const sg = resolveSubGate({ area: 'a', scorer: { id: 'test-pass-rate', args: [] } }, ctx)
+  assert.equal(sg.scorerCmd, TRUSTED)
+})
+
+test('resolveSubGate: rejects a shell-scorer sub-gate with no safe adapter (llm-judge — model-authored --rubric/--mcp-config) [RCE fence]', () => {
+  const withJudge = { repoDir: '/repo', allowlist: new Map([['llm-judge', '/abs/scorers/llm-judge.mjs']]), trustedScorerCmd: TRUSTED }
+  assert.equal(resolveSubGate({ area: 'a', scorer: { id: 'llm-judge', args: ['--rubric', '/attacker', '--mcp-config', '/evil'] } }, withJudge), null)
+})
+
+test('resolveSubGate: fail-closed — a test-pass-rate sub-gate with no trusted parent command is rejected [RCE fence]', () => {
+  const noTrust = { repoDir: '/repo', allowlist: allow } // trustedScorerCmd absent
+  assert.equal(resolveSubGate({ area: 'a', scorer: { id: 'test-pass-rate', args: ['--cmd', 'evil', '--only', 'x'] } }, noTrust), null)
+})
+
+test('resolveSubGate: a DATA-ONLY scorer (contains) still passes its args through verbatim (not a shell scorer)', () => {
+  const dataCtx = { repoDir: '/repo', allowlist: new Map([['contains', '/abs/scorers/contains.mjs']]), trustedScorerCmd: TRUSTED }
+  const sg = resolveSubGate({ area: 'a', scorer: { id: 'contains', args: ['--needle', 'hello world'] } }, dataCtx)
+  assert.equal(sg.scorerCmd, "node '/abs/scorers/contains.mjs' '--needle' 'hello world'")
 })
 
 test('resolveSubGate: rejects an unknown scorer id (injection/allowlist) [CR#4]', () => {
