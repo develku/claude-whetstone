@@ -82,6 +82,32 @@ export function reviewFromSpawn(res) {
   return parseJudgeResponse(resultText)
 }
 
+// Synchronous sleep — the main block is spawnSync-based, so no async refactor for a backoff.
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+
+// Retry-on-transient wrapper (2026-07-02 dogfood: one transient `claude` exit-1 killed a whole
+// paid run — the loop treats any scorer failure as fatal, so absorbing blips belongs HERE).
+// Retries ALL reviewFromSpawn throw paths: exit codes can't reliably separate a rate-limit
+// blip from a permanent failure, and retrying a permanent one only costs seconds. Each retry
+// warns on stderr (never silent), and the LAST error is rethrown for die() → exit 2, so the
+// scorer contract is unchanged. Injectable sleep/warn keep it unit-testable without a model.
+export function judgeWithRetry(spawnFn, { attempts = 3, backoffMs = [2000, 5000], sleep = sleepSync, warn = (m) => process.stderr.write(`${m}\n`) } = {}) {
+  let last
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return reviewFromSpawn(spawnFn())
+    } catch (e) {
+      last = e
+      if (i < attempts - 1) {
+        const ms = backoffMs[Math.min(i, backoffMs.length - 1)] ?? 0
+        warn(`llm-judge: attempt ${i + 1}/${attempts} failed: ${e.message} — retrying in ${ms / 1000}s`)
+        sleep(ms)
+      }
+    }
+  }
+  throw last
+}
+
 if (isMainModule(import.meta.url)) {
   const output = arg('--output')
   const goal = arg('--goal', 'meet the rubric')
@@ -109,10 +135,9 @@ if (isMainModule(import.meta.url)) {
   const args = ['-p', prompt, '--output-format', 'json', '--max-turns', '1', '--model', model]
   if (mcp) args.push('--mcp-config', mcp, '--strict-mcp-config')
 
-  const res = spawnSync('claude', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
   let review
   try {
-    review = reviewFromSpawn(res)
+    review = judgeWithRetry(() => spawnSync('claude', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }))
   } catch (e) {
     die(e.message)
   }

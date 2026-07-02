@@ -9,7 +9,7 @@
 A deterministic <b>loop-engineering</b> driver for Claude Code: <b>code owns the gate</b>, the <b>model owns only diagnosis + edits</b>.
 </p>
 
-> Status: **v1.5.0** — the single-file core is **stable**; the multi-file and orchestration layers are
+> Status: **v1.5.1** — the single-file core is **stable**; the multi-file and orchestration layers are
 > alpha. Matured by running it on itself (dogfooding), so the cost, auth, and security model are exercised
 > end-to-end, not speculative. Requires **Node ≥ 23.5** — the behavioural scorers isolate untrusted code
 > with `module.registerHooks` + the Permission Model. See [What's stable in v1](#whats-stable-in-v1).
@@ -386,7 +386,7 @@ model where it buys the most and keep the per-pass editor cheap:
 |---|---|---|
 | **Editor** — every pass | **sonnet** | real code/content edits. Drop to **haiku** for trivial/mechanical artifacts (the canary converged on Haiku for $0.05). |
 | **Scorer** — deterministic | **code** | test-pass-rate, compile, type-check, SSIM — a perfect, free signal. No model at all. |
-| **Scorer** — subjective | **opus** judge (`scorers/llm-judge.mjs`) | when "good" can't be checked by code. Put the reasoning budget in the *critic*, not the editor. |
+| **Scorer** — subjective | **opus** judge (`scorers/llm-judge.mjs`) | when "good" can't be checked by code. Put the reasoning budget in the *critic*, not the editor. Retries a transient `claude` failure (3 attempts, short backoff, loud on stderr) before reporting scorer failure, so one API blip can't kill a paid run. |
 | **Escalation** — on plateau only | **opus** | when the cheap editor is *provably stuck* (the gate emits `plateau`) the loop switches to Opus for one fresh window, then gives up if still stuck. `--no-escalate` to disable. |
 
 Why: editing ("apply this specific critique") is the easy half and runs every pass — a cheap model

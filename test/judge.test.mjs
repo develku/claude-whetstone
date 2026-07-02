@@ -56,6 +56,15 @@ test('reviewFromSpawn throws on a spawn error (claude not found / killed)', () =
   assert.throws(() => reviewFromSpawn({ error: new Error('ENOENT'), status: null, stdout: '' }), /spawn|claude/i)
 })
 
+test('reviewFromSpawn picks the result event out of an array-shaped claude output', () => {
+  const res = { status: 0, error: null, stdout: JSON.stringify([{ type: 'system', subtype: 'init' }, { type: 'result', result: '{"score": 42, "critique": "ok"}' }]) }
+  assert.equal(reviewFromSpawn(res).score, 42)
+})
+
+test('reviewFromSpawn throws on unparseable stdout (the retry wrapper treats this as retryable)', () => {
+  assert.throws(() => reviewFromSpawn({ status: 0, error: null, stdout: 'not json at all' }), /could not parse/)
+})
+
 test('tolerates triple-backticks inside the critique value', () => {
   const raw = '{"score": 84, "critique": "Add an inline ```mermaid flowchart: `flowchart TD` baseline->ACT, only `running` loops back to ACT```", "findings": []}'
   const r = parseJudgeResponse(raw)
