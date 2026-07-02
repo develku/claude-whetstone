@@ -88,3 +88,30 @@ test('a child flooding fd3 beyond maxBuffer is rejected (ENOBUFS), never a forge
   const r = runIsolated({ artifact: a, mode: 'assert', spec: { fn: 'add', cases: [[]] } })
   assert.equal(r.ok, false) // 20MB > 16MB maxBuffer -> ENOBUFS -> reason:'spawn'
 })
+
+// egress deny (off-machine exfil): --permission does NOT gate the network, so the sandbox must deny the network
+// builtins at the module layer AND neutralize the network globals. An artifact that imports a socket-bearing
+// builtin is a score-2 'import' failure (out of the pure/stateful io-* scope); an artifact that reads fetch gets
+// undefined. Without these the artifact could ship the test spec / its own source off-machine to any endpoint.
+for (const mod of ['node:net', 'node:http', 'node:https', 'node:http2', 'node:dns', 'node:dns/promises', 'node:dgram', 'node:tls']) {
+  test(`egress: a static import of ${mod} is denied at the sandbox boundary (reason:"import")`, () => {
+    const r = assertCase(artifact(`import '${mod}'\nexport const add=()=>-999\n`), [2, 3])
+    assert.equal(r.ok, false)
+    assert.equal(r.reason, 'import') // denied builtin -> import failure, never a live socket
+  })
+}
+
+test('egress: the fetch/WebSocket/EventSource network globals are neutralized inside the sandbox', () => {
+  const src = 'export const probe=()=>[typeof fetch,typeof WebSocket,typeof EventSource]\n'
+  const r = runIsolated({ artifact: artifact(src), mode: 'assert', spec: { fn: 'probe', cases: [[]] } })
+  assert.deepEqual(r, { ok: true, results: [{ value: ['undefined', 'undefined', 'undefined'] }] })
+})
+
+test('egress: a data: URL that re-imports node:net is denied through the graph (no nested bypass)', () => {
+  // The deny hook applies to the whole module graph, not just the entry — a data: URL re-import of a socket
+  // builtin is denied at the inner edge, so the artifact import fails (reason:'import'), never a live socket.
+  const src = `await import('data:text/javascript,await import("node:net")')\nexport const add=()=>-999\n`
+  const r = assertCase(artifact(src), [2, 3])
+  assert.equal(r.ok, false)
+  assert.equal(r.reason, 'import')
+})

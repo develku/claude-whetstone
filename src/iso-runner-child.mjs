@@ -6,6 +6,8 @@
 //
 // Invoked as: node --permission --allow-fs-read=<src dir> --allow-fs-read=<artifact dir> iso-runner-child.mjs
 // --permission denies fs-write (no heap snapshot to disk), worker, child_process, inspector, native addons.
+// --permission does NOT gate the network — off-machine egress is denied SEPARATELY by the DENY set (socket
+// builtins) and the global scrub (fetch/WebSocket) below, not by --permission.
 // The lockdown below additionally denies the IN-MEMORY heap/escape routes (node:v8 getHeapSnapshot survives
 // --permission) so the artifact cannot recover the lexically-secret nonce and forge a passing frame.
 //
@@ -30,8 +32,15 @@ process.argv.length = Math.min(process.argv.length, 1) // scrub argv (the nonce 
 // dodge is already a score-0 import failure — but the deny set must not rely on that external loader behaviour.
 // LIMITATION (by design): an honest artifact that imports one of these at module-eval time is reported
 // reason:'import' -> the scorer exits 2 (it cannot score), not score 0. The io-* scorers check pure/stateful
-// LOGIC, which never needs v8/inspector/vm/worker/child_process/module; a file that does is out of their scope.
-const DENY = new Set(['v8', 'inspector', 'vm', 'worker_threads', 'child_process', 'module'])
+// LOGIC, which never needs the introspection or network builtins; a file that does is out of their scope.
+const DENY = new Set([
+  // introspection / escape routes (nonce/heap recovery, native code): keep the artifact from forging a frame.
+  'v8', 'inspector', 'vm', 'worker_threads', 'child_process', 'module',
+  // network egress: --permission does NOT gate sockets, so every socket-bearing builtin is denied BY NAME here
+  // (dns is a covert exfil channel on its own, even with http blocked). bare() maps node:dns/promises -> 'dns',
+  // so subpaths are covered by the root entry.
+  'net', 'http', 'https', 'http2', 'dns', 'dgram', 'tls',
+])
 const bare = (s) => String(s).replace(/^node:/i, '').split(/[/?#]/)[0].toLowerCase()
 registerHooks({ resolve(specifier, ctx, next) { if (DENY.has(bare(specifier))) throw new Error(`iso-runner: "${specifier}" denied in sandbox`); return next(specifier, ctx) } })
 
@@ -39,6 +48,13 @@ registerHooks({ resolve(specifier, ctx, next) { if (DENY.has(bare(specifier))) t
 // WITHOUT the resolve hook; binding/_linkedBinding/dlopen reach native code (binding is already off under
 // --permission, scrubbed anyway as belt-and-suspenders).
 for (const k of ['getBuiltinModule', 'binding', '_linkedBinding', 'dlopen']) { try { delete process[k] } catch {} }
+
+// (3b) neutralize the network GLOBALS, which reach a socket WITHOUT the module layer (so the DENY set never sees
+// them). fetch/WebSocket are the only live egress globals on the Node floor; EventSource is absent today and is
+// deleted for forward-safety. They are configurable data props, so delete makes them undefined — and if a future
+// Node makes one a non-configurable getter, the egress deny test flips red rather than the control silently
+// no-opping. Order is load-bearing: this must run BEFORE `await import(artifact)` evaluates the attacker.
+for (const k of ['fetch', 'WebSocket', 'EventSource']) { try { delete globalThis[k] } catch {} }
 
 const EXEC = { assert: executeAssert, trace: executeTrace, effect: executeEffect, invariant: executeInvariants }
 

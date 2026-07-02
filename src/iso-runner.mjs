@@ -7,7 +7,8 @@
 // Spawn shape (NO shell — argument array): node --permission --allow-fs-read=<src> --allow-fs-read=<artifact dir>
 // child <stdin: {nonce,artifact,mode,spec}>. The grants are REALPATHS (the ESM loader realpaths the artifact;
 // the permission model checks the real path). --permission denies fs-write/worker/child_process/inspector; the
-// child's own lockdown denies the in-memory heap/escape routes. The job (incl. the nonce) goes over stdin, so it
+// child's own lockdown denies the in-memory heap/escape routes AND the network (deny-set + global scrub, since
+// --permission does not gate sockets). The job (incl. the nonce) goes over stdin, so it
 // never touches disk and needs no extra fs grant.
 import { spawnSync } from 'node:child_process'
 import { realpathSync } from 'node:fs'
@@ -23,7 +24,8 @@ const DEFAULT_TIMEOUT_MS = Number(process.env.WHET_ISO_TIMEOUT_MS) || 60 * 1000
 // The child runs with an ALLOWLISTED env, NOT the parent's. Two reasons: (1) the operator's secrets
 // (EXA_API_KEY / *_TOKEN / *_SECRET …) must never reach the untrusted artifact — else a gamed fn could return
 // one and it would flow into the observation → the critique → the editor model (an in-band leak; off-machine
-// exfil is already denied by --permission); (2) NODE_OPTIONS is deliberately EXCLUDED so an ambient
+// exfil is denied by the child's network lockdown — deny-set + global scrub in iso-runner-child.mjs — since
+// --permission does NOT gate sockets); (2) NODE_OPTIONS is deliberately EXCLUDED so an ambient
 // NODE_OPTIONS=--allow-fs-write (etc.) can't widen the sandbox. The io-* contract is pure/stateful logic, which
 // needs no env; this set is only what the Node runtime itself wants. No secret-shaped key is on it.
 const ENV_ALLOWLIST = ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'LC_CTYPE']
