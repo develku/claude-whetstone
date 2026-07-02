@@ -48,10 +48,17 @@ test('refuses when resuming would immediately plateau', () => {
 })
 
 test('restarts the editor ladder by clearing escalation state', () => {
-  const s = { ...buildState({ scores: [40, 75], hardCap: 1 }), status: 'capped', escalated: true, escalated_at_pass: 1 }
+  const s = {
+    ...buildState({ scores: [40, 75], hardCap: 1 }),
+    status: 'capped',
+    escalated: true,
+    escalated_at_pass: 1,
+    escalations: [{ pass: 1, rung: 1 }], // v1.6.0 per-rung provenance resets with the rest
+  }
   const { state } = prepareResume(s, { hard_cap: 5 })
   assert.equal(state.escalated, false)
   assert.equal(state.escalated_at_pass, null)
+  assert.deepEqual(state.escalations, [])
 })
 
 test('refuses to resume a budget-exhausted run when the budget is not raised', () => {

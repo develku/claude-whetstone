@@ -30,6 +30,8 @@ export function prepareResume(loadedState, overrides = {}) {
     status_reason: null,
     escalated: false, // restart the editor ladder from the cheap model
     escalated_at_pass: null,
+    escalations: [], // per-rung climb provenance resets with the rest of the ladder state
+
     updated_at: isoNow(),
   }
 

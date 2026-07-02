@@ -22,17 +22,32 @@ const overBudgetVerdict = (s) => {
 // deps:
 //   evaluate(state) -> { score, critique }       observe the real output + score it
 //   act(state)      -> { changed, costUsd }      cheap editor: model edits the artifact using the last critique
-//   actEscalated(state) -> { changed, costUsd }  OPTIONAL stronger editor, used ONLY after a plateau (spend Opus only when the cheap model is provably stuck)
+//   actEscalated(state) -> { changed, costUsd }  OPTIONAL stronger editor(s), used ONLY after a plateau (spend the pricier
+//                                                model only when the cheaper one is provably stuck). A single fn or an
+//                                                ORDERED ARRAY (ladder, e.g. opus then fable): each proven stall climbs
+//                                                ONE rung; a stall after the last rung stands.
 //   persist(state, { score, critique, costUsd }) -> newState   snapshot + review + recordPass + save
-//   escalationGrace                              passes the escalated editor gets before plateau is re-judged (default = plateau_window)
+//   escalationGrace                              passes each escalated editor gets before plateau is re-judged (default = plateau_window)
 //   log(event)                                   progress sink
 export async function runLoop({ state, evaluate, act, persist, save = null, log = () => {}, actEscalated = null, escalationGrace = null, restore = null, confirm = null, noopThreshold = 2, skipBaseline = false }) {
+  // A single escalated act is a one-rung ladder, so the historical single-jump behavior is unchanged.
+  const rungs = Array.isArray(actEscalated) ? actEscalated.filter(Boolean) : actEscalated ? [actEscalated] : []
   let currentAct = act
-  let escalated = false
+  let rung = 0 // rungs consumed so far; the run is escalated once rung > 0
   let graceUntilPass = -1 // while pass < this, a plateau is ignored (give the escalated editor a fresh window)
   let consecutiveNoops = 0
   let s
   let v
+
+  // Climb one rung of the escalation ladder: swap in the next stronger editor, open a fresh grace
+  // window, and stamp the climb on the state — escalations is the full per-rung provenance,
+  // escalated_at_pass stays the latest climb (the historical single-jump field).
+  const climb = (st) => {
+    currentAct = rungs[rung]
+    rung++
+    graceUntilPass = st.pass + (escalationGrace ?? st.plateau_window)
+    return { ...st, escalated: true, escalated_at_pass: st.pass, escalations: [...(st.escalations ?? []), { pass: st.pass, rung }] }
+  }
 
   // done-branch confirmation: an independent confirm scorer re-scores ONLY when the gate would
   // declare done — cheap normal passes, expensive skepticism at the finish line. A confirm score
@@ -136,13 +151,10 @@ export async function runLoop({ state, evaluate, act, persist, save = null, log 
           break
         }
         consecutiveNoops++
-        // Escalate only after N consecutive no-ops, not on the first.
-        if (consecutiveNoops >= noopThreshold && actEscalated && !escalated) {
-          escalated = true
-          currentAct = actEscalated
-          graceUntilPass = s.pass + (escalationGrace ?? s.plateau_window)
-          s = { ...s, escalated: true, escalated_at_pass: s.pass }
-          log({ pass: s.pass, score: s.current_score, best: s.best_score, status: 'running', reason: 'no-op — escalating to the stronger editor' })
+        // Escalate only after N consecutive no-ops, not on the first — one rung per proven stall.
+        if (consecutiveNoops >= noopThreshold && rung < rungs.length) {
+          s = climb(s)
+          log({ pass: s.pass, score: s.current_score, best: s.best_score, status: 'running', reason: `no-op — escalating to the stronger editor (rung ${rung}/${rungs.length})` })
           consecutiveNoops = 0
           continue
         }
@@ -176,14 +188,11 @@ export async function runLoop({ state, evaluate, act, persist, save = null, log 
       if (v.status === 'plateau') {
         if (s.pass < graceUntilPass) {
           v = { status: 'running', reason: 'post-escalation grace window' }
-        } else if (actEscalated && !escalated) {
-          escalated = true
-          currentAct = actEscalated
-          graceUntilPass = s.pass + (escalationGrace ?? s.plateau_window)
-          s = { ...s, escalated: true, escalated_at_pass: s.pass }
-          v = { status: 'running', reason: `plateau at pass ${s.pass} — escalating to the stronger editor` }
+        } else if (rung < rungs.length) {
+          s = climb(s)
+          v = { status: 'running', reason: `plateau at pass ${s.pass} — escalating to the stronger editor (rung ${rung}/${rungs.length})` }
         }
-        // else: already escalated (or no escalation available) -> plateau stands, loop exits
+        // else: ladder exhausted (or no escalation available) -> plateau stands, loop exits
       }
 
       log({ pass: s.pass, score: s.current_score, best: s.best_score, ...v })

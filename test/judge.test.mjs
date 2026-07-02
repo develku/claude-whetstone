@@ -65,6 +65,30 @@ test('reviewFromSpawn throws on unparseable stdout (the retry wrapper treats thi
   assert.throws(() => reviewFromSpawn({ status: 0, error: null, stdout: 'not json at all' }), /could not parse/)
 })
 
+// v1.6.0: the review carries the judge call's OWN spend (summed usage tokens + total_cost_usd) so
+// the driver can charge it to the budget dials — previously invisible (measured 2026-07-02 at ~20%
+// of a real run's tokens / ~30% of its USD).
+test('reviewFromSpawn reports the judge call\'s own usage for the budget dials', () => {
+  const res = {
+    status: 0,
+    error: null,
+    stdout: JSON.stringify({
+      type: 'result',
+      result: '{"score": 88, "critique": "ok"}',
+      total_cost_usd: 0.32,
+      usage: { input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: 200, cache_read_input_tokens: 150 },
+    }),
+  }
+  const r = reviewFromSpawn(res)
+  assert.equal(r.usage.tokens, 500) // all four usage counts summed, mirroring the editor's extractTokens
+  assert.equal(r.usage.costUsd, 0.32)
+})
+
+test('reviewFromSpawn usage defaults to zeros when the result carries none (never NaN)', () => {
+  const res = { status: 0, error: null, stdout: JSON.stringify({ type: 'result', result: '{"score": 88, "critique": "ok"}' }) }
+  assert.deepEqual(reviewFromSpawn(res).usage, { tokens: 0, costUsd: 0 })
+})
+
 test('tolerates triple-backticks inside the critique value', () => {
   const raw = '{"score": 84, "critique": "Add an inline ```mermaid flowchart: `flowchart TD` baseline->ACT, only `running` loops back to ACT```", "findings": []}'
   const r = parseJudgeResponse(raw)

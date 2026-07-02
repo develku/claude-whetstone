@@ -72,14 +72,25 @@ export function reviewFromSpawn(res) {
   if (res.error) throw new Error(`failed to spawn claude: ${res.error.message}`)
   if (res.status !== 0) throw new Error(`claude exited ${res.status}: ${String(res.stderr || res.stdout || '').slice(0, 300)}`)
   let resultText
+  let usage = { tokens: 0, costUsd: 0 }
   try {
     const parsed = JSON.parse(res.stdout)
     const r = Array.isArray(parsed) ? parsed.find((e) => e?.type === 'result') : parsed
     resultText = r?.result ?? ''
+    // The judge call's OWN spend (all four usage counts summed, mirroring the editor's extractTokens,
+    // + the notional USD): carried on the review so the driver can charge it to the budget dials.
+    // Previously invisible — measured 2026-07-02 at ~20% of a real run's tokens / ~30% of its USD.
+    const u = r?.usage
+    usage = {
+      tokens: u
+        ? (Number(u.input_tokens) || 0) + (Number(u.output_tokens) || 0) + (Number(u.cache_creation_input_tokens) || 0) + (Number(u.cache_read_input_tokens) || 0)
+        : 0,
+      costUsd: Number(r?.total_cost_usd) || 0,
+    }
   } catch {
     throw new Error(`could not parse claude output: ${(res.stdout || res.stderr || '').slice(0, 300)}`)
   }
-  return parseJudgeResponse(resultText)
+  return { ...parseJudgeResponse(resultText), usage }
 }
 
 // Synchronous sleep — the main block is spawnSync-based, so no async refactor for a backoff.

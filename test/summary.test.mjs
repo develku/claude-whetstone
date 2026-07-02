@@ -39,3 +39,16 @@ test('renders 0 tokens for a pre-feature state that has no spent_tokens', () => 
 test('omits the escalation line when the run did not escalate', () => {
   assert.doesNotMatch(summarizeRun(base), /escalated/)
 })
+
+test('names each ladder rung when the run escalated more than once (v1.6.0 ladder)', () => {
+  assert.equal(
+    summarizeRun({
+      ...base,
+      escalated: true,
+      escalated_at_pass: 6,
+      escalations: [{ pass: 3, rung: 1 }, { pass: 6, rung: 2 }],
+      escalate_models: ['opus', 'fable'],
+    }),
+    'DONE — best 100 @ pass 2\n3 passes / cap 10 · spent 1,234 tokens ($0.5000)\nescalated at pass 3 → opus, pass 6 → fable',
+  )
+})

@@ -62,6 +62,11 @@ never fabricates a pass; `exit 2` is the recommended convention).
 - `critique`: non-empty string when `score < target` — "what to change to raise the
   score". It becomes the next ACT's steering input.
 - `findings`: optional `[{ area, severity, suggestion }]`.
+- `usage`: optional `{ tokens, costUsd }` — the scorer's OWN model spend for this call
+  (v1.6.0). The driver adds it to `spent_tokens` / `spent_usd` alongside the editor's, so a
+  model-backed scorer (llm-judge pays a second `claude` call every pass) counts against the
+  budget dials. Absent (every deterministic scorer) reads as 0. Done-edge stability/confirm
+  probes and failed retry attempts remain uncounted — `--cap` stays the hard backstop.
 
 A scorer is valid iff it is deterministic given the same output+target (or documents
 its nondeterminism), and honors the range + exit codes. The driver reads **only** the
@@ -98,7 +103,8 @@ else is testable with a stub.
 goal, artifact_path, observe_cmd, scorer_cmd, confirm_scorer_cmd,
 target_score(90), min_delta(1), plateau_window(3), hard_cap(10), budget_usd(null), budget_tokens(null), model, effort(medium),
 pass, last_critique, current_score, best_score, best_pass, confirm_vetoed_at_pass, spent_usd, spent_tokens,
-escalated, escalated_at_pass,   # set when a plateau triggered the stronger editor
+escalated, escalated_at_pass,   # set when a stall triggered a stronger editor (latest climb)
+escalations, escalate_models,   # v1.6.0 ladder provenance: [{pass, rung}] per climb + the rung models in order
 status(running|done|capped|plateau|error), status_reason, started_at, updated_at,
 history: [{ pass, score, critique_ref, snapshot, ts }]
 ```
@@ -108,7 +114,7 @@ history: [{ pass, score, critique_ref, snapshot, ts }]
 ```
 state.json
 snapshots/iter_NNN.<ext>   verbatim artifact at end of pass NNN (iter_000 = baseline)
-reviews/review_NNN.json    the scorer's {score, critique, findings} for pass NNN
+reviews/review_NNN.json    the scorer's {score, critique, findings[, usage]} for pass NNN
 ```
 
 `zip(snapshots, reviews)` over `history` is the full score trajectory — for

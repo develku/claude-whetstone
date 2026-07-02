@@ -50,6 +50,23 @@ export function editorEffort(state, escalated) {
   return EFFORT_LEVELS[i] ?? RESCUE_EFFORT
 }
 
+// The escalation LADDER: which stronger editors rescue a stall, in climb order (one rung per proven
+// plateau/no-op stall — loop.mjs). A bare 'fable' auto-expands to opus->fable (operator decision
+// 2026-07-02: a fable-enabled run still rescues via opus first — fable bills above opus and most
+// stalls yield to opus); a comma list ('opus,fable') is the explicit general form. Rungs equal to
+// the BASE model drop (a same-model rescue is a no-op rung), as do consecutive duplicates.
+export function escalationLadder(escalateModel, baseModel = null) {
+  if (!escalateModel) return []
+  const names = String(escalateModel).split(',').map((s) => s.trim()).filter(Boolean)
+  const expanded = names.length === 1 && /^(fable|claude-fable-5)$/i.test(names[0]) ? ['opus', names[0]] : names
+  const rungs = []
+  for (const m of expanded) {
+    if (m === baseModel || m === rungs[rungs.length - 1]) continue
+    rungs.push(m)
+  }
+  return rungs
+}
+
 function runScorer(scorerCmd, { output, loopDir, pass }) {
   const full = `${scorerCmd} --output ${shq(output)} --loop-dir ${shq(loopDir)} --pass ${zeroPad(pass)}`
   const res = spawnSync(full, { shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: CHILD_TIMEOUT_MS, killSignal: 'SIGKILL' })
@@ -78,7 +95,18 @@ export function buildContext(loopDir) {
     const pass = s.history.length
     const snapshot = snapshotArtifact(loopDir, s.artifact_path, pass)
     const reviewRef = writeReview(loopDir, pass, ev.review ?? { score: ev.score, critique: ev.critique })
-    const next = recordPass(s, { score: ev.score, critique: ev.critique, snapshot, reviewRef, costUsd: ev.costUsd ?? 0, tokens: ev.tokens ?? 0 })
+    // Charge BOTH spend sources on the pass: the editor's (act) and the scorer's own (review.usage —
+    // an llm-judge scorer pays a second model call every pass; before v1.6.0 that spend was invisible
+    // to the budget dials, measured on a real run at ~20% of tokens / ~30% of USD). Number()||0 so a
+    // scorer without the optional usage field (every deterministic scorer) charges 0, never NaN.
+    const next = recordPass(s, {
+      score: ev.score,
+      critique: ev.critique,
+      snapshot,
+      reviewRef,
+      costUsd: (ev.costUsd ?? 0) + (Number(ev.review?.usage?.costUsd) || 0),
+      tokens: (ev.tokens ?? 0) + (Number(ev.review?.usage?.tokens) || 0),
+    })
     saveState(loopDir, next)
     return next
   }
@@ -115,6 +143,11 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
     const composed = composeConfirm({ baseConfirmCmd: state.confirm_scorer_cmd, storePath: cfg.forgeStorePath, loopDir, kind: cfg.scope ? 'scope' : 'file' })
     if (composed !== state.confirm_scorer_cmd) state = { ...state, confirm_scorer_cmd: composed }
   }
+  // The escalation ladder is stamped on the state (before the save below) so the final report can
+  // NAME each rung. Skipped when the caller injects its own escalated act (scope --decompose owns
+  // that slot's meaning) — the models behind an injected act are unknowable here.
+  const rungModels = cfg.noEscalate ? [] : escalationLadder(cfg.escalateModel ?? 'opus', state.model)
+  if (rungModels.length && !deps.actEscalated) state = { ...state, escalate_models: rungModels }
   saveState(loopDir, state)
 
   // The context (evaluate/persist/confirm) is injectable so a different artifact KIND can swap it:
@@ -125,10 +158,13 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
   // built with — the real makeClaudeAct's effort is otherwise unobservable behind a claude spawn).
   const make = deps.makeAct ?? makeClaudeAct
   const act = deps.act ?? make({ artifactPath: state.artifact_path, model: state.model, mcpConfig: cfg.mcpConfig, effort: editorEffort(state, false) })
-  const escalateModel = cfg.noEscalate ? null : cfg.escalateModel ?? 'opus'
+  // One rescue editor per ladder rung, each at the floored (never lowered) rescue effort;
+  // runLoop climbs them in order, one rung per proven stall.
   const actEscalated =
     deps.actEscalated ??
-    (escalateModel ? make({ artifactPath: state.artifact_path, model: escalateModel, mcpConfig: cfg.mcpConfig, effort: editorEffort(state, true) }) : null)
+    (rungModels.length
+      ? rungModels.map((m) => make({ artifactPath: state.artifact_path, model: m, mcpConfig: cfg.mcpConfig, effort: editorEffort(state, true) }))
+      : null)
 
   // keep-best: restore a prior snapshot back over the live artifact when a pass regressed.
   // safeSnapshotPath refuses a ref that escapes the run dir (a poisoned snapshot ref on resume).

@@ -9,7 +9,7 @@
 A deterministic <b>loop-engineering</b> driver for Claude Code: <b>code owns the gate</b>, the <b>model owns only diagnosis + edits</b>.
 </p>
 
-> Status: **v1.5.1** — the single-file core is **stable**; the multi-file and orchestration layers are
+> Status: **v1.6.0** — the single-file core is **stable**; the multi-file and orchestration layers are
 > alpha. Matured by running it on itself (dogfooding), so the cost, auth, and security model are exercised
 > end-to-end, not speculative. Requires **Node ≥ 23.5** — the behavioural scorers isolate untrusted code
 > with `module.registerHooks` + the Permission Model. See [What's stable in v1](#whats-stable-in-v1).
@@ -28,7 +28,8 @@ whetstone is easy to mistake for two adjacent things it isn't:
   [Backends & the Workflow tool](#backends--the-claude-code-workflow-tool)).
 
 The feature set built on top of that one gate: pluggable 0–100 scorers, automatic **keep-best**
-rollback when an edit makes things worse, a **plateau → one Opus escalation** before giving up,
+rollback when an edit makes things worse, a **plateau → escalation ladder** (one stronger editor per
+proven stall, e.g. opus then Fable 5) before giving up,
 dual **token/USD budgets with crash-resume**, and an optional **confirm-scorer** layer that
 re-checks the artifact only at the done branch to catch reward-hacking.
 
@@ -185,10 +186,10 @@ runs the loop *for* you, pausing for your confirmation before anything spends mo
 | **Target** | the score that counts as done | `100` |
 | **Cost bound** | a hard limit so it can't run away | `--cap 8` + `--budget-tokens 1200000` |
 
-> One more, only if your config hasn't settled it: whether a plateau should escalate the rescue
-> window to **Claude Fable 5** (`--model-escalate fable`) — top-tier, priced above opus, opt-in per
-> run. Set `"escalateModel": "fable"` or `"offerFableEscalation": false` in `whetstone.config.json`
-> to stop being asked.
+> One more, only if your config hasn't settled it: whether a plateau should climb the rescue ladder
+> to **Claude Fable 5** (`--model-escalate fable` = opus rescues first; Fable 5 only if opus also
+> stalls) — top-tier, priced above opus, opt-in per run. Set `"escalateModel": "fable"` or
+> `"offerFableEscalation": false` in `whetstone.config.json` to stop being asked.
 
 **3 · Claude shows the exact command and a worst-case cost** (cap × per-call), then waits. Nothing runs
 until you say go — every confirmed pass auto-accepts file edits and spends real money, so this gate is
@@ -386,8 +387,8 @@ model where it buys the most and keep the per-pass editor cheap:
 |---|---|---|
 | **Editor** — every pass | **sonnet** | real code/content edits. Drop to **haiku** for trivial/mechanical artifacts (the canary converged on Haiku for $0.05). |
 | **Scorer** — deterministic | **code** | test-pass-rate, compile, type-check, SSIM — a perfect, free signal. No model at all. |
-| **Scorer** — subjective | **opus** judge (`scorers/llm-judge.mjs`) | when "good" can't be checked by code. Put the reasoning budget in the *critic*, not the editor. Retries a transient `claude` failure (3 attempts, short backoff, loud on stderr) before reporting scorer failure, so one API blip can't kill a paid run. |
-| **Escalation** — on plateau only | **opus** | when the cheap editor is *provably stuck* (the gate emits `plateau`) the loop switches to Opus for one fresh window, then gives up if still stuck. `--no-escalate` to disable. |
+| **Scorer** — subjective | **opus** judge (`scorers/llm-judge.mjs`) | when "good" can't be checked by code. Put the reasoning budget in the *critic*, not the editor. Retries a transient `claude` failure (3 attempts, short backoff, loud on stderr) before reporting scorer failure, so one API blip can't kill a paid run. Reports its own per-call `usage` on the review, so `spent_tokens`/`spent_usd` charge the judge's spend too (previously invisible — measured at ~20% of a real run's tokens / ~30% of its USD). Done-edge stability/confirm probes and failed retry attempts remain uncounted; `--cap` stays the hard backstop. |
+| **Escalation** — on plateau only | **opus** (ladder to fable) | when the cheap editor is *provably stuck* (the gate emits `plateau`) the loop climbs the escalation ladder one rung per stall — `--model-escalate fable` means opus rescues first, Fable 5 only if opus also stalls — and gives up when the ladder is exhausted. `--no-escalate` to disable. |
 
 Why: editing ("apply this specific critique") is the easy half and runs every pass — a cheap model
 does it well, and `--cap 10` of Opus edits is wasteful. *Evaluation* defines the gradient, so put
@@ -396,15 +397,19 @@ plateau), never up front.
 
 On escalation the strong editor runs in **rescue mode**: it is told a cheaper model already plateaued
 here and to make a *bolder, different-strategy* edit, not a pricier version of the same local tweak.
-One decisive jump — never a cheap→mid→opus retry ladder, since a plateau is already evidence the
-cheaper config is exhausted. Strength rises on **both dials** in that jump: the rescue editor also
-steps reasoning effort up to `high`, while forward passes run at `--effort` (default **medium**).
-Reserve `max` effort for a judge scorer (evaluation is the hard half) or a deep-stall override, never a
-uniform `max` every pass.
+Each climb is one decisive jump **triggered by evidence** — a rung is paid only after the rung below
+it *provably* stalled (plateau or repeated no-op), never as a blind cheap→mid→top retry schedule.
+Strength rises on **both dials** at every rung: each rescue editor also steps reasoning effort up to
+`high`, while forward passes run at `--effort` (default **medium**). Reserve `max` effort for a judge
+scorer (evaluation is the hard half) or a deep-stall override, never a uniform `max` every pass.
 
-The rescue tier is configurable (`--model-escalate <model>` / config `escalateModel`): the `/whet`
-launcher offers a per-run upgrade to **Claude Fable 5** — the top-tier model, priced above opus — so
-you pay Fable only when a plateau proves the run needs it, and only for that one rescue window.
+The rescue tier is configurable (`--model-escalate <model>` / config `escalateModel`) and, since
+v1.6.0, a **ladder**: a bare `fable` auto-expands to `opus,fable` (opus rescues first; **Claude
+Fable 5** — the top-tier model, priced above opus — is paid only when opus *also* stalls), and an
+explicit comma list (`--model-escalate opus,fable`) sets any climb order. Rungs equal to the base
+model drop. Sizing note: each rung consumes a plateau window plus its grace window, so showing a full
+2-rung climb wants `--cap ≳ 3 × plateau-window`. The final report names every climb
+(`escalated at pass 3 → opus, pass 6 → fable`).
 
 ## Backends & the Claude Code Workflow tool
 
