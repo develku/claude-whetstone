@@ -1,6 +1,9 @@
 # Ephemeral loop run state (snapshots, reviews, state.json) — never synced/tracked
 .loop/
 
+# Ephemeral spec-driven-development session artifacts (task briefs, review diffs) — never tracked
+.superpowers/
+
 # Node
 node_modules/
 npm-debug.log*
