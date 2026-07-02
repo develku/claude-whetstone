@@ -9,7 +9,7 @@
 A deterministic <b>loop-engineering</b> driver for Claude Code: <b>code owns the gate</b>, the <b>model owns only diagnosis + edits</b>.
 </p>
 
-> Status: **v1.4.1** — the single-file core is **stable**; the multi-file and orchestration layers are
+> Status: **v1.5.0** — the single-file core is **stable**; the multi-file and orchestration layers are
 > alpha. Matured by running it on itself (dogfooding), so the cost, auth, and security model are exercised
 > end-to-end, not speculative. Requires **Node ≥ 23.5** — the behavioural scorers isolate untrusted code
 > with `module.registerHooks` + the Permission Model. See [What's stable in v1](#whats-stable-in-v1).
@@ -185,6 +185,11 @@ runs the loop *for* you, pausing for your confirmation before anything spends mo
 | **Target** | the score that counts as done | `100` |
 | **Cost bound** | a hard limit so it can't run away | `--cap 8` + `--budget-tokens 1200000` |
 
+> One more, only if your config hasn't settled it: whether a plateau should escalate the rescue
+> window to **Claude Fable 5** (`--model-escalate fable`) — top-tier, priced above opus, opt-in per
+> run. Set `"escalateModel": "fable"` or `"offerFableEscalation": false` in `whetstone.config.json`
+> to stop being asked.
+
 **3 · Claude shows the exact command and a worst-case cost** (cap × per-call), then waits. Nothing runs
 until you say go — every confirmed pass auto-accepts file edits and spends real money, so this gate is
 the whole point.
@@ -344,9 +349,11 @@ Directly measured on this machine (2026-06-22), **not** hand-waved:
   **~100–150K tokens**, so a token budget is roughly `cap × 150000`. On a subscription (Max/Pro) plan
   the USD figure is only a *notional* API-equivalent price — `--budget-tokens` is what the rate limit
   actually counts, so prefer it there.
-- **Persistent defaults** — set `budgetTokens`, `budgetUsd`, `hardCap`, `model`, `effort` once in
-  `~/.config/whetstone/config.json` (personal) or `./whetstone.config.json` (project, wins); CLI flags
-  override. See `examples/whetstone.config.json`.
+- **Persistent defaults** — set `budgetTokens`, `budgetUsd`, `hardCap`, `model`, `effort`,
+  `escalateModel` once in `~/.config/whetstone/config.json` (personal) or `./whetstone.config.json`
+  (project, wins); CLI flags override. See `examples/whetstone.config.json`. `offerFableEscalation`
+  (default `true`) is read by the `/whet` launcher only — it gates the per-run Fable 5 escalation
+  question; the driver ignores it.
 - `--mcp-config empty-mcp.json --strict-mcp-config` **works** (`mcp_servers` → `[]`) — a real cost
   lever. An empty config is bundled at `empty-mcp.json`. `--bare` (which would zero the tax) **does not
   work for OAuth/subscription (Max/Pro) auth** — it returns "Not logged in"; it needs
@@ -394,6 +401,10 @@ cheaper config is exhausted. Strength rises on **both dials** in that jump: the 
 steps reasoning effort up to `high`, while forward passes run at `--effort` (default **medium**).
 Reserve `max` effort for a judge scorer (evaluation is the hard half) or a deep-stall override, never a
 uniform `max` every pass.
+
+The rescue tier is configurable (`--model-escalate <model>` / config `escalateModel`): the `/whet`
+launcher offers a per-run upgrade to **Claude Fable 5** — the top-tier model, priced above opus — so
+you pay Fable only when a plateau proves the run needs it, and only for that one rescue window.
 
 ## Backends & the Claude Code Workflow tool
 

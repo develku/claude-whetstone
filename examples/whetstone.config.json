@@ -3,5 +3,6 @@
   "effort": "medium",
   "hardCap": 12,
   "budgetTokens": 2000000,
+  "offerFableEscalation": true,
   "mcpConfig": "/absolute/path/to/whetstone/empty-mcp.json"
 }

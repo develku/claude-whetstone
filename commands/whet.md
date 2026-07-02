@@ -20,6 +20,26 @@ Otherwise follow **NEW RUN**.
 
 Collect these (use AskUserQuestion; treat any other inline `$ARGUMENTS` text as the goal):
 
+0. **escalation offer (Fable 5)** — before the questions below, read the merged config
+   (`~/.config/whetstone/config.json`, then `./whetstone.config.json` — project wins, the same
+   order the driver uses). **Skip this question entirely** when any of:
+   - the config sets `escalateModel` to any value (the operator already fixed an escalation
+     standard — including `fable` / `claude-fable-5`, where the question is moot), or
+   - the config sets `offerFableEscalation: false`, or
+   - `$ARGUMENTS` / the conversation already states an escalation preference (don't re-ask
+     supplied values).
+
+   Otherwise ask (AskUserQuestion, header "Escalation"):
+   *"If this run plateaus, escalate the rescue window to Claude Fable 5?"*
+   - **Fable 5** — adds `--model-escalate fable`. ⚠ top-tier model, bills above opus; only the
+     plateau rescue window pays it, but each rescue pass costs more than a normal pass.
+   - **Opus (default)** — no flag; plateau rescue stays on the built-in opus default. Do NOT
+     emit `--no-escalate` here — disabling escalation is a separate, unprompted decision.
+
+   The answer applies to THIS RUN ONLY — never write config. If the user picks Fable 5 (or asks
+   to make it permanent / stop being asked), show this copy-paste snippet once, for
+   `whetstone.config.json`: `"escalateModel": "fable"` (always rescue on Fable 5 — also stops
+   this question) · `"offerFableEscalation": false` (keep opus, stop being asked).
 1. **goal** — the objective, injected into every edit prompt.
 2. **artifact** — the single file the loop may edit. Confirm it exists (Read it) before running.
 3. **scorer** — how each pass is scored 0–100. Offer the three bundled scorers:
@@ -64,9 +84,15 @@ string (the flag soup is what users find unfriendly):
 ▶ scorer    <name> (deterministic | ⚠ spends money per pass)
 ▶ target    <N> / 100   ·   cap <N> passes
 ▶ budget    <--budget-tokens N | --budget X | cap-only>
+▶ escalate  <model> on plateau, one rescue window (default opus) | off (--no-escalate)
 ▶ est. cost worst-case ≈ cap × per-call for the chosen model
-            (if the scorer is llm-judge, add its own per-pass spend — roughly cap × (editor + judge))
+            (if the scorer is llm-judge, add its own per-pass spend — roughly cap × (editor + judge);
+            if escalation is fable, the rescue window bills at Fable 5 rates — above this figure)
 ```
+
+On the `▶ escalate` line: tag `fable` with `⚠ bills above opus`; append `(from config)` when
+`escalateModel` came from the config file; show `off` only when the user explicitly asked to
+disable escalation (`--no-escalate`).
 
 Show the **exact command in a fenced block *below* the summary** (transparency — the user must be
 able to see precisely what will run), then ask for explicit confirmation with AskUserQuestion.
@@ -79,7 +105,7 @@ no tool re-vote. Only after they confirm, run it with Bash. Pass an **absolute**
 ```
 node ${CLAUDE_PLUGIN_ROOT}/src/driver.mjs "<goal>" \
   --artifact <abs path> --scorer "<scorer>" --target <N> --cap <N> [--budget <X>] \
-  --model <model> --mcp-config ${CLAUDE_PLUGIN_ROOT}/empty-mcp.json --loop-dir <abs run dir>
+  --model <model> [--model-escalate fable] --mcp-config ${CLAUDE_PLUGIN_ROOT}/empty-mcp.json --loop-dir <abs run dir>
 ```
 
 Report the final verdict the driver prints, then render the run trajectory:
