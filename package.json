@@ -1,6 +1,6 @@
 {
   "name": "claude-whetstone",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "private": true,
   "type": "module",
   "description": "A deterministic loop-engineering driver: code owns the gate, the model owns diagnosis + edits. Raises one artifact toward a measured score threshold.",
