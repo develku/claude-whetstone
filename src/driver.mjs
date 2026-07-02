@@ -5,7 +5,7 @@
 import { spawnSync } from 'node:child_process'
 import { copyFileSync, readFileSync, realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { resolve, join } from 'node:path'
+import { resolve, join, dirname } from 'node:path'
 import { homedir } from 'node:os'
 import { shq } from './shq.mjs'
 import { parseScorerJson } from './parse-scorer.mjs'
@@ -28,6 +28,7 @@ import { formatReport } from './summary.mjs'
 import { forgeShouldFire, runForgeHook } from './forge/hook.mjs'
 import { composeConfirm } from './forge/gate.mjs'
 import { loadStore, saveStore, findCheckKeys, retireCheck } from './forge/store.mjs'
+import { crossRepoPermissionWarning } from './preflight.mjs'
 
 export { shq } // re-exported so callers can keep importing shq from driver (the canonical impl is shq.mjs)
 
@@ -373,6 +374,10 @@ if (process.argv[1] && (
     process.stderr.write('--forge-mutation-threshold must be a number in [0,1]\n')
     process.exit(2)
   }
+  // F2 preflight: warn (non-fatal) when editing a file in a DIFFERENT repo that carries a broad Claude
+  // permission surface — the editor inherits it (runs --permission-mode acceptEdits in the artifact's dir).
+  const permWarn = crossRepoPermissionWarning({ targetDir: dirname(resolve(cfg.artifactPath)) })
+  if (permWarn) process.stderr.write(permWarn + '\n')
   const { state, verdict } = await runFromConfig(cfg)
   process.stdout.write(`\n${verdict.reason}\n${formatReport(state)}\n`)
   process.exit(verdict.status === 'done' ? 0 : 1)

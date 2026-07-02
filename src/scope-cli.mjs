@@ -18,6 +18,7 @@ import { makeDecomposeAct } from './decompose.mjs'
 import { isUnsafeScorer } from './scorer-safety.mjs'
 import { runScopeForgeHook } from './forge/scope-hook.mjs'
 import { floorConfirmCmd } from '../scorers/floor.mjs'
+import { crossRepoPermissionWarning } from './preflight.mjs'
 
 // driver's parseCli plus --scope (becomes the artifact) and --read-only (comma list of gate paths
 // the editor may not touch — the tests/scorer it is graded by).
@@ -234,6 +235,10 @@ if (isMainModule(import.meta.url)) {
     process.stderr.write('refusing to start: --forge-max-files must be a positive integer\n')
     process.exit(2)
   }
+  // F2 preflight: warn (non-fatal) when the --scope repo is outside cwd and carries a broad Claude
+  // permission surface the editor would inherit (runs --permission-mode acceptEdits inside the scope).
+  const permWarn = crossRepoPermissionWarning({ targetDir: rpath(cfg.scope) })
+  if (permWarn) process.stderr.write(permWarn + '\n')
   const { state, verdict } = await runFromConfig(cfg, scopeDeps(cfg))
   process.stdout.write(`\n${verdict.reason}\n${formatReport(state)}\n`)
   process.exit(verdict.status === 'done' ? 0 : 1)
