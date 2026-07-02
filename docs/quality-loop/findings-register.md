@@ -16,13 +16,24 @@ intentional / not worth the cost).
 
 Via `npm run coverage` (src + scorers, deterministic). Ratcheted up by cycle 1.
 
-| Metric | Cycle 0 | Cycle 1 | Cycle 2 | Cycle 3 | Cycle 4 (2026-06-30) | Audit (2026-07-02) |
-|--------|---------|---------|---------|---------|----------------------|--------------------|
-| Line | 96.03% | 96.10% | 96.27% | 96.31% | 96.31% | **96.42%** |
-| Branch | 82.15% | 82.54% | 82.89% | 83.11% | 83.48% | **84.12%** |
-| Function | 91.83% | 92.12% | 92.28% | 93.73% | 93.89% | **94.22%** |
+| Metric | Cycle 0 | Cycle 1 | Cycle 2 | Cycle 3 | Cycle 4 (2026-06-30) | Audit (2026-07-02) | Cycle 5 (2026-07-02) |
+|--------|---------|---------|---------|---------|----------------------|--------------------|----------------------|
+| Line | 96.03% | 96.10% | 96.27% | 96.31% | 96.31% | 96.42% | **96.42%** |
+| Branch | 82.15% | 82.54% | 82.89% | 83.11% | 83.48% | 84.12% ◇ | **84.03%** ◇ |
+| Function | 91.83% | 92.12% | 92.28% | 93.73% | 93.89% | 94.22% | **94.22%** |
 
-The loop must not drop below the latest column; ratchet upward as coverage improves.
+The loop must not drop below the latest column; ratchet **line / function** (stable, exact) upward as
+coverage improves.
+
+◇ **Branch floor recalibrated in cycle 5 (84.12 → 84.03).** Branch coverage is NOT deterministic — it
+jitters across ~[84.03, 84.12] run-to-run because three spawn-based tests flip a branch on an
+*already-covered line* depending on subprocess-scheduling timing: `converge.mjs`, `act-claude.mjs`, and the
+**invariant** `loop.mjs` (which cannot be stabilized without touching a tripwired file). The audit's 84.12
+was the band's *peak* (all three fully covered in that one run), so HEAD — byte-unchanged — cannot reliably
+reproduce it (empirically 84.03/84.06/84.09/84.12 across runs). The branch floor is therefore the reproducible
+**minimum**: a genuine regression drops below it, jitter within the band does not. Line (96.42) and function
+(94.22) are stable and stay exact ratchets. This is a SOFT, manually-compared ratchet (RUNBOOK gate item 4);
+no automated gate reads it. Provenance: cycle-5 QL-01.
 
 ---
 
@@ -140,6 +151,22 @@ works; only its *proof* was fragile.
 | ID | Axis | Sev | File(s) | Status | Note / provenance |
 |----|------|-----|---------|--------|-------------------|
 | FT-01 | test-flakiness | LOW | `test/converge-parallel-overlap.test.mjs` | fixed | The `--parallel` wall-clock-concurrency proof asserted a load-SENSITIVE duration ratio (`concurrent < serial * 0.7`); it flaked once under `npm run coverage` (coverage instrumentation + heavy parallel load inflate the concurrent arm's ratio past the bound). A duration ratio is the wrong instrument — not a logic bug. Replaced the durational proxy with a CAUSAL interval-overlap check: capture each editor child's `[spawn, exit]` interval via the existing `onSpawn`/`onExit` hooks (monotonic `performance.now`), assert the two CONCURRENT children's intervals overlap (`sa < eb && sb < ea`), + a SERIAL negative control that must NOT overlap (gives the check teeth — a serializing spawnSync fails it). Load-INDEPENDENT: overlap is ordering, not speed. Verified: isolation + full `npm run coverage` incl. one under core saturation, all green; coverage ≥ floor; 8 invariant files byte-identical. Adversarial 3-lens review (no-weakening / teeth / residual-flakiness) all PASS. Not an invariant file. Spun off as its own session (task `task_c9b5a4ee`, branch `claude/unruffled-lederberg-623e2c`); landed into the audit merge. |
+
+### Cycle 5 (2026-07-02) — adversarial re-probe of AUD-04 + AUD-01 + 4-axis discovery (2 candidates → 0 confirmed)
+
+A 6-agent Workflow (4 parallel axis finders + refute-by-default verifiers, **no-web**, empirical) re-probed the
+two freshest security fixes and swept for new issues. **All four axes returned NEGATIVE — boundaries sound**,
+independently reproduced by a separate main-loop probe harness that ran hostile artifacts through the real
+`runIsolated` (verify against source, not model consensus). The two surfaced candidates were both REFUTED by the
+adversarial verifiers. **Zero code changes** this cycle — strong convergence (cores/boundaries sound) continues
+across cycles 1–4 + the audit + now cycle 5.
+
+| ID | Axis | Sev | File(s) | Status | Note / provenance |
+|----|------|-----|---------|--------|-------------------|
+| AUD-04-reprobe | security | — | `src/iso-runner.mjs`, `src/iso-runner-child.mjs`, `src/iso-frame.mjs`, `src/iso-execute.mjs` | verified-sound | 12 egress + nonce-recovery hypotheses empirically refuted through the real `runIsolated`: all socket builtins (+`dns/promises` subpaths) DENY at the resolve hook; `data:`-URL nested `node:net` still denied; network-import URLs refused by Node's loader (the `bare('https://…')`=`'https:'` trailing-colon DENY-miss is a **DEAD path** — schemes unsupported + `--experimental-network-imports` removed on Node ≥22); `fetch`/`WebSocket`/`EventSource`/`WebTransport` deleted; `process.{getBuiltinModule,binding,_linkedBinding,dlopen}` deleted; `node:wasi` imports but `new WASI()` is `--permission`-blocked (no `--allow-wasi`, preview1 has no sockets); nonce unrecoverable (fd0→EOF, argv scrubbed, env allowlisted, iso-frame namespace exports immutable, primitive-poisoning never intercepts the template-literal frame on a string primitive); `process.report` carries no nonce / no tcp-udp handle. **AUD-04 FIXED disposition holds.** |
+| AUD-01-reprobe | security | — | `src/decompose.mjs`, `src/scope-cli.mjs`, `src/scorer-safety.mjs`, `scorers/*` | verified-sound | 6 shell-reach hypotheses refuted: `SHELL_SCORERS` is EXACTLY the shell-executing set (grep of all 10 scorers → `composite`/`floor`/`llm-judge`/`test-pass-rate` are the only `shell:true`/claude spawns; the 6 data-only scorers never shell — io-* spawn a **fixed arg-array** locked child, not a shell); `shq` neutralizes `$()`/backtick/quote/newline/`;`/`&&`/`\|` proven in a real shell across the two-hop `resolveSubGate`→`test-pass-rate` path (double-shq); `allowlist.get(id)` is exact-match (no normalization dodge admits a shell scorer); `loopDirInsideScope` realpath-aware; `base+sep` containment segment-correct; `trustedScorerCmd` = operator's `--scorer` (no model influence). **AUD-01 FIXED disposition holds.** |
+| QL-01 | coverage/process | LOW | `docs/quality-loop/{findings-register,RUNBOOK}.md` | fixed | **Branch-coverage floor mis-calibration.** The recorded branch floor 84.12 is the *peak* of a ~[84.03, 84.12] jitter band (line 96.42 / function 94.22 stable); HEAD (byte-unchanged) reproduces 84.03–84.12 across runs. Root cause: three spawn-based tests flip a branch on an *already-covered line* by subprocess-scheduling timing — `converge.mjs`, `act-claude.mjs`, invariant `loop.mjs`. The adversarial verifier correctly REFUTED the finding's "gate spuriously trips" framing (the ratchet is SOFT/manual per RUNBOOK gate 4 — no code reads it), but the underlying mis-calibration is real and recurs at each cycle's manual coverage check. Fix (operator-approved): recalibrate the branch floor to the reproducible **minimum** 84.03, document the jitter + its invariant-file source, keep line/function as exact ratchets. Docs-only; no code/test/invariant change. |
+| SIMP-1 | simplification | — | `src/act-claude.mjs` (+`plan-call.mjs`, `forge/generate.mjs`, `scorers/llm-judge.mjs`) | wontfix | 5-site `claude -p` result-element extractor duplication (`JSON.parse` + `find(type:'result')`) — REFUTED as a fix by adversarial verify: same tolerated-dup disposition as C1-12 / C4-03 (only a 1-line shared ternary; downstream field extraction + parse-fail behavior diverge per site; a shared helper adds cross-module coupling for little clarity gain). Its one novel argument — a `find` vs `findLast` "inconsistency" — is defensive-code-for-impossible-state (a real `--output-format json` stream has exactly one terminal `result` element, so both resolve identically; the `findLast` is deliberately documented forward-proofing), which the maintainer's rules reject. |
 
 ---
 
