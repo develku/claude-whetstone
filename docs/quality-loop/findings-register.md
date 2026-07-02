@@ -38,7 +38,7 @@ The loop must not drop below the latest column; ratchet upward as coverage impro
 | Q-004 | correctness/security | MEDIUM | `src/act-claude.mjs` | fixed | NaN-coercion `|| 0` guard pinned for present-but-non-numeric cost/token fields (cycle 1, `86c92e1`). |
 | Q-005 | simplification | LOW | `src/safe-rel.mjs`, `src/plan-resolve.mjs`, `src/scope-cli.mjs` | wontfix | Adversarial verify CONFIRMED the differences are load-bearing (throw-vs-null, realpath-vs-pure, root-allowed-vs-rejected); unifying would re-open the symlink import-RCE the io-* epic closed. No change. |
 | Q-006 | coverage | LOW | `src/outer-cli.mjs`, `src/replan-cli.mjs`, `src/plan-cli.mjs` | deferred | Function coverage 64–71% on alpha-tier CLIs (Track A / dynamic control plane, maintainer-marked alpha-unsupported). Lower value until those graduate. |
-| Q-007 | security | LOW | `src/iso-frame.mjs` | open | Theoretical frame-forgery: nonce extraction via `indexOf` twice; 16-hex-char random nonce makes collision implausible. Not re-surfaced by the cycle-1 security finder. Verify next cycle, likely wontfix. |
+| Q-007 | security | LOW | `src/iso-frame.mjs` | wontfix | Verified during the 2026-07-02 audit → NOT exploitable. The guarantee is nonce SECRECY, not marker distinctness: the 64-bit `randomBytes(8)` nonce is passed over stdin (off-disk) and heap-recovery is denied (`node:v8` in the child DENY set), so a forged `<<nonce>>` frame requires a 2^-64 guess. A nonce-collision inside the payload degrades to unparseable → score 0 (fail-safe), never a forged pass. Covered by the A2 fd-forge + heap-snapshot-deny tests. No change (no defensive code for an impossible case). |
 
 ### Cycle 1 (2026-06-30) — adversarial 4-axis audit (13 candidates → 12 verified → 11 fixed)
 
