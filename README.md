@@ -334,6 +334,12 @@ Directly measured on this machine (2026-06-22), **not** hand-waved:
   edit, but do **not** point the loop at a repo with *broad* write/exec grants either — it will
   auto-accept edits there every pass with no human in the loop. Scope the artifact's project so the
   blast radius is just that artifact.
+- **Cross-repo permission preflight (non-fatal).** When the target artifact lives in a different repo
+  than the driver's cwd, the driver now warns before running if that repo's `.claude/settings.json` /
+  `settings.local.json` grants a broad permission surface (a non-empty `permissions.allow`, or
+  bypass-by-default via `defaultMode: 'bypassPermissions'` / `dangerouslySkipPermissions`) — since the
+  headless editor inherits and auto-accepts edits under that surface. Same-repo targets are unaffected;
+  the warning is advisory, not a hard stop.
 - The scorer's critique is fed back into the editor prompt each pass. It is **untrusted data** (a model
   judge or custom scorer can echo artifact/observed content), so the prompt fences it and tells the
   editor to ignore instructions inside it — a *soft* mitigation. The real control is the permission
