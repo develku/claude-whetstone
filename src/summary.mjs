@@ -22,6 +22,31 @@ export function thinScorerWarning(state) {
   return `⚠ thin-scorer suspicion: done in 1 edit pass, margin +${margin}, no done-edge check wired. ${advice}`;
 }
 
+// AUD-06: the editor touched files OUTSIDE the artifact and the blast-radius guard reverted them. Code-owned
+// fixed prose + numbers only (no model text). Returns the warning line, or null when the run stayed in bounds.
+export function blastRadiusWarning(state) {
+  const v = state.blast_radius?.violations;
+  if (!Array.isArray(v) || v.length === 0) return null;
+  const reverted = v.reduce((n, e) => n + (e.reverted?.length ?? 0), 0);
+  const unreverted = v.reduce((n, e) => n + (e.detectedOnly?.length ?? 0), 0);
+  const capped = v.some((e) => e.capped);
+  let msg = `⚠ blast-radius: the editor wrote outside the artifact on ${v.length} pass(es) — ${reverted} sibling edit(s) reverted`;
+  if (unreverted) msg += `, ${unreverted} over-budget change(s) NOT reverted`;
+  if (capped) msg += ' (sibling monitoring hit its cap — some edits were unmonitored)';
+  return msg + '.';
+}
+
+// AUD-08: the opt-in --gate-audit result. Advisory: a low kill-rate means the primary scorer failed to notice
+// broken mutants of the accepted artifact (a weak gate). Code-owned fixed prose + numbers only. Returns null
+// when no audit ran.
+export function gateAuditLine(state) {
+  const a = state.gate_audit;
+  if (!a) return null;
+  if (a.skipped) return `gate-audit: skipped — ${a.skipped}`;
+  const errNote = a.errored ? ` (${a.errored} errored)` : '';
+  return `gate-audit: the primary scorer killed ${a.killed}/${a.sampled} sampled mutants${errNote} — a low kill-rate means a weak gate.`;
+}
+
 export function summarizeRun(state) {
   const passes = state.history.length;
   // best_score is null on a baseline-error run — render '—' rather than 'best null @ pass 0'.
@@ -39,5 +64,9 @@ export function summarizeRun(state) {
   } else if (state.escalated_at_pass != null) out += `\nescalated at pass ${state.escalated_at_pass}`;
   const thin = thinScorerWarning(state);
   if (thin) out += `\n${thin}`;
+  const blast = blastRadiusWarning(state);
+  if (blast) out += `\n${blast}`;
+  const gaudit = gateAuditLine(state);
+  if (gaudit) out += `\n${gaudit}`;
   return out;
 }

@@ -13,7 +13,7 @@ import { isUnsafeScorer, SHELL_SCORERS, SHELL_SCORER_PATHS } from '../scorer-saf
 import { generateCandidates, claudePropose } from './generate.mjs'
 import { admitCheck, scorerRunCheck } from './admit.mjs'
 import { mutationAdmit } from './mutation-admit.mjs'
-import { admitSurvivesExploits } from './exploit-regression.mjs'
+import { admitSurvivesExploits, exploitArchivePath, loadExploitArchive, appendExploit, saveExploitArchive } from './exploit-regression.mjs'
 import { corroborateLabels } from './corroborate.mjs'
 import { pruneFlaky } from './prune.mjs'
 import { loadStore, saveStore, addCheck, listActiveChecks } from './store.mjs'
@@ -117,6 +117,20 @@ export async function runForgeHook({ cfg, state, loopDir, trigger = 'recovered-v
   }
   const bad = deps.badArtifact ?? safeSnapshotPath(loopDir, badRef)
   const good = deps.goodArtifact ?? state.artifact_path
+  // AUD-07: capture the vetoed gamed snapshot into the live exploit archive (beside the store file) so the
+  // regression gate grows past its static seeds. recovered-veto ONLY — an easy-done baseline is merely "before",
+  // not a confirmed exploit. Best-effort: a missing/unreadable snapshot must never fail a done run (the driver
+  // also fail-safes forge errors).
+  if (trigger === 'recovered-veto' && cfg.forgeStorePath) {
+    try {
+      if (existsSync(bad)) {
+        const archivePath = exploitArchivePath(cfg.forgeStorePath)
+        saveExploitArchive(archivePath, appendExploit(loadExploitArchive(archivePath), {
+          source: readFileSync(bad, 'utf8'), taxonomy: 'live-veto', origin: basename(loopDir), ts: state.updated_at ?? null,
+        }))
+      }
+    } catch { /* archive is best-effort; forge learning continues regardless */ }
+  }
   const allowlist = forgeAllowlist(cfg.scorerAllow)
   const generate = deps.generate ?? ((a) => generateCandidates({ ...a, propose: (p) => claudePropose(p, { model: cfg.model }) }))
   // Admission composition (centralized order: admitCheck -> mutationAdmit -> admitSurvivesExploits — each is a
@@ -128,7 +142,7 @@ export async function runForgeHook({ cfg, state, loopDir, trigger = 'recovered-v
     ? (a) => mutationAdmit({ ...a, runCheck: scorerRunCheck, oracleCmds: cfg.forgeOracleCmds ?? [], mutationKillThreshold: cfg.forgeMutationThreshold })
     : (a) => admitCheck({ ...a, runCheck: scorerRunCheck })
   const admit = deps.admit ?? (cfg.forgeExploitRegression
-    ? (a) => admitSurvivesExploits({ ...a, runCheck: scorerRunCheck, baseAdmit })
+    ? (a) => admitSurvivesExploits({ ...a, runCheck: scorerRunCheck, baseAdmit, archivePath: cfg.forgeStorePath ? exploitArchivePath(cfg.forgeStorePath) : null })
     : baseAdmit)
   // Frontier 2a: corroborate the veto's good/bad labelling with independent operator oracles before learning.
   // Oracles run VERBATIM via scorerRunCheck (operator-authored, NOT through forgeAllowlist). Empty oracleCmds

@@ -18,5 +18,17 @@ export function buildLedger(state) {
         ? `last edit: ${delta} (REGRESSED — try a different approach, do not repeat it)`
         : `last edit: no change (the gradient did not move — try a different approach)`
   const best = Number.isFinite(state.best_score) ? state.best_score : '?'
-  return `Score trajectory: ${recent}. Best so far: ${best}. ${effect}.`
+  let line = `Score trajectory: ${recent}. Best so far: ${best}. ${effect}.`
+  // AUD-05: the pass just scored was reverted by keep-best — tell the editor the live file is the best
+  // snapshot so it does not "fix" a regression that was already erased on disk. Fixed prose with
+  // finite-number-only interpolation (best_pass / best_score), preserving the trusted-region contract.
+  if (
+    state.restored_at_pass === state.pass &&
+    Number.isFinite(state.restored_at_pass) &&
+    Number.isFinite(state.best_pass) &&
+    Number.isFinite(state.best_score)
+  ) {
+    line += ` NOTE: the last edit was REVERTED by keep-best; the live file is the pass-${state.best_pass} best (score ${state.best_score}).`
+  }
+  return line
 }

@@ -170,7 +170,16 @@ export async function runLoop({ state, evaluate, act, persist, save = null, log 
       s = persist(s, { ...(await evaluate(s)), costUsd: a.costUsd ?? 0, tokens: a.tokens ?? 0 })
 
       const target = restoreTarget(s)
-      if (target != null && restore != null) await restore(target)
+      if (target != null && restore != null) {
+        await restore(target)
+        // keep-best reverted the live artifact to the best snapshot: re-point the steering critique at
+        // the version now on disk — the just-persisted critique describes the reverted (dead) edit (AUD-05).
+        // undefined = a legacy state.json without best_critique -> keep the historical behavior.
+        // Stamp BEFORE verifyDone so a stability/confirm veto (which re-scores the RESTORED artifact) can
+        // legitimately overwrite with its fresher critique.
+        s = { ...s, last_critique: s.best_critique !== undefined ? s.best_critique : s.last_critique, restored_at_pass: s.pass }
+        if (save) save(s)
+      }
 
       ;({ s, v } = await verifyDone(s, gateVerdict(s)))
 

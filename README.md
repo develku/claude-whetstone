@@ -9,10 +9,18 @@
 A deterministic <b>loop-engineering</b> driver for Claude Code: <b>code owns the gate</b>, the <b>model owns only diagnosis + edits</b>.
 </p>
 
-> Status: **v1.8.0** — the single-file core is **stable**; the multi-file and orchestration layers are
+> Status: **v1.9.0** — the single-file core is **stable**; the multi-file and orchestration layers are
 > alpha. Matured by running it on itself (dogfooding), so the cost, auth, and security model are exercised
 > end-to-end, not speculative. Requires **Node ≥ 23.5** — the behavioural scorers isolate untrusted code
 > with `module.registerHooks` + the Permission Model. See [What's stable in v1](#whats-stable-in-v1).
+>
+> **New in v1.9.0** (feedback-fidelity hardening): a keep-best rollback now re-points the editor's steering
+> critique at the version actually on disk (it used to critique the reverted, dead one); the single-file loop
+> **code-enforces** "edit ONLY the artifact" — sibling edits are reverted (`--allow-sibling-edits` opts out);
+> the Forge's exploit-regression archive now **grows** from real confirm-vetoed snapshots; and an opt-in
+> `--gate-audit` mutates the finished artifact and re-scores a few mutants to report the primary scorer's
+> kill-rate (a low rate = a weak gate). Each candidate mutant is a full scorer run, so it is opt-in (the
+> scorer may be paid).
 
 ## Introduction
 

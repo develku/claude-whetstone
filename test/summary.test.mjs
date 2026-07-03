@@ -1,6 +1,31 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { summarizeRun, thinScorerWarning } from '../src/summary.mjs'
+import { summarizeRun, thinScorerWarning, blastRadiusWarning, gateAuditLine } from '../src/summary.mjs'
+
+test('gateAuditLine: null with no audit; kill-rate line with an errored note; skip note (AUD-08)', () => {
+  assert.equal(gateAuditLine({}), null)
+  assert.match(gateAuditLine({ gate_audit: { sampled: 6, killed: 2, survived: 4, errored: 0 } }), /killed 2\/6 sampled mutants/)
+  assert.match(gateAuditLine({ gate_audit: { sampled: 6, killed: 5, survived: 0, errored: 1 } }), /\(1 errored\)/)
+  assert.match(gateAuditLine({ gate_audit: { skipped: 'the scorer scores observe output, not the artifact' } }), /skipped — .*observe/)
+})
+
+test('blastRadiusWarning: null in bounds; summarizes reverted + over-budget + capped when violated (AUD-06)', () => {
+  assert.equal(blastRadiusWarning({}), null)
+  assert.equal(blastRadiusWarning({ blast_radius: { violations: [] } }), null)
+  const w = blastRadiusWarning({ blast_radius: { violations: [
+    { reverted: ['a.mjs', 'b.mjs'], detectedOnly: [] },
+    { reverted: ['c.mjs'], detectedOnly: ['big.bin'], capped: true },
+  ] } })
+  assert.match(w, /2 pass\(es\)/)
+  assert.match(w, /3 sibling edit\(s\) reverted/)
+  assert.match(w, /1 over-budget change\(s\) NOT reverted/)
+  assert.match(w, /cap/)
+})
+
+test('summarizeRun appends the blast-radius line when the run had reverted sibling edits (AUD-06)', () => {
+  const out = summarizeRun({ status: 'done', history: [{}, {}], hard_cap: 10, best_score: 95, best_pass: 1, target_score: 90, current_score: 95, confirm_scorer_cmd: 'x', blast_radius: { violations: [{ reverted: ['s.mjs'], detectedOnly: [] }] } })
+  assert.match(out, /blast-radius/)
+})
 
 // summarizeRun(state) renders a human-readable run summary. Exact format:
 //   line 1: '<STATUS> — best <best_score> @ pass <best_pass>'

@@ -19,11 +19,12 @@ const sha256 = (p) => createHash('sha256').update(readFileSync(join(root, p))).d
 // imports its verdict fn (gateVerdict/validScore) from the then-unpinned gate — the actual "code owns the gate" core.
 const INVARIANT = {
   'src/gate.mjs': 'b0cb2139ef36bbed304e6a6cf10e9ed02209e3488fd6ce03b4079d2f3819ac11',
-  // loop.mjs hash DELIBERATELY updated 2026-07-02 (v1.6.0): actEscalated generalized from one jump to an
-  // ordered escalation LADDER (single fn stays a one-rung ladder — historical behavior byte-for-byte in
-  // semantics, proven by the pre-existing escalation tests passing unchanged). Reviewed change, operator-
-  // requested (sonnet→opus→fable); decision provenance in the v1.6.0 commit body.
-  'src/loop.mjs': '223863b356de2fca02d91457c8320a6f43246a37d9cd3551d18fe8bae304e226',
+  // loop.mjs hash DELIBERATELY updated 2026-07-03 (v1.9.0, AUD-05): after a keep-best restore the loop now
+  // re-points last_critique at best_critique + stamps restored_at_pass + save()s, so the next edit is steered
+  // by the live (restored) artifact, not the reverted dead version. Stamp is BEFORE verifyDone so a later
+  // stability/confirm veto legitimately overwrites. DCA 20260703T203705 (REFINED-AND-PROCEED, Option A);
+  // all pre-existing loop/restore tests pass unchanged. (Prior deliberate bump: 2026-07-02 v1.6.0 escalation ladder.)
+  'src/loop.mjs': '17eb8fff1e872a3d8b11314fdfc4064434a308b3db3e7f1dff48d286c622ebc6',
   'src/forge/run.mjs': '60aef92be0dfed2d9891da67ebbcd0b49dd36f684b060027b0fd68d8ac9b063b',
   'src/forge/gate.mjs': '16b6bcb3ad3600a45456ca3486137ffd94d1c186dd90aadb8ab09420ccdad5c9',
   'src/forge/store.mjs': 'cd8d0049e5070a3757456c0eea8030c34c084a378ace03c6e2fd8678473d8c66',

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runFromConfig, parseCli, shq, editorEffort, loadConfig } from '../src/driver.mjs'
+import { recordPass } from '../src/state.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const scriptedScorer = join(here, 'fixtures', 'scripted-scorer.mjs')
@@ -42,6 +43,100 @@ test('runs the full pipeline, persists artifacts, and converges to done', async 
   }
   const saved = JSON.parse(readFileSync(join(dir, '.loop', 'state.json'), 'utf8'))
   assert.equal(saved.status, 'done')
+})
+
+test('AUD-06: the driver code-reverts an out-of-bounds sibling edit and stamps state.blast_radius (default ON)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'whetstone-blast-'))
+  const artifact = join(dir, 'artifact.txt'); writeFileSync(artifact, 'v0')
+  const sibling = join(dir, 'sibling.txt'); writeFileSync(sibling, 'orig')
+  let n = 0
+  // makeAct (not deps.act) so the driver builds AND wraps the editor; the editor edits the artifact + a sibling.
+  const make = () => async () => { writeFileSync(artifact, `v${++n}`); writeFileSync(sibling, 'tampered'); return { changed: true, costUsd: 0 } }
+  const { state } = await runFromConfig(
+    { goal: 'g', artifactPath: artifact, scorerCmd, targetScore: 90, hardCap: 10, loopDir: join(dir, '.loop') },
+    { makeAct: make, log: () => {} },
+  )
+  assert.equal(readFileSync(sibling, 'utf8'), 'orig', 'the guard reverted the sibling edit')
+  assert.ok((state.blast_radius?.violations?.length ?? 0) >= 1, 'a violation is stamped on the durable state')
+})
+
+test('AUD-06: --allow-sibling-edits opts out; an injected deps.act is never wrapped', async () => {
+  const mk = (over, deps) => {
+    const dir = mkdtempSync(join(tmpdir(), 'whetstone-blast2-'))
+    const artifact = join(dir, 'artifact.txt'); writeFileSync(artifact, 'v0')
+    const sibling = join(dir, 'sibling.txt'); writeFileSync(sibling, 'orig')
+    let n = 0
+    const editor = async () => { writeFileSync(artifact, `v${++n}`); writeFileSync(sibling, 'tampered'); return { changed: true, costUsd: 0 } }
+    return { dir, artifact, sibling, cfg: { goal: 'g', artifactPath: artifact, scorerCmd, targetScore: 90, hardCap: 10, loopDir: join(dir, '.loop'), ...over }, deps: deps(editor) }
+  }
+  // opt-out via flag (still a driver-built act)
+  const a = mk({ allowSiblingEdits: true }, (ed) => ({ makeAct: () => ed, log: () => {} }))
+  const ra = await runFromConfig(a.cfg, a.deps)
+  assert.equal(readFileSync(a.sibling, 'utf8'), 'tampered', 'flag disables the guard')
+  assert.equal(ra.state.blast_radius, undefined)
+  // injected deps.act is never wrapped
+  const b = mk({}, (ed) => ({ act: ed, log: () => {} }))
+  const rb = await runFromConfig(b.cfg, b.deps)
+  assert.equal(readFileSync(b.sibling, 'utf8'), 'tampered', 'an injected act bypasses the guard')
+  assert.equal(rb.state.blast_radius, undefined)
+})
+
+test('parseCli defaults --allow-sibling-edits off and --gate-audit off; both flip true when passed', () => {
+  const off = parseCli([])
+  assert.equal(off.allowSiblingEdits, false)
+  assert.equal(off.gateAudit, false)
+  const on = parseCli(['--allow-sibling-edits', '--gate-audit'])
+  assert.equal(on.allowSiblingEdits, true)
+  assert.equal(on.gateAudit, true)
+})
+
+test('AUD-08: --gate-audit runs a post-done audit once and stamps state.gate_audit; off by default', async () => {
+  const run = async (gateAudit) => {
+    const dir = mkdtempSync(join(tmpdir(), 'whetstone-gaudit-'))
+    const artifact = join(dir, 'artifact.txt'); writeFileSync(artifact, 'v0'); let n = 0
+    let called = 0
+    const { state, verdict } = await runFromConfig(
+      { goal: 'g', artifactPath: artifact, scorerCmd, targetScore: 90, hardCap: 10, loopDir: join(dir, '.loop'), gateAudit },
+      { act: async () => { writeFileSync(artifact, `v${++n}`); return { changed: true, costUsd: 0 } }, runGateAudit: async () => { called++; return { sampled: 3, killed: 3, survived: 0, errored: 0 } }, log: () => {} },
+    )
+    assert.equal(verdict.status, 'done')
+    return { called, state }
+  }
+  const off = await run(false)
+  assert.equal(off.called, 0)
+  assert.equal(off.state.gate_audit, undefined)
+  const on = await run(true)
+  assert.equal(on.called, 1)
+  assert.equal(on.state.gate_audit.killed, 3)
+})
+
+test('AUD-08: a gate-audit error never fails an already-done run (fail-safe)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'whetstone-gaudit-err-'))
+  const artifact = join(dir, 'a.txt'); writeFileSync(artifact, 'v0'); let n = 0
+  const { verdict, state } = await runFromConfig(
+    { goal: 'g', artifactPath: artifact, scorerCmd, targetScore: 90, hardCap: 10, loopDir: join(dir, '.loop'), gateAudit: true },
+    { act: async () => { writeFileSync(artifact, `v${++n}`); return { changed: true, costUsd: 0 } }, runGateAudit: async () => { throw new Error('boom') }, log: () => {} },
+  )
+  assert.equal(verdict.status, 'done')
+  assert.equal(state.gate_audit, undefined) // not stamped on error
+})
+
+test('AUD-08: --gate-audit skips (no mutant scoring) when the scorer scores observe output', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'whetstone-gaudit-obs-'))
+  const artifact = join(dir, 'a.txt'); writeFileSync(artifact, 'v0'); let n = 0
+  let called = 0
+  const scoreQ = [50, 95]
+  const { state } = await runFromConfig(
+    { goal: 'g', artifactPath: artifact, observeCmd: 'echo x', scorerCmd, targetScore: 90, hardCap: 10, loopDir: join(dir, '.loop'), gateAudit: true },
+    {
+      buildContext: () => ({ evaluate: async () => ({ score: scoreQ.shift(), critique: 'c' }), persist: (s, ev) => recordPass(s, { ...ev, snapshot: `iter_${s.history.length}.txt` }), confirm: null }),
+      act: async () => { writeFileSync(artifact, `v${++n}`); return { changed: true, costUsd: 0 } },
+      runGateAudit: async () => { called++; return {} },
+      log: () => {},
+    },
+  )
+  assert.equal(called, 0, 'observe_cmd -> audit skipped before any mutant scoring')
+  assert.match(state.gate_audit.skipped, /observe/)
 })
 
 test('shq single-quotes a value and escapes embedded single quotes', () => {

@@ -84,6 +84,30 @@ test('recordPass accumulates spent_tokens and tolerates a pre-feature state with
   assert.equal(recordPass(old, { score: 70, tokens: 5 }).spent_tokens, 5)
 })
 
+test('initState defaults best_critique and restored_at_pass to null (AUD-05)', () => {
+  const s = newState()
+  assert.equal(s.best_critique, null)
+  assert.equal(s.restored_at_pass, null)
+})
+
+test('recordPass tracks best_critique: updates on a new best, holds on regression and tie (AUD-05)', () => {
+  let s = newState()
+  s = recordPass(s, { score: 50, critique: 'a' }) // baseline is the best
+  assert.equal(s.best_critique, 'a')
+  s = recordPass(s, { score: 80, critique: 'b' }) // new best
+  assert.equal(s.best_critique, 'b')
+  s = recordPass(s, { score: 40, critique: 'c' }) // regression -> hold
+  assert.equal(s.best_critique, 'b')
+  s = recordPass(s, { score: 80, critique: 'd' }) // tie (strict >) -> hold
+  assert.equal(s.best_critique, 'b')
+})
+
+test('recordPass stores best_critique=null, never undefined, when the best pass has no critique (AUD-05, Codex guard)', () => {
+  const s = recordPass(newState(), { score: 90 }) // no critique field -> default null; this is the best
+  assert.equal(s.best_critique, null)
+  assert.notEqual(s.best_critique, undefined)
+})
+
 // The editor runs in dirname(artifact_path) and snapshot/restore/evaluate copy it; a RELATIVE
 // artifact_path resolves against whatever cwd the driver (or a later --resume) runs from, so a
 // resume from another dir reads/writes the wrong file. Resolve it to absolute once, at init.

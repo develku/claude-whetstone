@@ -7,6 +7,8 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { shq } from '../src/shq.mjs'
 import { forgeShouldFire, forgeAllowlist, forgeCatalog, runForgeHook } from '../src/forge/hook.mjs'
+import { exploitArchivePath, loadExploitArchive } from '../src/forge/exploit-regression.mjs'
+import { mkdirSync as mkdirSyncArch } from 'node:fs'
 
 const CONTENT_SCORER = `node ${shq(join(dirname(fileURLToPath(import.meta.url)), 'fixtures/content-scorer.mjs'))} --needle FORGE_OK`
 
@@ -280,6 +282,32 @@ test('runForgeHook easy-done falls back to an empty critique when the baseline r
   let seen = null
   await runForgeHook({ cfg, state, loopDir, trigger: 'easy-done' }, { runForge: async (a) => { seen = a; return {} }, generate: async () => ({}), admit: async () => ({}), pruneFlaky: async () => [] })
   assert.equal(seen.critique, '')
+})
+
+// --- AUD-07: live exploit archive write path (recovered-veto appends; easy-done does not) ---
+
+test('AUD-07: a recovered-veto run appends the vetoed snapshot to exploits.json beside the store; re-fire dedups', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-hook-arch-'))
+  const bad = join(dir, 'vetoed.mjs'); writeFileSync(bad, 'export const gamed = 1 // dead text sort\n')
+  const cfg = { forge: true, confirmScorerCmd: 'x', forgeStorePath: join(dir, 'checks.json'), scorerAllow: [], model: 'sonnet' }
+  const state = { goal: 'g', artifact_path: join(dir, 'final.mjs'), last_critique: 'gamed', confirm_vetoed_at_pass: 0, history: [{ snapshot: 'snap' }], updated_at: 't' }
+  const deps = { badArtifact: bad, goodArtifact: join(dir, 'final.mjs'), runForge: async () => ({ admitted: [], rejected: [], corroborated: true }), generate: async () => ({}), admit: async () => ({}), pruneFlaky: async () => [] }
+  await runForgeHook({ cfg, state, loopDir: dir }, deps)
+  const archivePath = exploitArchivePath(cfg.forgeStorePath)
+  assert.equal(loadExploitArchive(archivePath).exploits.length, 1)
+  assert.match(loadExploitArchive(archivePath).exploits[0].source, /gamed/)
+  await runForgeHook({ cfg, state, loopDir: dir }, deps) // re-fire same content
+  assert.equal(loadExploitArchive(archivePath).exploits.length, 1, 're-firing the same vetoed content must dedup')
+})
+
+test('AUD-07: an easy-done trigger does NOT append (a baseline is not a confirmed exploit)', async () => {
+  const loopDir = mkdtempSync(join(tmpdir(), 'forge-hook-arch-easy-'))
+  mkdirSyncArch(join(loopDir, 'snapshots'), { recursive: true })
+  writeFileSync(join(loopDir, 'snapshots', 'iter_000.txt'), 'baseline content')
+  const state = { goal: 'g', artifact_path: '/run/final.txt', last_critique: '', confirm_vetoed_at_pass: null, history: [{ snapshot: 'snapshots/iter_000.txt', critique_ref: 'x' }, { snapshot: 'snapshots/iter_001.txt' }] }
+  const cfg = { forge: true, forgeStorePath: join(loopDir, 'checks.json'), scorerAllow: [], model: 'sonnet' }
+  await runForgeHook({ cfg, state, loopDir, trigger: 'easy-done' }, { runForge: async () => ({ admitted: [], rejected: [], corroborated: true }), generate: async () => ({}), admit: async () => ({}), pruneFlaky: async () => [] })
+  assert.deepEqual(loadExploitArchive(exploitArchivePath(cfg.forgeStorePath)), { version: 1, exploits: [] })
 })
 
 test('forgeShouldFire fires when the confirm gate was AUTO-COMPOSED (state cmd set, cfg flag null) — guard widening', () => {

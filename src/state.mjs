@@ -32,10 +32,17 @@ export function initState(cfg) {
     effort: cfg.effort ?? 'medium',
     pass: 0,
     last_critique: null,
+    // The critique of the best pass so far. On a keep-best rollback the loop re-points last_critique
+    // at this, so the next edit is steered by the version now on disk — not the reverted (dead) one
+    // (AUD-05). null (not undefined) even when the best pass had no critique text, so the restore
+    // guard can tell "known-no-critique" (fall back to neutral) from "legacy state.json" (keep old).
+    best_critique: null,
     current_score: null,
     best_score: null,
     best_pass: null,
     confirm_vetoed_at_pass: null,
+    // RECORD-ONLY provenance (like confirm_vetoed_at_pass): the pass whose edit keep-best reverted.
+    restored_at_pass: null,
     spent_usd: 0,
     spent_tokens: 0,
     status: 'running',
@@ -57,6 +64,10 @@ export function recordPass(state, { score, critique = null, snapshot = null, rev
     ...state,
     pass,
     last_critique: critique,
+    // Track the best pass's critique alongside best_score/best_pass (AUD-05). `critique` defaults to
+    // null, so a new best with no critique text stores null — never undefined (the restore guard relies
+    // on undefined meaning ONLY "legacy state.json without this field").
+    best_critique: isBest ? critique : state.best_critique,
     current_score: score,
     best_score: isBest ? score : state.best_score,
     best_pass: isBest ? pass : state.best_pass,

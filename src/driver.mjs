@@ -24,7 +24,9 @@ import { runLoop } from './loop.mjs'
 import { makeClaudeAct } from './act-claude.mjs'
 import { validateConfig, EFFORT_LEVELS } from './validate.mjs'
 import { prepareResume } from './resume.mjs'
-import { formatReport } from './summary.mjs'
+import { formatReport, gateAuditLine } from './summary.mjs'
+import { withBlastRadius } from './blast-radius.mjs'
+import { runGateAudit } from './gate-audit.mjs'
 import { forgeShouldFire, easyForgeShouldFire, runForgeHook, composeConfirmFromStore } from './forge/hook.mjs'
 import { withAreaLedger } from './area-registry.mjs'
 import { composeConfirm } from './forge/gate.mjs'
@@ -167,20 +169,27 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
   // make is the editor factory (injectable so a test can observe the effort/model each editor is
   // built with — the real makeClaudeAct's effort is otherwise unobservable behind a claude spawn).
   const make = deps.makeAct ?? makeClaudeAct
-  const act = deps.act ?? make({ artifactPath: state.artifact_path, model: state.model, mcpConfig: cfg.mcpConfig, effort: editorEffort(state, false) })
+  // AUD-06: wrap ONLY driver-built editors (never an injected deps.act — tests/scope inject their own; scope
+  // mode already enforces the boundary via git). Default ON; --allow-sibling-edits or scope mode disables it.
+  // Violations are collected for the final state stamp; the summary surfaces them.
+  const blastViolations = []
+  const wrapBlast = (a) => (cfg.scope || cfg.allowSiblingEdits)
+    ? a
+    : withBlastRadius(a, { artifactPath: state.artifact_path, record: (r) => blastViolations.push(r) })
+  const act = deps.act ?? wrapBlast(make({ artifactPath: state.artifact_path, model: state.model, mcpConfig: cfg.mcpConfig, effort: editorEffort(state, false) }))
   // One rescue editor per ladder rung, each at the floored (never lowered) rescue effort;
   // runLoop climbs them in order, one rung per proven stall.
   const actEscalated =
     deps.actEscalated ??
     (rungModels.length
-      ? rungModels.map((m) => make({ artifactPath: state.artifact_path, model: m, mcpConfig: cfg.mcpConfig, effort: editorEffort(state, true) }))
+      ? rungModels.map((m) => wrapBlast(make({ artifactPath: state.artifact_path, model: m, mcpConfig: cfg.mcpConfig, effort: editorEffort(state, true) })))
       : null)
 
   // keep-best: restore a prior snapshot back over the live artifact when a pass regressed.
   // safeSnapshotPath refuses a ref that escapes the run dir (a poisoned snapshot ref on resume).
   const restore = deps.restore ?? ((snap) => copyFileSync(safeSnapshotPath(loopDir, snap), state.artifact_path))
 
-  const { state: final, verdict } = await runLoop({
+  const runOut = await runLoop({
     state,
     evaluate,
     act,
@@ -192,6 +201,9 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
     skipBaseline,
     log: deps.log ?? defaultLog,
   })
+  const verdict = runOut.verdict
+  // AUD-06: stamp any code-reverted out-of-bounds sibling edits onto the durable state + the returned state.
+  let final = blastViolations.length ? { ...runOut.state, blast_radius: { violations: blastViolations } } : runOut.state
   saveState(loopDir, final)
   // Verifier Forge (brick 4a + v1.8.0): learn private checks post-run — on a recovered-veto done (good/bad =
   // final/vetoed snapshot) or a suspiciously-easy done (good/bad = final/baseline). Single-fire: the triggers
@@ -211,6 +223,25 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
       else log({ ...base, status: 'forge', reason: `admitted ${r.admitted.length}, rejected ${r.rejected.length} (${forgeTrigger})` })
     } catch (e) {
       ;(deps.log ?? defaultLog)({ pass: final.pass, score: final.current_score, best: final.best_score, status: 'forge-error', reason: `${forgeTrigger}: ${e.message}` })
+    }
+  }
+  // AUD-08: opt-in post-done primary-scorer kill-rate audit — advisory, never changes the verdict. Fail-safe
+  // (an audit error must not fail a done run). Skipped when the scorer scores OBSERVE output: mutating the
+  // artifact file proves nothing about the scored output. Post-run, so control flow above is untouched.
+  if (cfg.gateAudit && verdict.status === 'done') {
+    try {
+      const audit = final.observe_cmd
+        ? { skipped: 'the scorer scores observe output, not the artifact' }
+        : await (deps.runGateAudit ?? runGateAudit)({
+            artifactPath: final.artifact_path,
+            targetScore: final.target_score,
+            scoreOutput: (p) => runScorer(final.scorer_cmd, { output: p, loopDir, pass: final.history.length }).score,
+          })
+      final = { ...final, gate_audit: audit }
+      saveState(loopDir, final)
+      ;(deps.log ?? defaultLog)({ pass: final.pass, score: final.current_score, best: final.best_score, status: 'gate-audit', reason: gateAuditLine(final) ?? 'skipped' })
+    } catch (e) {
+      ;(deps.log ?? defaultLog)({ pass: final.pass, score: final.current_score, best: final.best_score, status: 'gate-audit-error', reason: e.message })
     }
   }
   return { state: final, verdict }
@@ -318,6 +349,13 @@ export function parseCli(argv, defaults = {}) {
     // Brick 1.5: also require an admitted candidate to SURVIVE the executable exploit archive (reject a check an
     // archived gaming pattern can dodge). Composes after mutation-admit. Opt-in.
     forgeExploitRegression: argv.includes('--forge-exploit-regression'),
+    // AUD-06: code-enforce "edit ONLY <artifact>" in the single-file loop — snapshot the artifact's sibling
+    // files, revert any the editor also touched. Default ON; opt out for a workflow that legitimately writes
+    // siblings. (Scope mode has git enforcement and ignores this.)
+    allowSiblingEdits: argv.includes('--allow-sibling-edits'),
+    // AUD-08: opt-in post-done advisory — mutate the final artifact, re-score ≤6 mutants with the PRIMARY
+    // scorer, report the kill-rate (a weak scorer converges confidently). Opt-in because the scorer may be paid.
+    gateAudit: argv.includes('--gate-audit'),
   }
 }
 
@@ -410,7 +448,7 @@ if (process.argv[1] && (
 
   const cfg = parseCli(argv, loadConfig())
   if (!cfg.goal || !cfg.artifactPath || !cfg.scorerCmd) {
-    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--budget-tokens N] [--stability-runs N] [--plateau-window N] [--min-delta X] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>] [--forge --forge-store <path> --scorer-allow <scorer.mjs,...> [--forge-oracle "<scorer cmd>" ...] [--forge-mutation-admit [--forge-mutation-threshold 0.75]]]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--stability-runs N] [--plateau-window N] [--min-delta X] [--target T] [--model M]\n')
+    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--budget-tokens N] [--stability-runs N] [--plateau-window N] [--min-delta X] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>] [--allow-sibling-edits] [--gate-audit] [--forge --forge-store <path> --scorer-allow <scorer.mjs,...> [--forge-oracle "<scorer cmd>" ...] [--forge-mutation-admit [--forge-mutation-threshold 0.75]]]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--stability-runs N] [--plateau-window N] [--min-delta X] [--target T] [--model M]\n')
     process.exit(2)
   }
   // Mutation-backed admit needs an independent oracle (codex finding 7): refuse the explicit flag without one
