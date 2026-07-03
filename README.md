@@ -275,6 +275,8 @@ it manages the long haul itself:
 
 - **plateau →** one bold Opus rescue, then it gives up rather than burning Opus every pass;
 - **keep-best →** a regressing edit is rolled back, so the run can't drift backward;
+- **transient blips →** a rate-limit/API-overload editor failure is retried with backoff (parity with
+  the judge's v1.5.1 retry), so one API blip can't kill an overnight run;
 - **confirmation →** an independent finish-line check (`--confirm-scorer`) vetoes a gamed "done" — which
   matters more the longer it runs.
 
@@ -385,7 +387,7 @@ model where it buys the most and keep the per-pass editor cheap:
 
 | Role | Default | Use |
 |---|---|---|
-| **Editor** — every pass | **sonnet** | real code/content edits. Drop to **haiku** for trivial/mechanical artifacts (the canary converged on Haiku for $0.05). |
+| **Editor** — every pass | **sonnet** | real code/content edits. Drop to **haiku** for trivial/mechanical artifacts (the canary converged on Haiku for $0.05). A transient fatal exit (rate limit, API overload) is retried with backoff (3 attempts, loud on stderr) — parity with the judge — so one blip can't kill an unattended run; failed attempts stay uncounted (`--cap` is the backstop). |
 | **Scorer** — deterministic | **code** | test-pass-rate, compile, type-check, SSIM — a perfect, free signal. No model at all. |
 | **Scorer** — subjective | **opus** judge (`scorers/llm-judge.mjs`) | when "good" can't be checked by code. Put the reasoning budget in the *critic*, not the editor. Retries a transient `claude` failure (3 attempts, short backoff, loud on stderr) before reporting scorer failure, so one API blip can't kill a paid run. Reports its own per-call `usage` on the review, so `spent_tokens`/`spent_usd` charge the judge's spend too (previously invisible — measured at ~20% of a real run's tokens / ~30% of its USD). Done-edge stability/confirm probes and failed retry attempts remain uncounted; `--cap` stays the hard backstop. |
 | **Escalation** — on plateau only | **opus** (ladder to fable) | when the cheap editor is *provably stuck* (the gate emits `plateau`) the loop climbs the escalation ladder one rung per stall — `--model-escalate fable` means opus rescues first, Fable 5 only if opus also stalls — and gives up when the ladder is exhausted. `--no-escalate` to disable. |
@@ -410,6 +412,12 @@ explicit comma list (`--model-escalate opus,fable`) sets any climb order. Rungs 
 model drop. Sizing note: each rung consumes a plateau window plus its grace window, so showing a full
 2-rung climb wants `--cap ≳ 3 × plateau-window`. The final report names every climb
 (`escalated at pass 3 → opus, pass 6 → fable`).
+
+The final report also flags a **thin-scorer suspicion** (v1.7.0): a run that reaches `done` in ≤1 edit
+pass with *no* done-edge check wired (`--confirm-scorer` / `--stability-runs`) converged suspiciously
+easily — evidence the *scorer* may be thin, not that the artifact is good. The warning is code-owned
+fixed prose + numbers (it can never carry model text), and it stays quiet when the done-edge already
+paid skepticism or when convergence took real work.
 
 ## Backends & the Claude Code Workflow tool
 

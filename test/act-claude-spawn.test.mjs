@@ -63,7 +63,9 @@ test('makeClaudeAct real spawn: error_max_turns exits non-zero but is NOT fatal 
 
 test('makeClaudeAct real spawn: a fatal non-zero exit THROWS with the surfaced editor reason', async () => {
   await withArtifact(async ({ artifact }) => {
-    const act = makeClaudeAct({ artifactPath: artifact, claudeBin: FAKE, timeoutMs: 10_000 })
+    // Zero-wait sleep + silent warn: the fatal path now runs the FULL default retry (3 attempts) before
+    // throwing — same assertions, just no real 2s/5s backoff waits or stderr noise in the suite.
+    const act = makeClaudeAct({ artifactPath: artifact, claudeBin: FAKE, timeoutMs: 10_000, retry: { sleep: async () => {}, warn: () => {} } })
     await assert.rejects(
       actWithEnv(act, { WHET_FAKE_MODE: 'fatal' }),
       (e) => /exited 1/.test(e.message) && /(api_error_status|Overloaded|error_during_execution)/.test(e.message),

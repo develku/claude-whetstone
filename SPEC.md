@@ -95,7 +95,11 @@ artifact before/after (the no-op guard). `costUsd` and `tokens` are parsed from 
 `claude -p --output-format json` result — `total_cost_usd` and the summed `usage` token counts
 (input + output + both cache counts), feeding `spent_usd` and `spent_tokens` respectively. Isolated in
 `act-claude.mjs` because it is the costly, environment-sensitive part — everything
-else is testable with a stub.
+else is testable with a stub. A FATAL editor exit (rate limit, API overload) is retried with backoff
+(v1.7.0: 3 attempts, 2s/5s — the act twin of the judge's v1.5.1 retry) before the loop sees a throw;
+the spawn-error path (ENOENT / ETIMEDOUT / ENOBUFS) still throws immediately (permanent, or re-pays the
+10-minute timeout), `error_max_turns` stays non-fatal bounded progress, and a failed attempt's spend
+stays uncounted (`--cap` is the hard backstop).
 
 ## state.json (code is the only writer)
 

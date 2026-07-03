@@ -164,7 +164,7 @@ export function buildClaudeArgs({ prompt, maxTurns = 12, model = null, mcpConfig
   return args
 }
 
-// opts: { artifactPath, maxTurns, model, claudeBin, mcpConfig, effort, timeoutMs }
+// opts: { artifactPath, maxTurns, model, claudeBin, mcpConfig, effort, timeoutMs, retry }
 // mcpConfig: path to an empty/whitelist MCP config to suppress the per-spawn
 // context tax (loading every MCP server). Strongly recommended for cost control.
 // timeoutMs: hard wall-clock cap so a hung/stalled editor can't wedge an unattended
@@ -172,29 +172,58 @@ export function buildClaudeArgs({ prompt, maxTurns = 12, model = null, mcpConfig
 // detached/onSpawn default off; they exist so a concurrent fan-out (converge --parallel) can run this
 // editor async with a process-group kill + pid capture. The single-file loop leaves them off, so its
 // behaviour is unchanged (it awaits one act at a time regardless).
-export function makeClaudeAct({ artifactPath, maxTurns = 12, model = null, claudeBin = 'claude', mcpConfig = null, effort = null, timeoutMs = 10 * 60 * 1000, detached = false, onSpawn = null, onExit = null } = {}) {
+// retry: { attempts, backoffMs, sleep, warn } — the act twin of llm-judge's judgeWithRetry (v1.5.1;
+// one transient `claude` exit-1 killed a whole paid run — the loop treats any act throw as terminal).
+// Scope is deliberately NARROWER than the judge's blanket retry: only the fatal-EXIT path (where rate
+// limits / API overloads live) is retried. The res.error path stays throw-immediately — ENOENT is
+// permanent, ETIMEDOUT would re-pay a 10-minute timeout (not "only costs seconds"), ENOBUFS is
+// deterministic. error_max_turns stays non-fatal bounded progress, returned not retried. A failed
+// attempt's spend stays uncounted, like the judge's failed retries — --cap is the hard backstop.
+export function makeClaudeAct({ artifactPath, maxTurns = 12, model = null, claudeBin = 'claude', mcpConfig = null, effort = null, timeoutMs = 10 * 60 * 1000, detached = false, onSpawn = null, onExit = null, retry = {} } = {}) {
+  const {
+    attempts = 3,
+    backoffMs = [2000, 5000],
+    sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+    warn = (m) => process.stderr.write(`${m}\n`),
+  } = retry
   return async (state) => {
+    // before-hash and prompt are computed ONCE, spanning all attempts: a failed attempt may have applied
+    // partial edits (acceptEdits is incremental), and changed-detection must see them; the prompt depends
+    // only on state, which does not change between attempts.
     const before = hashFile(artifactPath)
     const prompt = buildEditorPrompt(state, artifactPath)
 
     // Resolve --mcp-config against the driver's cwd NOW, because the child runs in a different cwd.
     const args = buildClaudeArgs({ prompt, maxTurns, model, mcpConfig: resolveMcpConfig(mcpConfig), effort })
 
-    // Run in the artifact's own directory so the nested edit inherits THAT project's
-    // config — not whatever cwd the driver was launched from. (A driver launched inside
-    // another project's session would otherwise hand the child a restrictive deny layer
-    // that silently blocks the edit; validated 2026-06-22.)
-    const res = await spawnEditorAsync(claudeBin, args, { cwd: dirname(artifactPath), timeoutMs, detached, onSpawn, onExit })
-    // res.error is set on spawn failure, timeout (ETIMEDOUT), or maxBuffer overflow. Surface the
-    // code so the loop's error handler records an actionable reason instead of a silent hang.
-    if (res.error) throw new Error(`editor ${claudeBin} failed (${res.error.code || res.error.message})`)
-    // A FATAL non-zero exit (rate limit, unreadable --mcp-config, auth failure) is a real failure — and
-    // res.error is null for it. Without surfacing it, a failed call slips through as a {changed:false, $0}
-    // no-op and the loop misreports it as "no artifact change". But a turn-limit hit (error_max_turns) is
-    // NOT fatal: the editor's incremental edits are applied, so the pass is bounded progress to be scored.
-    if (editorExitDisposition(res.status, res.stdout).fatal) throw new Error(`editor ${claudeBin} exited ${res.status}: ${editorFailureReason(res.stdout, res.stderr)}`)
-
-    const after = hashFile(artifactPath)
-    return { changed: before !== after, costUsd: extractCost(res.stdout), tokens: extractTokens(res.stdout) }
+    let lastErr
+    for (let i = 0; i < attempts; i++) {
+      // Run in the artifact's own directory so the nested edit inherits THAT project's
+      // config — not whatever cwd the driver was launched from. (A driver launched inside
+      // another project's session would otherwise hand the child a restrictive deny layer
+      // that silently blocks the edit; validated 2026-06-22.)
+      const res = await spawnEditorAsync(claudeBin, args, { cwd: dirname(artifactPath), timeoutMs, detached, onSpawn, onExit })
+      // res.error is set on spawn failure, timeout (ETIMEDOUT), or maxBuffer overflow. Surface the
+      // code so the loop's error handler records an actionable reason instead of a silent hang.
+      // Never retried (see the retry contract above).
+      if (res.error) throw new Error(`editor ${claudeBin} failed (${res.error.code || res.error.message})`)
+      // A FATAL non-zero exit (rate limit, unreadable --mcp-config, auth failure) is a real failure — and
+      // res.error is null for it. Without surfacing it, a failed call slips through as a {changed:false, $0}
+      // no-op and the loop misreports it as "no artifact change". But a turn-limit hit (error_max_turns) is
+      // NOT fatal: the editor's incremental edits are applied, so the pass is bounded progress to be scored.
+      if (!editorExitDisposition(res.status, res.stdout).fatal) {
+        const after = hashFile(artifactPath)
+        return { changed: before !== after, costUsd: extractCost(res.stdout), tokens: extractTokens(res.stdout) }
+      }
+      lastErr = new Error(`editor ${claudeBin} exited ${res.status}: ${editorFailureReason(res.stdout, res.stderr)}`)
+      if (i < attempts - 1) {
+        const ms = backoffMs[Math.min(i, backoffMs.length - 1)] ?? 0
+        // Each retry warns (never silent); the LAST error is rethrown unchanged below, so the loop's
+        // error handler sees the identical failure shape it saw before retry existed.
+        warn(`editor: attempt ${i + 1}/${attempts} failed: ${lastErr.message} — retrying in ${ms / 1000}s`)
+        await sleep(ms)
+      }
+    }
+    throw lastErr
   }
 }

@@ -6,11 +6,21 @@
 //   WHET_FAKE_MODE   success (default) | max_turns | fatal | hang
 //   WHET_FAKE_EDIT   absolute path to append to (simulates the model editing the artifact); omitted = no-op
 //   WHET_FAKE_COST   total_cost_usd to report (default 0.01)
+//   WHET_FAKE_FAIL_TIMES + WHET_FAKE_COUNTER   fail-then-succeed for the retry test: behave as 'fatal' for
+//                    the first N invocations, then 'success'. Env is static per spawn, so the invocation
+//                    count is persisted in the WHET_FAKE_COUNTER file across spawns.
 // Emits the same [init, result] stream `claude -p --output-format json` produces so extractCost/extractTokens/
 // editorExitDisposition/editorFailureReason all parse it exactly as they would the real CLI.
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
 
-const mode = process.env.WHET_FAKE_MODE || 'success'
+let mode = process.env.WHET_FAKE_MODE || 'success'
+const failTimes = Number(process.env.WHET_FAKE_FAIL_TIMES || 0)
+if (failTimes > 0 && process.env.WHET_FAKE_COUNTER) {
+  let n = 0
+  try { n = Number(readFileSync(process.env.WHET_FAKE_COUNTER, 'utf8')) || 0 } catch { /* first invocation — no counter yet */ }
+  writeFileSync(process.env.WHET_FAKE_COUNTER, String(n + 1))
+  mode = n < failTimes ? 'fatal' : 'success'
+}
 if (mode === 'hang') {
   setInterval(() => {}, 1000) // stay alive past the caller's timeoutMs so spawn-editor's timeout kill fires
 } else {
