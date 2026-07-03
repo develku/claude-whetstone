@@ -90,6 +90,11 @@ test('initState defaults best_critique and restored_at_pass to null (AUD-05)', (
   assert.equal(s.restored_at_pass, null)
 })
 
+test('initState defaults retry_memo to null and carries cfg.retryMemo when set (AUD-09)', () => {
+  assert.equal(newState().retry_memo, null)
+  assert.equal(newState({ retryMemo: 'attempt 1: rolled back (floor 42)' }).retry_memo, 'attempt 1: rolled back (floor 42)')
+})
+
 test('recordPass tracks best_critique: updates on a new best, holds on regression and tie (AUD-05)', () => {
   let s = newState()
   s = recordPass(s, { score: 50, critique: 'a' }) // baseline is the best

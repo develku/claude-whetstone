@@ -326,10 +326,31 @@ export const rollbackToLastGood = (scopeDir, lastGoodSha) => {
   git(scopeDir, ['clean', '-fdq'])
 }
 
+// AUD-09: a code-composed summary of THIS objective's prior FAILED rounds, so a retried child does not
+// repeat a dead approach it already tried. Pure; built from code-authored round `reason`s + finite floor
+// scores only (never scorer/model free-text), and re-fenced as DATA in the editor prompt (belt-and-suspenders).
+export function composeRetryMemo(rounds, objId) {
+  const failed = (rounds ?? []).filter((r) => r.objectiveId === objId && r.accepted === false)
+  if (!failed.length) return null
+  const lines = failed.map((r, i) => {
+    // reason is code-authored ('no in-scope change', the tournament winner's-curse strings). The rollback
+    // round carries no reason — synthesize from its FINITE floor score. Anything else: a bare "attempt failed".
+    const why = r.reason
+      ? r.reason
+      : r.rolledBack && Number.isFinite(r.floor_score)
+        ? `candidate rolled back (floor ${r.floor_score})`
+        : 'attempt failed'
+    return `attempt ${i + 1}: ${why}`
+  })
+  return `This objective was already attempted and failed. Do NOT repeat these approaches — try a different strategy:\n${lines.join('\n')}`
+}
+
 export function buildObjectiveCfg(obj, state, cfg, wt, globalRO, slice) {
   return {
     objectiveId: obj.id, // carried so the parallel launcher can key its killChild pid-map by objective
     goal: obj.goal,
+    // AUD-09: prior failed-attempt memo for THIS objective (null on the first attempt) -> initState -> the child's prompt.
+    retryMemo: composeRetryMemo(state.rounds, obj.id),
     scope: wt,
     artifactPath: wt,
     scorerCmd: obj.scorer,

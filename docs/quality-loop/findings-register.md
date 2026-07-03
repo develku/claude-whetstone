@@ -179,6 +179,13 @@ A 15-agent audit vs field prior art (evaluator-optimizer / DSPy / Agent Capsules
 | AUD-07 | hardening | MEDIUM | `src/forge/exploit-regression.mjs`, `src/forge/hook.mjs` | fixed | **Exploit-regression archive was frozen at 3 static seeds.** Real observed gaming (confirm-vetoed snapshots) was discarded. Live `exploits.json` beside the store file: append on recovered-veto (sha256 dedup, FIFO 20), consumed at admission via the existing materialize seam. `store.mjs` (invariant) untouched. No redaction (sources must round-trip runnable); executes only through `runCheck`, the channel admitCheck already uses. |
 | AUD-08 | verification | LOW | `src/gate-audit.mjs`, `src/driver.mjs`, `src/summary.mjs` | fixed | **Primary-gate strength never measured** — a weak scorer converges confidently. Opt-in `--gate-audit`: post-done, mutate the final artifact, re-score ≤6 sampled mutants with the PRIMARY scorer, report the kill-rate (survived = the scorer let a broken mutant clear target). Advisory only (never changes the verdict); opt-in because the scorer may be paid; fail-safe; skipped under `--observe`. |
 
+### Phase B (2026-07-03) — deferred architecture-adaptation items (planned by Fable, run by Opus)
+
+| ID | Axis | Sev | File(s) | Status | Note / provenance |
+|---|---|---|---|---|---|
+| AUD-09 | correctness | LOW | `src/converge.mjs`, `src/state.mjs`, `src/scope-act.mjs` | fixed | **Converge retries started blind** — a failed objective retried in a fresh child could repeat the exact dead approach the last attempt already failed (`state.rounds` recorded the failures but nothing fed them forward). Fix (v1.10.0): `composeRetryMemo(rounds, objId)` summarizes THIS objective's prior failed rounds (code-authored `reason`s + finite floor scores only); `buildObjectiveCfg` carries it as `retryMemo` → `initState` `retry_memo` → `buildScopePrompt` renders it as a nonce-**fenced** `PRIOR-ATTEMPTS` DATA block (own nonce). No invariant file touched; no model spawn; the child is in-process `runFromConfig` so the memo flows straight through. TDD RED→GREEN. |
+| AUD-10 | verification | — | `src/forge/gate-probe.mjs` (+driver/hook/summary) | deferred | Gate self-probe (full hacker-fixer, operator chose Option B): mutate the accepted artifact, run the composed confirm gate, route survivors into paid Forge learning. PAID → **DCA required first** (cost caps, trigger, `gate-survivor` routing). Planned; not yet built. |
+
 ---
 
 ## How findings enter

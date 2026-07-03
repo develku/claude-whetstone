@@ -6,6 +6,19 @@ import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { scopeChanged, buildScopePrompt, enforceReadOnly } from '../src/scope-act.mjs'
 
+test('buildScopePrompt fences a retry_memo as a PRIOR-ATTEMPTS data block (AUD-09)', () => {
+  const state = { goal: 'g', last_critique: 'c', history: [], escalated: false, retry_memo: 'attempt 1: no in-scope change' }
+  const p = buildScopePrompt(state, { scopeDir: '/repo', readOnly: [], nonce: 'aaaa', areasNonce: 'bbbb', memoNonce: 'cccc' })
+  assert.match(p, /<<<PRIOR-ATTEMPTS cccc>>>/)     // opened with the memo's own nonce
+  assert.match(p, /attempt 1: no in-scope change/) // the memo text is present, inside the fence
+  assert.match(p, /<<<END cccc>>>/)                // and closed
+})
+
+test('buildScopePrompt omits the PRIOR-ATTEMPTS block when there is no retry_memo (AUD-09)', () => {
+  const p = buildScopePrompt({ goal: 'g', last_critique: 'c', history: [], escalated: false }, { scopeDir: '/repo', readOnly: [] })
+  assert.doesNotMatch(p, /PRIOR-ATTEMPTS/)
+})
+
 test('buildScopePrompt: editScope narrows the edit instruction', () => {
   const state = { goal: 'g', last_critique: 'do x', history: [], escalated: false }
   const p = buildScopePrompt(state, { scopeDir: '/repo', readOnly: [], editScope: 'src/auth' })

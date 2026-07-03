@@ -53,6 +53,9 @@ export function initState(cfg) {
     // Fence-safe discard-memory (v1.8.0): per-area sighting registry from scorer findings — see
     // src/area-registry.mjs. Read with `?? []` (pre-feature state.json files lack it).
     area_ledger: [],
+    // AUD-09: a converge retry child receives a code-composed summary of THIS objective's prior failed
+    // attempts (buildObjectiveCfg -> cfg.retryMemo); the scope prompt fences it. null for single-file runs.
+    retry_memo: cfg.retryMemo ?? null,
   }
 }
 
