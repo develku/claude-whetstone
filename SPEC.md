@@ -21,6 +21,15 @@ Two further code-owned guards live in the loop, not the gate: a **no-op** pass
 → `capped` (two parallel cost dials — USD for API-key auth, tokens for a subscription/Max plan
 where the USD figure is only a notional API-equivalent price).
 
+**Forge triggers & consume (v1.8.0).** The Verifier Forge learns checks post-run on TWO disjoint
+signals: a **recovered-veto** done (good/bad = final/vetoed snapshot — the original trigger) and an
+**easy done** (1 edit pass, no confirm/stability wired; good/bad = final/BASELINE snapshot). Learned
+checks are consumed at the next fresh run's start: with a base confirm cmd they compose MIN(base,
+…checks); with NO base confirm a file-mode run now composes the gate from the store alone
+(`composeConfirmFromStore`), so an unwired run that learned on run N is gated on run N+1 — which also
+self-quiets the easy trigger. Checks from the easy pair pass the current final by construction (they
+cannot veto the run that learned them; the payoff is strictly next-run).
+
 **Done-branch confirmation (optional, `confirm_scorer_cmd`).** When the gate would declare
 `done`, an INDEPENDENT confirm scorer re-scores the same output — but ONLY on the done edge, so
 normal passes stay cheap and the skepticism is paid only at the finish line. If the confirm score
@@ -90,7 +99,11 @@ The model edits **only** `artifact_path`, one coherent change, steered by
 trajectory, the best-so-far bar, and whether the last edit improved/regressed) so the editor does
 not repeat a failed edit — the bounded middle between amnesia (last critique only) and the harmful
 full-history context that degrades long refinement loops. The ledger is numbers-only, so it stays
-trusted and outside the critique fence. `changed` is computed by the driver via a sha256 of the
+trusted and outside the critique fence. Its semantic complement (v1.8.0) is the **area ledger**
+(`src/area-registry.mjs`): scorer `findings[].area` sightings folded into `state.area_ledger` each
+persist; areas attacked ≥2× with no best-score gain render into the prompt inside their OWN nonce
+fence (TRIED-AREAS) — code decides WHICH areas qualify, the fence carries the scorer-authored strings
+(they never enter the trusted region, even sanitized). `changed` is computed by the driver via a sha256 of the
 artifact before/after (the no-op guard). `costUsd` and `tokens` are parsed from the headless
 `claude -p --output-format json` result — `total_cost_usd` and the summed `usage` token counts
 (input + output + both cache counts), feeding `spent_usd` and `spent_tokens` respectively. Isolated in
@@ -110,7 +123,8 @@ pass, last_critique, current_score, best_score, best_pass, confirm_vetoed_at_pas
 escalated, escalated_at_pass,   # set when a stall triggered a stronger editor (latest climb)
 escalations, escalate_models,   # v1.6.0 ladder provenance: [{pass, rung}] per climb + the rung models in order
 status(running|done|capped|plateau|error), status_reason, started_at, updated_at,
-history: [{ pass, score, critique_ref, snapshot, ts }]
+history: [{ pass, score, critique_ref, snapshot, ts }],
+area_ledger: [{ area, first_pass, last_pass, seen_count, best_at_first }]   # v1.8.0 discard-memory (kept on --resume)
 ```
 
 ## Run directory (`.loop/<run>/`, gitignored)

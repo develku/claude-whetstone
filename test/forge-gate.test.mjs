@@ -155,3 +155,78 @@ test('resuming a composed --forge run does NOT double-wrap the confirm scorer (f
   )
   assert.equal(s2.confirm_scorer_cmd, s1.confirm_scorer_cmd) // identical — not a composite-of-a-composite
 })
+
+// --- consume-without-base (v1.8.0 easy-done companion) --------------------------------------------
+// The invariant composeConfirm passes through when there is no base confirm (gate.mjs:36), so an unwired
+// run never consumed stored checks — everything an easy-done run learned would never bite. The non-invariant
+// sibling composeConfirmFromStore (forge/hook.mjs) closes that: run N learns -> run N+1 auto-gets a gate.
+import { composeConfirmFromStore } from '../src/forge/hook.mjs'
+
+test('composeConfirmFromStore composes a check-only manifest (no base line) and returns a composite cmd', () => {
+  let wrote = null
+  const cmd = composeConfirmFromStore(
+    { storePath: '/s.json', loopDir: '/run', compositePath: '/c/composite.mjs' },
+    { loadStore: () => ({}), listChecks: () => [{ cmd: 'node a.mjs --needle X' }, { cmd: 'node b.mjs' }], writeManifest: (p, body) => { wrote = { p, body } } },
+  )
+  assert.equal(cmd, `node ${shq('/c/composite.mjs')} --scorers-file ${shq('/run/gate-checks.txt')}`)
+  assert.equal(wrote.p, '/run/gate-checks.txt')
+  assert.equal(wrote.body, 'node a.mjs --needle X\nnode b.mjs\n')
+})
+
+test('composeConfirmFromStore returns null (no write) on an empty store', () => {
+  let wrote = false
+  const cmd = composeConfirmFromStore(
+    { storePath: '/s.json', loopDir: '/run' },
+    { loadStore: () => ({}), listChecks: () => [], writeManifest: () => { wrote = true } },
+  )
+  assert.equal(cmd, null)
+  assert.equal(wrote, false)
+})
+
+test('composeConfirmFromStore consumes only checks of the requested kind', () => {
+  let store = addCheck(emptyStore(), { cmd: 'node f.mjs', target: 100 })
+  store = addCheck(store, { cmd: 'node s.mjs --rel x.mjs', target: 100, kind: 'scope' })
+  let body = null
+  composeConfirmFromStore({ storePath: '/s', loopDir: '/run' }, { loadStore: () => store, writeManifest: (_p, b) => { body = b } })
+  assert.equal(body, 'node f.mjs\n')
+})
+
+test('a fresh --forge run with NO base confirm auto-composes the gate from stored checks', async () => {
+  const loopDir = mkdtempSync(join(tmpdir(), 'forge-autogate-'))
+  const storePath = checkStorePath(loopDir)
+  saveStore(storePath, addCheck(emptyStore(), { cmd: 'node /x.mjs --needle Y', target: 100, reason: 'r' }))
+  const { state } = await runFromConfig(
+    { goal: 'g', artifactPath: join(loopDir, 'a.txt'), scorerCmd: 's', targetScore: 90, hardCap: 3, loopDir, forge: true, forgeStorePath: storePath },
+    trivialDeps(),
+  )
+  assert.ok(state.confirm_scorer_cmd.includes('composite.mjs'))
+  assert.ok(state.confirm_scorer_cmd.includes('gate-checks.txt'))
+  assert.equal(readFileSync(join(loopDir, 'gate-checks.txt'), 'utf8'), 'node /x.mjs --needle Y\n') // NO base line
+})
+
+test('a SCOPE --forge run with NO base confirm stays unwired (auto-compose is file-mode only this increment)', async () => {
+  const loopDir = mkdtempSync(join(tmpdir(), 'forge-autogate-scope-'))
+  const storePath = checkStorePath(loopDir)
+  saveStore(storePath, addCheck(emptyStore(), { cmd: 'node /s.mjs --rel x.mjs', target: 100, kind: 'scope' }))
+  const { state } = await runFromConfig(
+    { goal: 'g', artifactPath: join(loopDir, 'a.txt'), scope: '/some/repo', scorerCmd: 's', targetScore: 90, hardCap: 3, loopDir, forge: true, forgeStorePath: storePath },
+    trivialDeps(),
+  )
+  assert.equal(state.confirm_scorer_cmd, null)
+})
+
+test('resuming an AUTO-composed --forge run does NOT re-compose (fresh-only guard)', async () => {
+  const loopDir = mkdtempSync(join(tmpdir(), 'forge-autogate-resume-'))
+  const storePath = checkStorePath(loopDir)
+  saveStore(storePath, addCheck(emptyStore(), { cmd: 'node /x.mjs --needle Y', target: 100, reason: 'r' }))
+  const { state: s1 } = await runFromConfig(
+    { goal: 'g', artifactPath: join(loopDir, 'a.txt'), scorerCmd: 's', targetScore: 90, hardCap: 2, loopDir, forge: true, forgeStorePath: storePath },
+    wipDeps(),
+  )
+  assert.ok(s1.confirm_scorer_cmd.includes('composite.mjs'))
+  const { state: s2 } = await resumeFromConfig(
+    { loopDir, overrides: { hard_cap: 4 }, forge: true, forgeStorePath: storePath, noEscalate: true },
+    wipDeps(),
+  )
+  assert.equal(s2.confirm_scorer_cmd, s1.confirm_scorer_cmd)
+})

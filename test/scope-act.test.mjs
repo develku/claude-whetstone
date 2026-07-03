@@ -81,3 +81,20 @@ test('enforceReadOnly reverts edits to read-only paths, keeps in-scope edits (ri
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('buildScopePrompt renders qualified tried-areas inside their OWN nonce fence (v1.8.0 discard-memory)', () => {
+  const state = {
+    goal: 'g', last_critique: 'fix it', best_score: 70,
+    history: [{ pass: 0, score: 50 }, { pass: 1, score: 70 }],
+    area_ledger: [{ area: 'error handling', first_pass: 0, last_pass: 1, seen_count: 2, best_at_first: 70 }],
+  }
+  const p = buildScopePrompt(state, { scopeDir: '/repo', readOnly: [], nonce: 'abcdef123456', areasNonce: 'feedbeef0123' })
+  const open = '<<<TRIED-AREAS feedbeef0123>>>'
+  const close = '<<<END feedbeef0123>>>'
+  const fenced = p.slice(p.indexOf(open) + open.length, p.indexOf(close))
+  assert.match(fenced, /error handling — attacked 2x/)
+  const outside = p.slice(0, p.indexOf(open)) + p.slice(p.indexOf(close) + close.length)
+  assert.doesNotMatch(outside, /error handling/)
+  // and absent when nothing qualifies
+  assert.doesNotMatch(buildScopePrompt({ ...state, area_ledger: [] }, { scopeDir: '/repo', readOnly: [] }), /TRIED-AREAS/)
+})

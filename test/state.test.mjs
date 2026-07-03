@@ -96,3 +96,7 @@ test('initState resolves a relative artifact_path to absolute (cwd-stable across
 test('initState leaves an already-absolute artifact_path unchanged', () => {
   assert.equal(initState({ goal: 'g', artifactPath: '/abs/art.txt', scorerCmd: 's' }).artifact_path, '/abs/art.txt')
 })
+
+test('initState starts an empty area_ledger (the fence-safe discard-memory registry)', () => {
+  assert.deepEqual(initState({ goal: 'g', artifactPath: '/x/a.txt' }).area_ledger, [])
+})

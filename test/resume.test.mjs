@@ -124,3 +124,13 @@ test('overrides only the provided keys and preserves history', () => {
   assert.equal(state.history.length, 2) // preserved
   assert.equal(state.best_score, 75)
 })
+
+test('prepareResume carries area_ledger forward untouched (discard-memory survives --resume)', () => {
+  // --resume continues the SAME run: the ledger is exactly the memory that stops the resumed editor
+  // from re-attacking dead areas, so it is carried like history/best_score, not reset like the ladder.
+  const ledger = [{ area: 'x', first_pass: 0, last_pass: 1, seen_count: 2, best_at_first: 55 }]
+  const s = recordPass(recordPass(initState({ goal: 'g', artifactPath: '/a', targetScore: 90, hardCap: 2 }), { score: 50 }), { score: 55 })
+  const { state, error } = prepareResume({ ...s, area_ledger: ledger }, { hard_cap: 5 })
+  assert.equal(error, undefined)
+  assert.deepEqual(state.area_ledger, ledger)
+})

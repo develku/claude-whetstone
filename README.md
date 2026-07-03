@@ -337,7 +337,32 @@ versions into separate worktrees and learns a new **per-file** check that tells 
 by an independent oracle, regression-tested against the exploit it just caught, and auto-retired if it
 later turns flaky. The learned checks are stored *outside* the scope (`--forge-store`) so the editor
 can't reach them. It's how the gate gets *stronger* over a long run instead of staying a fixed target —
-experimental, and it needs `--confirm-scorer`.
+experimental, and (for the veto trigger) it needs `--confirm-scorer`.
+
+**Easy-done trigger (v1.8.0, single-file runs).** The Forge also fires on the *opposite* signal: a run
+that reaches `done` in **one edit pass with no done-edge check wired** (the thin-scorer-suspicion
+condition) converged too easily to be trusted. There is no gamed snapshot to learn from, but a
+legitimate discriminating pair exists — the **baseline** (`snapshots/iter_000`, which scored below
+target) vs the final artifact — so Forge learns what the successful edit actually changed. Honest
+limitation: checks admitted from that pair pass the current final *by construction*, so they can never
+veto the run that learned them — the payoff is the **next** run. That next run consumes them
+automatically: with `--forge` + `--forge-store` set, a run with **no** `--confirm-scorer` now composes
+its confirm gate **from the store alone** ([src/forge/hook.mjs](src/forge/hook.mjs)
+`composeConfirmFromStore`), so run N's learning gives run N+1 a done-edge gate for free — and once that
+gate exists, the run is no longer "easy" and the trigger self-quiets. A 0-edit baseline-done has no pair
+at all; there the [thin-scorer warning](src/summary.mjs) stays the only response. (Scope-mode easy-done
+— baseline git SHA as the bad side — is deferred; the trigger parameter and kind-namespaced store are
+the ready seams.)
+
+**Discard-memory (v1.8.0).** The code-owned iteration ledger tells the editor *that* the last edit
+failed, but not *which strategy classes* already failed. The loop now also keeps a per-run
+`area_ledger` ([src/area-registry.mjs](src/area-registry.mjs)): every scorer `findings[].area` is
+tracked, and areas attacked **≥2×** with **no best-score gain** are listed to the editor — *inside
+their own nonce fence* (`TRIED-AREAS`), because area strings are scorer-authored (a model-backed
+scorer writes them from artifact content the editor influences — an indirect capture channel), so they
+never enter the trusted prompt region, even sanitized. Code decides *which* areas qualify (pure number
+rules); the fence carries the strings. Survives `--resume`; renders nothing (zero prompt tax) until an
+area actually goes stale.
 
 ## ⚠️ Cost, auth & budgets (read before the first live run)
 

@@ -6,6 +6,7 @@
 // (the "artifact" is the directory); everything else — escalation, confirm-veto, budget — is reused.
 import { spawnSync } from 'node:child_process'
 import { writeReview, recordPass, saveState, zeroPad } from './state.mjs'
+import { withAreaLedger } from './area-registry.mjs'
 import { gitSnapshot, gitVerifyAt } from './git-snapshot.mjs'
 import { shq } from './shq.mjs'
 import { parseScorerJson } from './parse-scorer.mjs'
@@ -32,8 +33,11 @@ export function scopeBuildContext(loopDir) {
     const snapshot = gitSnapshot(s.artifact_path, `pass ${zeroPad(pass)}`)
     const reviewRef = writeReview(loopDir, pass, ev.review ?? { score: ev.score, critique: ev.critique })
     const next = recordPass(s, { score: ev.score, critique: ev.critique, snapshot, reviewRef, costUsd: ev.costUsd ?? 0, tokens: ev.tokens ?? 0 })
-    saveState(loopDir, next)
-    return next
+    // Same discard-memory fold as driver.buildContext's persist — the ONE shared helper keeps the two
+    // persist paths from drifting.
+    const withAreas = withAreaLedger(s, next, ev.review)
+    saveState(loopDir, withAreas)
+    return withAreas
   }
   // Done-edge confirm (v1 Forge graft): run the held-out scorer against a PRISTINE checkout of the pass
   // just committed, not the live working tree — so the finish is verified on exactly the committed state

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { scopeBuildContext } from '../src/scope-context.mjs'
-import { initState, ensureLoopDir } from '../src/state.mjs'
+import { initState, ensureLoopDir, loadState } from '../src/state.mjs'
 
 const git = (dir, ...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim()
 
@@ -93,6 +93,25 @@ test('scope confirm scores the committed snapshot from a clean checkout, not the
     writeFileSync(join(scopeDir, 'held.json'), '{"score":100,"critique":"gamed"}') // editor games the dirty tree
     const r = await ctx.confirm(s)
     assert.equal(r.score, 90) // verified the COMMITTED snapshot (90), not the gamed working tree (100)
+  } finally {
+    rmSync(scopeDir, { recursive: true, force: true }); rmSync(loopDir, { recursive: true, force: true })
+  }
+})
+
+test('scope persist threads review findings into a growing area_ledger in state.json', () => {
+  const scopeDir = tempRepo()
+  const loopDir = mkdtempSync(join(tmpdir(), 'whet-loop-'))
+  try {
+    ensureLoopDir(loopDir)
+    const { persist } = scopeBuildContext(loopDir)
+    writeFileSync(join(scopeDir, 'src.js'), 'edit 1')
+    const s1 = persist(stateFor(scopeDir), { score: 50, critique: 'c', review: { score: 50, critique: 'c', findings: [{ area: 'error handling' }] }, costUsd: 0, tokens: 0 })
+    assert.deepEqual(s1.area_ledger, [{ area: 'error handling', first_pass: 0, last_pass: 0, seen_count: 1, best_at_first: 50 }])
+    writeFileSync(join(scopeDir, 'src.js'), 'edit 2')
+    const s2 = persist(s1, { score: 50, critique: 'c', review: { score: 50, critique: 'c', findings: [{ area: 'error handling' }] }, costUsd: 0, tokens: 0 })
+    assert.equal(s2.area_ledger[0].seen_count, 2)
+    assert.equal(s2.area_ledger[0].best_at_first, 50) // never moves after first sighting
+    assert.equal(loadState(loopDir).area_ledger[0].seen_count, 2) // lands durably in state.json
   } finally {
     rmSync(scopeDir, { recursive: true, force: true }); rmSync(loopDir, { recursive: true, force: true })
   }

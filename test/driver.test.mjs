@@ -254,3 +254,22 @@ test('halts with error on a no-op pass (the model changed nothing)', async () =>
   )
   assert.equal(verdict.status, 'error')
 })
+
+test('driver persist threads scorer findings into a growing area_ledger in state.json', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'whetstone-areas-'))
+  const artifact = join(dir, 'artifact.txt')
+  writeFileSync(artifact, 'v0')
+  // a scorer that names the same finding-area every pass while the score never improves
+  const areaScorer = join(dir, 'area-scorer.mjs')
+  writeFileSync(areaScorer, `process.stdout.write(JSON.stringify({ score: 50, critique: 'c', findings: [{ area: 'edge cases', severity: 'high' }] }))`)
+  let n = 0
+  const { state } = await runFromConfig(
+    { goal: 'g', artifactPath: artifact, scorerCmd: `node ${JSON.stringify(areaScorer)}`, targetScore: 90, hardCap: 3, loopDir: join(dir, '.loop'), noEscalate: true },
+    { act: async () => { writeFileSync(artifact, `v${++n}`); return { changed: true, costUsd: 0 } }, log: () => {} },
+  )
+  assert.equal(state.area_ledger[0].area, 'edge cases')
+  assert.equal(state.area_ledger[0].seen_count, state.history.length) // sighted on every scored pass
+  assert.equal(state.area_ledger[0].best_at_first, 50)
+  const saved = JSON.parse(readFileSync(join(dir, '.loop', 'state.json'), 'utf8'))
+  assert.equal(saved.area_ledger[0].seen_count, state.history.length) // durable in state.json
+})

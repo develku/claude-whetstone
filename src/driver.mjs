@@ -25,7 +25,8 @@ import { makeClaudeAct } from './act-claude.mjs'
 import { validateConfig, EFFORT_LEVELS } from './validate.mjs'
 import { prepareResume } from './resume.mjs'
 import { formatReport } from './summary.mjs'
-import { forgeShouldFire, runForgeHook } from './forge/hook.mjs'
+import { forgeShouldFire, easyForgeShouldFire, runForgeHook, composeConfirmFromStore } from './forge/hook.mjs'
+import { withAreaLedger } from './area-registry.mjs'
 import { composeConfirm } from './forge/gate.mjs'
 import { loadStore, saveStore, findCheckKeys, retireCheck } from './forge/store.mjs'
 import { crossRepoPermissionWarning } from './preflight.mjs'
@@ -107,8 +108,11 @@ export function buildContext(loopDir) {
       costUsd: (ev.costUsd ?? 0) + (Number(ev.review?.usage?.costUsd) || 0),
       tokens: (ev.tokens ?? 0) + (Number(ev.review?.usage?.tokens) || 0),
     })
-    saveState(loopDir, next)
-    return next
+    // Fold the pass's findings into the discard-memory registry (area-registry.mjs) before the save,
+    // so the editor prompt can steer away from areas already attacked with no gain.
+    const withAreas = withAreaLedger(s, next, ev.review)
+    saveState(loopDir, withAreas)
+    return withAreas
   }
   // done-branch confirmation: re-score the same output with an INDEPENDENT scorer, run by the loop
   // only when the gate would declare done. Mirrors evaluate's output resolution (observe or artifact).
@@ -140,8 +144,14 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
   if (!skipBaseline && cfg.forge && cfg.forgeStorePath) {
     // kind namespaces which stored checks compose: a scope (repo) run consumes only scope checks (per-file,
     // --rel), a single-file run only file checks. cfg.scope is set only by the scope CLI.
-    const composed = composeConfirm({ baseConfirmCmd: state.confirm_scorer_cmd, storePath: cfg.forgeStorePath, loopDir, kind: cfg.scope ? 'scope' : 'file' })
-    if (composed !== state.confirm_scorer_cmd) state = { ...state, confirm_scorer_cmd: composed }
+    // With NO base confirm, composeConfirm is a passthrough (invariant gate.mjs) — so an unwired file run
+    // composes from the store ALONE (v1.8.0): the checks an easy-done run learned give run N+1 a confirm
+    // gate even without --confirm-scorer. Scope stays base-composed-only this increment.
+    const kind = cfg.scope ? 'scope' : 'file'
+    const composed = state.confirm_scorer_cmd
+      ? composeConfirm({ baseConfirmCmd: state.confirm_scorer_cmd, storePath: cfg.forgeStorePath, loopDir, kind })
+      : (!cfg.scope ? composeConfirmFromStore({ storePath: cfg.forgeStorePath, loopDir, kind }) : null)
+    if (composed && composed !== state.confirm_scorer_cmd) state = { ...state, confirm_scorer_cmd: composed }
   }
   // The escalation ladder is stamped on the state (before the save below) so the final report can
   // NAME each rung. Skipped when the caller injects its own escalated act (scope --decompose owns
@@ -183,19 +193,24 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
     log: deps.log ?? defaultLog,
   })
   saveState(loopDir, final)
-  // Verifier Forge (brick 4a): on a recovered-veto done, learn private checks from the run. Post-run, so the
-  // loop control flow above is untouched. Fail-safe — a Forge error must not fail an already-successful run.
-  if (forgeShouldFire(cfg, final, verdict)) {
+  // Verifier Forge (brick 4a + v1.8.0): learn private checks post-run — on a recovered-veto done (good/bad =
+  // final/vetoed snapshot) or a suspiciously-easy done (good/bad = final/baseline). Single-fire: the triggers
+  // are disjoint by construction (easy requires an UNWIRED done-edge; a veto requires a wired one), and the
+  // ternary makes recovered-veto win explicitly if that ever drifts. Post-run, so the loop control flow above
+  // is untouched. Fail-safe — a Forge error must not fail an already-successful run.
+  const forgeTrigger = forgeShouldFire(cfg, final, verdict) ? 'recovered-veto'
+    : easyForgeShouldFire(cfg, final, verdict) ? 'easy-done' : null
+  if (forgeTrigger) {
     try {
-      const r = await (deps.runForgeHook ?? runForgeHook)({ cfg, state: final, loopDir })
+      const r = await (deps.runForgeHook ?? runForgeHook)({ cfg, state: final, loopDir, trigger: forgeTrigger })
       const log = deps.log ?? defaultLog
       const base = { pass: final.pass, score: final.current_score, best: final.best_score }
       // A corroboration DECLINE (2a) is a distinct, healthy outcome — log it apart from a normal learn so it
       // is not mistaken for a 0-admitted no-op or (when it threw) a forge-error.
       if (r.corroborated === false) log({ ...base, status: 'forge-declined', reason: `declined to learn — ${r.conflicts.length} oracle conflict(s)` })
-      else log({ ...base, status: 'forge', reason: `admitted ${r.admitted.length}, rejected ${r.rejected.length}` })
+      else log({ ...base, status: 'forge', reason: `admitted ${r.admitted.length}, rejected ${r.rejected.length} (${forgeTrigger})` })
     } catch (e) {
-      ;(deps.log ?? defaultLog)({ pass: final.pass, score: final.current_score, best: final.best_score, status: 'forge-error', reason: e.message })
+      ;(deps.log ?? defaultLog)({ pass: final.pass, score: final.current_score, best: final.best_score, status: 'forge-error', reason: `${forgeTrigger}: ${e.message}` })
     }
   }
   return { state: final, verdict }

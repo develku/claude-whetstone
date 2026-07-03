@@ -43,6 +43,9 @@ export function initState(cfg) {
     started_at: ts,
     updated_at: ts,
     history: [],
+    // Fence-safe discard-memory (v1.8.0): per-area sighting registry from scorer findings — see
+    // src/area-registry.mjs. Read with `?? []` (pre-feature state.json files lack it).
+    area_ledger: [],
   }
 }
 

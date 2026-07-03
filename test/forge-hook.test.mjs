@@ -188,3 +188,102 @@ test('runForgeHook uses plain admitCheck (no .mutation field) when forgeMutation
   assert.equal(captured.admit, true)
   assert.equal(captured.mutation, undefined, 'plain admitCheck returns no .mutation field')
 })
+
+// --- easy-done trigger (v1.8.0) -------------------------------------------------------------------
+// A 1-edit done with NO done-edge check wired paid zero finish-line skepticism. The (good,bad) pair for
+// the forge is (final artifact, BASELINE snapshot) — the check then captures what the successful edit
+// changed behaviourally, hardening FUTURE runs (admitted checks pass the current final by construction,
+// so they can never veto the current run — the payoff is next-run only). 0-edit baseline-done has no
+// pair -> never fires (the thin-scorer warning stays the only response).
+import { easyForgeShouldFire } from '../src/forge/hook.mjs'
+import { mkdirSync } from 'node:fs'
+
+const EASY_CFG = { forge: true, forgeStorePath: '/s/checks.json' }
+const EASY_STATE = { confirm_vetoed_at_pass: null, confirm_scorer_cmd: null, history: [{}, {}] } // baseline + 1 edit
+
+test('easyForgeShouldFire fires on an unwired 1-edit done with forge+store', () => {
+  assert.equal(easyForgeShouldFire(EASY_CFG, EASY_STATE, DONE), true)
+})
+
+test('easyForgeShouldFire fires with cfg.confirmScorerCmd null (unlike the recovered-veto guard)', () => {
+  assert.equal(easyForgeShouldFire({ ...EASY_CFG, confirmScorerCmd: null }, EASY_STATE, DONE), true)
+})
+
+test('easyForgeShouldFire is false when any condition is missing', () => {
+  assert.equal(easyForgeShouldFire({ ...EASY_CFG, forge: false }, EASY_STATE, DONE), false)
+  assert.equal(easyForgeShouldFire({ ...EASY_CFG, forgeStorePath: null }, EASY_STATE, DONE), false)
+  assert.equal(easyForgeShouldFire({ ...EASY_CFG, scope: '/some/repo' }, EASY_STATE, DONE), false) // scope mode deferred
+  assert.equal(easyForgeShouldFire(EASY_CFG, EASY_STATE, { status: 'capped' }), false)
+  assert.equal(easyForgeShouldFire(EASY_CFG, { ...EASY_STATE, history: [{}] }, DONE), false) // 0-edit: no pair
+  assert.equal(easyForgeShouldFire(EASY_CFG, { ...EASY_STATE, history: [{}, {}, {}] }, DONE), false) // 2 edits: real work
+  assert.equal(easyForgeShouldFire(EASY_CFG, { ...EASY_STATE, confirm_scorer_cmd: 'node c.mjs' }, DONE), false) // wired
+  assert.equal(easyForgeShouldFire(EASY_CFG, { ...EASY_STATE, stability_runs: 2 }, DONE), false) // wired (stability)
+  assert.equal(easyForgeShouldFire(EASY_CFG, { ...EASY_STATE, confirm_vetoed_at_pass: 0 }, DONE), false) // no double-fire
+})
+
+test('runForgeHook easy-done trigger sources bad=BASELINE snapshot + baseline critique, good=final artifact', async () => {
+  const loopDir = mkdtempSync(join(tmpdir(), 'forge-hook-easy-'))
+  mkdirSync(join(loopDir, 'snapshots'), { recursive: true })
+  writeFileSync(join(loopDir, 'snapshots', 'iter_000.txt'), 'baseline content')
+  mkdirSync(join(loopDir, 'reviews'), { recursive: true })
+  writeFileSync(join(loopDir, 'reviews', 'review_000.json'), JSON.stringify({ score: 50, critique: 'baseline critique' }))
+  const state = {
+    goal: 'g', artifact_path: '/run/final.txt', last_critique: 'the DONE-pass critique', confirm_vetoed_at_pass: null,
+    history: [
+      { snapshot: 'snapshots/iter_000.txt', critique_ref: 'reviews/review_000.json' },
+      { snapshot: 'snapshots/iter_001.txt' },
+    ],
+  }
+  const cfg = { forge: true, forgeStorePath: join(loopDir, 'checks.json'), scorerAllow: [], model: 'sonnet' }
+  let seen = null
+  const r = await runForgeHook(
+    { cfg, state, loopDir, trigger: 'easy-done' },
+    { runForge: async (a) => { seen = a; return { admitted: [], rejected: [] } }, generate: async () => ({}), admit: async () => ({}), pruneFlaky: async () => [] },
+  )
+  assert.match(seen.badArtifact, /snapshots\/iter_000\.txt$/) // baseline, NOT a vetoed snapshot
+  assert.equal(seen.goodArtifact, '/run/final.txt')
+  assert.equal(seen.critique, 'baseline critique') // the discriminating text — not the done-pass critique
+  assert.equal(r.trigger, 'easy-done') // provenance for the driver log
+})
+
+test('runForgeHook default trigger carries recovered-veto provenance (regression)', async () => {
+  const state = { goal: 'g', artifact_path: '/run/final.txt', last_critique: 'gamed it', confirm_vetoed_at_pass: 0, history: [{ snapshot: 'snapshots/iter_000.txt' }] }
+  const cfg = { forge: true, confirmScorerCmd: 'x', forgeStorePath: '/run/checks.json', scorerAllow: [], model: 'sonnet' }
+  const r = await runForgeHook({ cfg, state, loopDir: '/run' }, { runForge: async () => ({ admitted: [], rejected: [] }), generate: async () => ({}), admit: async () => ({}), pruneFlaky: async () => [] })
+  assert.equal(r.trigger, 'recovered-veto')
+})
+
+test('runForgeHook easy-done REJECTS with a named error when the baseline snapshot is missing on disk', async () => {
+  const loopDir = mkdtempSync(join(tmpdir(), 'forge-hook-easy-miss-'))
+  const state = { goal: 'g', artifact_path: '/run/final.txt', confirm_vetoed_at_pass: null, history: [{ snapshot: 'snapshots/iter_000.txt' }, { snapshot: 'snapshots/iter_001.txt' }] }
+  const cfg = { forge: true, forgeStorePath: join(loopDir, 'checks.json'), scorerAllow: [], model: 'sonnet' }
+  await assert.rejects(
+    () => runForgeHook({ cfg, state, loopDir, trigger: 'easy-done' }, { runForge: async () => ({}), generate: async () => ({}), admit: async () => ({}) }),
+    /baseline snapshot missing/,
+  )
+  // and a history with no baseline ref at all is equally a named refusal, not a crash
+  await assert.rejects(
+    () => runForgeHook({ cfg, state: { ...state, history: [] }, loopDir, trigger: 'easy-done' }, { runForge: async () => ({}), generate: async () => ({}), admit: async () => ({}) }),
+    /no baseline snapshot ref/,
+  )
+})
+
+test('runForgeHook easy-done falls back to an empty critique when the baseline review is unreadable', async () => {
+  const loopDir = mkdtempSync(join(tmpdir(), 'forge-hook-easy-noreview-'))
+  mkdirSync(join(loopDir, 'snapshots'), { recursive: true })
+  writeFileSync(join(loopDir, 'snapshots', 'iter_000.txt'), 'baseline content')
+  const state = {
+    goal: 'g', artifact_path: '/run/final.txt', last_critique: 'done-pass critique', confirm_vetoed_at_pass: null,
+    history: [{ snapshot: 'snapshots/iter_000.txt', critique_ref: 'reviews/review_000.json' }, { snapshot: 'snapshots/iter_001.txt' }], // review file never written
+  }
+  const cfg = { forge: true, forgeStorePath: join(loopDir, 'checks.json'), scorerAllow: [], model: 'sonnet' }
+  let seen = null
+  await runForgeHook({ cfg, state, loopDir, trigger: 'easy-done' }, { runForge: async (a) => { seen = a; return {} }, generate: async () => ({}), admit: async () => ({}), pruneFlaky: async () => [] })
+  assert.equal(seen.critique, '')
+})
+
+test('forgeShouldFire fires when the confirm gate was AUTO-COMPOSED (state cmd set, cfg flag null) — guard widening', () => {
+  // Run N+1 of an easy-done lineage: driver auto-composed state.confirm_scorer_cmd from the store, cfg has
+  // no --confirm-scorer. A veto by that gate that then recovers is the forge's prime learning moment.
+  assert.equal(forgeShouldFire({ ...CFG, confirmScorerCmd: null }, { ...RECOVERED, confirm_scorer_cmd: 'node composite.mjs --scorers-file m' }, DONE), true)
+})

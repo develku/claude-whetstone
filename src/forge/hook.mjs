@@ -4,7 +4,10 @@
 // and runs the cycle (src/forge/run.mjs). Kept out of driver.mjs so the driver change stays a thin guarded
 // call. The allowlist is built inline from --scorer-allow (not imported from scope-cli) to avoid a
 // driver<->scope-cli import cycle.
-import { resolve, basename } from 'node:path'
+import { resolve, basename, join, dirname } from 'node:path'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { shq } from '../shq.mjs'
 import { safeSnapshotPath } from '../state.mjs'
 import { isUnsafeScorer, SHELL_SCORERS, SHELL_SCORER_PATHS } from '../scorer-safety.mjs'
 import { generateCandidates, claudePropose } from './generate.mjs'
@@ -13,7 +16,7 @@ import { mutationAdmit } from './mutation-admit.mjs'
 import { admitSurvivesExploits } from './exploit-regression.mjs'
 import { corroborateLabels } from './corroborate.mjs'
 import { pruneFlaky } from './prune.mjs'
-import { loadStore, saveStore, addCheck } from './store.mjs'
+import { loadStore, saveStore, addCheck, listActiveChecks } from './store.mjs'
 import { runForge } from './run.mjs'
 
 // Fire ONLY when a run recovered to true-done after a veto, with forge enabled + a confirm scorer + a store
@@ -24,8 +27,28 @@ import { runForge } from './run.mjs'
 // discriminate, so a flaky-sourced `bad` simply yields nothing admittable rather than a bad store write.
 // (A precise confirm-vs-stability source marker would need a loop.mjs change — deferred to brick 4b.)
 export function forgeShouldFire(cfg, state, verdict) {
+  // The confirm gate may come from --confirm-scorer (cfg) OR from the auto-composed store gate
+  // (state.confirm_scorer_cmd set by composeConfirmFromStore at run start, cfg flag null) — a veto by
+  // the auto-composed gate that recovers is the forge's prime learning moment, so accept either source.
   return !!cfg.forge && verdict.status === 'done' && state.confirm_vetoed_at_pass != null &&
-    !!cfg.confirmScorerCmd && !!cfg.forgeStorePath
+    !!(cfg.confirmScorerCmd || state.confirm_scorer_cmd) && !!cfg.forgeStorePath
+}
+
+// Fire on a SUSPICIOUSLY-EASY done (v1.8.0): exactly 1 edit pass to done with NO done-edge check wired
+// (the thinScorerWarning condition) — zero finish-line skepticism was paid, so learn from the run instead.
+// The (good,bad) pair is (final artifact, BASELINE snapshot): a legitimate discriminating pair for a
+// 1-edit done. A 0-edit baseline-done has no pair -> never fires (the warning stays the only response);
+// >=2-edit dones took real work. Disjoint from the recovered-veto trigger by construction (a veto needs a
+// confirm/stability gate, which "unwired" excludes) — the marker check makes that explicit and testable.
+// NOTE the admitted checks pass the current final by construction, so they cannot veto THIS run's done;
+// the payoff is the NEXT run, whose gate auto-composes from the store (composeConfirmFromStore).
+export function easyForgeShouldFire(cfg, state, verdict) {
+  return !!cfg.forge && !!cfg.forgeStorePath && !cfg.scope &&
+    verdict.status === 'done' &&
+    state.confirm_vetoed_at_pass == null &&
+    !state.confirm_scorer_cmd &&
+    (state.stability_runs ?? 1) <= 1 &&
+    (state.history?.length ?? 0) - 1 === 1
 }
 
 // Scorers whose contract is "execute my argument" (a --cmd / raw manifest line run via shell:true) turn
@@ -64,10 +87,35 @@ export function forgeCatalog(allowlist) {
   return [...allowlist.keys()].map((id) => ({ id, usage: SCORER_USAGE[id] ?? '' }))
 }
 
-// Source good/bad from the recovered run and run the cycle. good = the confirmed-honest final artifact;
-// bad = the vetoed gamed snapshot. Real pieces injected by default; tests pass stubs via `deps`.
-export async function runForgeHook({ cfg, state, loopDir }, deps = {}) {
-  const bad = deps.badArtifact ?? safeSnapshotPath(loopDir, state.history[state.confirm_vetoed_at_pass].snapshot)
+// The easy-done pair's critique: the DONE-pass critique describes the PASSING artifact, so the
+// discriminating text is the BASELINE review's critique ("what was wrong before the edit"). Best-effort
+// '' — a missing/corrupt review only weakens the generator prompt, never blocks the learn. The ref is
+// resolved through safeSnapshotPath so a tampered critique_ref cannot escape the run dir.
+function baselineCritique(loopDir, state) {
+  try {
+    const ref = state.history?.[0]?.critique_ref
+    if (!ref) return ''
+    const review = JSON.parse(readFileSync(safeSnapshotPath(loopDir, ref), 'utf8'))
+    return typeof review.critique === 'string' ? review.critique : ''
+  } catch {
+    return ''
+  }
+}
+
+// Source good/bad from the run and run the cycle. trigger 'recovered-veto' (default): good = the
+// confirmed-honest final artifact, bad = the vetoed gamed snapshot. trigger 'easy-done': bad = the
+// BASELINE snapshot (iter_000) — the only bad example an unwired 1-edit done has — with an explicit
+// existence check (a named throw is caught by the driver's fail-safe as forge-error; the done verdict
+// is untouched either way). Real pieces injected by default; tests pass stubs via `deps`.
+export async function runForgeHook({ cfg, state, loopDir, trigger = 'recovered-veto' }, deps = {}) {
+  const badRef = trigger === 'easy-done'
+    ? state.history?.[0]?.snapshot
+    : state.history[state.confirm_vetoed_at_pass].snapshot
+  if (trigger === 'easy-done' && !deps.badArtifact) {
+    if (!badRef) throw new Error('easy-done forge: no baseline snapshot ref in history')
+    if (!existsSync(safeSnapshotPath(loopDir, badRef))) throw new Error(`easy-done forge: baseline snapshot missing on disk: ${badRef}`)
+  }
+  const bad = deps.badArtifact ?? safeSnapshotPath(loopDir, badRef)
   const good = deps.goodArtifact ?? state.artifact_path
   const allowlist = forgeAllowlist(cfg.scorerAllow)
   const generate = deps.generate ?? ((a) => generateCandidates({ ...a, propose: (p) => claudePropose(p, { model: cfg.model }) }))
@@ -90,7 +138,7 @@ export async function runForgeHook({ cfg, state, loopDir }, deps = {}) {
     goal: state.goal,
     goodArtifact: good,
     badArtifact: bad,
-    critique: state.last_critique ?? '',
+    critique: trigger === 'easy-done' ? baselineCritique(loopDir, state) : (state.last_critique ?? ''),
     scorerCatalog: forgeCatalog(allowlist),
     allowlist,
     storePath: cfg.forgeStorePath,
@@ -112,5 +160,25 @@ export async function runForgeHook({ cfg, state, loopDir }, deps = {}) {
     const pruned = await (deps.pruneFlaky ?? pruneFlaky)({ storePath: cfg.forgeStorePath, goodArtifact: good, kind: 'file', runCheck: scorerRunCheck })
     if (pruned.length) r.retiredFlaky = pruned
   }
+  r.trigger = trigger // provenance for the driver's forge log line (matches r.retiredFlaky's local mutate idiom)
   return r
+}
+
+const COMPOSITE = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scorers', 'composite.mjs')
+
+// Consume-without-base (v1.8.0). The invariant composeConfirm (forge/gate.mjs) is a passthrough when
+// there is no base confirm cmd — so an UNWIRED run could never consume stored checks, and everything an
+// easy-done run learns would never bite. This non-invariant sibling composes a confirm gate from the
+// store ALONE: same manifest file, same composite MIN semantics, just no base line. Returns null when
+// the store has no active checks of the kind. The two compose paths are mutually exclusive (the driver
+// picks exactly one per run), so the shared gate-checks.txt filename cannot collide.
+export function composeConfirmFromStore(
+  { storePath, loopDir, kind = 'file', compositePath = COMPOSITE },
+  { loadStore: load = loadStore, listChecks = listActiveChecks, writeManifest = (p, body) => writeFileSync(p, body) } = {},
+) {
+  const checks = listChecks(load(storePath), kind)
+  if (!checks.length) return null
+  const manifest = join(loopDir, 'gate-checks.txt')
+  writeManifest(manifest, checks.map((c) => c.cmd).join('\n') + '\n')
+  return ['node', shq(compositePath), '--scorers-file', shq(manifest)].join(' ')
 }
