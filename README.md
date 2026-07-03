@@ -9,7 +9,7 @@
 A deterministic <b>loop-engineering</b> driver for Claude Code: <b>code owns the gate</b>, the <b>model owns only diagnosis + edits</b>.
 </p>
 
-> Status: **v1.6.0** — the single-file core is **stable**; the multi-file and orchestration layers are
+> Status: **v1.8.0** — the single-file core is **stable**; the multi-file and orchestration layers are
 > alpha. Matured by running it on itself (dogfooding), so the cost, auth, and security model are exercised
 > end-to-end, not speculative. Requires **Node ≥ 23.5** — the behavioural scorers isolate untrusted code
 > with `module.registerHooks` + the Permission Model. See [What's stable in v1](#whats-stable-in-v1).
@@ -97,7 +97,7 @@ layers are unsupported and two seats stay human. From the bottom up:
 |---|---|---|---|
 | **Inner loop** (stable) | raise *one* file | `gateVerdict` (`gate.mjs`) | a per-pass artifact snapshot |
 | **Scope loop** (experimental) | raise a *whole repo* | the same `gateVerdict`, per project run | a **git** commit per pass (needs a clean git repo) |
-| **+ Forge** (experimental) | *learn* a per-file verifier when a `done` is vetoed | the recovered confirm signal | the learned check, stored outside the scope |
+| **+ Forge** (experimental) | *learn* a per-file verifier when a `done` is vetoed *or reached too easily* | the recovered confirm signal, or the baseline→final pair | the learned check, stored outside the scope |
 | **Control plane** (alpha) | raise *N objectives* at once | `globalVerdict` (`converge-gate.mjs`) — `done` only when **every** objective is MET | a selective squash-merge per round |
 
 The two human seats (alpha): **authoring the global held-out truth** (the immutable, hash-pinned
