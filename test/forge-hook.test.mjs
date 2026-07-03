@@ -315,3 +315,23 @@ test('forgeShouldFire fires when the confirm gate was AUTO-COMPOSED (state cmd s
   // no --confirm-scorer. A veto by that gate that then recovers is the forge's prime learning moment.
   assert.equal(forgeShouldFire({ ...CFG, confirmScorerCmd: null }, { ...RECOVERED, confirm_scorer_cmd: 'node composite.mjs --scorers-file m' }, DONE), true)
 })
+
+// --- AUD-10: gate-survivor trigger (routes a probe survivor mutant into forge learning) ---
+
+test('AUD-10: gate-survivor requires both deps, never indexes history, and carries the gate-survivor critique', async () => {
+  // confirm_vetoed_at_pass is null on a gate-survivor pass — the old badRef line would crash; it must not run.
+  const state = { goal: 'g', artifact_path: '/run/final.mjs', confirm_vetoed_at_pass: null, history: [], last_critique: '' }
+  const cfg = { forge: true, forgeStorePath: '/run/checks.json', scorerAllow: [], model: 'sonnet' }
+  await assert.rejects(
+    () => runForgeHook({ cfg, state, loopDir: '/run', trigger: 'gate-survivor' }, { goodArtifact: '/run/final.mjs' }), // missing badArtifact
+    /requires deps.badArtifact/,
+  )
+  let seen = null
+  await runForgeHook({ cfg, state, loopDir: '/run', trigger: 'gate-survivor' }, {
+    goodArtifact: '/run/final.mjs', badArtifact: '/run/.gate-probe-mutant.mjs',
+    runForge: async (a) => { seen = a; return { admitted: [], rejected: [], corroborated: true } }, generate: async () => ({}), admit: async () => ({}), pruneFlaky: async () => [],
+  })
+  assert.equal(seen.goodArtifact, '/run/final.mjs')             // good = the accepted final (admission can't veto it)
+  assert.equal(seen.badArtifact, '/run/.gate-probe-mutant.mjs') // bad = the survivor mutant
+  assert.match(seen.critique, /composed confirm gate PASSED this broken mutant/)
+})

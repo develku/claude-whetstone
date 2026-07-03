@@ -108,9 +108,16 @@ function baselineCritique(loopDir, state) {
 // existence check (a named throw is caught by the driver's fail-safe as forge-error; the done verdict
 // is untouched either way). Real pieces injected by default; tests pass stubs via `deps`.
 export async function runForgeHook({ cfg, state, loopDir, trigger = 'recovered-veto' }, deps = {}) {
+  // AUD-10 'gate-survivor': the bad/good are caller-provided (a probe survivor mutant + the accepted final) —
+  // NEVER index state.history (confirm_vetoed_at_pass is null here) and require both deps, fail loud if missing.
+  if (trigger === 'gate-survivor' && (!deps.badArtifact || !deps.goodArtifact)) {
+    throw new Error('gate-survivor forge: requires deps.badArtifact (survivor mutant) + deps.goodArtifact (final)')
+  }
   const badRef = trigger === 'easy-done'
     ? state.history?.[0]?.snapshot
-    : state.history[state.confirm_vetoed_at_pass].snapshot
+    : trigger === 'gate-survivor'
+      ? null // bad comes from deps.badArtifact; do not touch history
+      : state.history[state.confirm_vetoed_at_pass].snapshot
   if (trigger === 'easy-done' && !deps.badArtifact) {
     if (!badRef) throw new Error('easy-done forge: no baseline snapshot ref in history')
     if (!existsSync(safeSnapshotPath(loopDir, badRef))) throw new Error(`easy-done forge: baseline snapshot missing on disk: ${badRef}`)
@@ -152,7 +159,11 @@ export async function runForgeHook({ cfg, state, loopDir, trigger = 'recovered-v
     goal: state.goal,
     goodArtifact: good,
     badArtifact: bad,
-    critique: trigger === 'easy-done' ? baselineCritique(loopDir, state) : (state.last_critique ?? ''),
+    critique: trigger === 'easy-done'
+      ? baselineCritique(loopDir, state)
+      : trigger === 'gate-survivor'
+        ? 'the composed confirm gate PASSED this broken mutant — learn a check that FAILS it'
+        : (state.last_critique ?? ''),
     scorerCatalog: forgeCatalog(allowlist),
     allowlist,
     storePath: cfg.forgeStorePath,

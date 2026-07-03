@@ -110,6 +110,38 @@ test('AUD-08: --gate-audit runs a post-done audit once and stamps state.gate_aud
   assert.equal(on.state.gate_audit.killed, 3)
 })
 
+test('AUD-10: --gate-self-probe routes survivors to forge learning + stamps state; skips w/o forge; off by default', async () => {
+  const mkRun = (over, deps) => {
+    const dir = mkdtempSync(join(tmpdir(), 'whetstone-sprobe-'))
+    const artifact = join(dir, 'artifact.txt'); writeFileSync(artifact, 'v0'); let n = 0
+    return runFromConfig(
+      { goal: 'g', artifactPath: artifact, scorerCmd, targetScore: 90, hardCap: 10, loopDir: join(dir, '.loop'), forge: true, forgeStorePath: join(dir, 'checks.json'), confirmScorerCmd: 'node confirm.mjs', ...over },
+      { act: async () => { writeFileSync(artifact, `v${++n}`); return { changed: true, costUsd: 0 } }, confirm: async () => ({ score: 100, critique: '' }), log: () => {}, ...deps },
+    )
+  }
+  const probe = async () => ({ sampled: 4, survivors: [{ operator: 'x', path: '/tmp/.gate-probe-mutant.mjs' }], cleanup: () => {} })
+
+  // full path: a survivor is routed to the (injected) forge hook and the result is stamped
+  let routed = null
+  const { state } = await mkRun({ gateSelfProbe: true }, {
+    runGateSelfProbe: probe,
+    runForgeHook: async (_a, d) => { routed = d; return { admitted: [{}], rejected: [] } },
+  })
+  assert.deepEqual(state.gate_self_probe, { sampled: 4, survivors: 1, learned: 1 })
+  assert.equal(routed.goodArtifact, state.artifact_path) // good = the accepted final
+  assert.equal(routed.badArtifact, '/tmp/.gate-probe-mutant.mjs')
+
+  // skip (loud) when there is no forge to learn into
+  const { state: s2 } = await mkRun({ gateSelfProbe: true, forge: false }, { runGateSelfProbe: probe })
+  assert.match(s2.gate_self_probe.skipped, /forge/)
+
+  // off by default: the probe never runs
+  let called = 0
+  const { state: s3 } = await mkRun({}, { runGateSelfProbe: async () => { called++; return {} } })
+  assert.equal(s3.gate_self_probe, undefined)
+  assert.equal(called, 0)
+})
+
 test('AUD-08: a gate-audit error never fails an already-done run (fail-safe)', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'whetstone-gaudit-err-'))
   const artifact = join(dir, 'a.txt'); writeFileSync(artifact, 'v0'); let n = 0

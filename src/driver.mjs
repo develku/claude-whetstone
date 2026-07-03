@@ -24,9 +24,10 @@ import { runLoop } from './loop.mjs'
 import { makeClaudeAct } from './act-claude.mjs'
 import { validateConfig, EFFORT_LEVELS } from './validate.mjs'
 import { prepareResume } from './resume.mjs'
-import { formatReport, gateAuditLine } from './summary.mjs'
+import { formatReport, gateAuditLine, gateSelfProbeLine } from './summary.mjs'
 import { withBlastRadius } from './blast-radius.mjs'
 import { runGateAudit } from './gate-audit.mjs'
+import { runGateSelfProbe } from './forge/gate-probe.mjs'
 import { forgeShouldFire, easyForgeShouldFire, runForgeHook, composeConfirmFromStore } from './forge/hook.mjs'
 import { withAreaLedger } from './area-registry.mjs'
 import { composeConfirm } from './forge/gate.mjs'
@@ -244,6 +245,42 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
       ;(deps.log ?? defaultLog)({ pass: final.pass, score: final.current_score, best: final.best_score, status: 'gate-audit-error', reason: e.message })
     }
   }
+  // AUD-10: opt-in gate self-probe (hacker-fixer) — mutate the accepted artifact, probe the COMPOSED confirm
+  // gate, route survivors (holes) into Forge learning. PAID: bounded (≤4 mutants, ≤1 survivor, sequential
+  // early-stop) per DCA 20260703T222155. Fire only with something to probe (a composed gate) AND somewhere to
+  // learn (--forge --forge-store); else skip-LOUD. Fail-safe; never changes the verdict. Only outcome-'pass'
+  // (the gate reproducibly passing a broken mutant) routes to learning.
+  if (cfg.gateSelfProbe && verdict.status === 'done') {
+    try {
+      const gate = (final.confirm_scorer_cmd ?? '').trim()
+      if (!gate || !cfg.forge || !cfg.forgeStorePath) {
+        final = { ...final, gate_self_probe: { skipped: !gate ? 'no composed confirm gate to probe' : 'no --forge/--forge-store to learn into' } }
+      } else {
+        const runCheck = (cmd, artifact) => {
+          const s = runScorer(cmd, { output: artifact, loopDir, pass: final.history.length }).score
+          return { pass: Number.isFinite(s) && s >= final.target_score } // gate PASSES a broken mutant = a hole
+        }
+        const probe = await (deps.runGateSelfProbe ?? runGateSelfProbe)({ artifactPath: final.artifact_path, composedConfirmCmd: gate, runCheck })
+        let learned = 0
+        if (probe.survivors?.length) {
+          for (const sv of probe.survivors) {
+            try {
+              const r = await (deps.runForgeHook ?? runForgeHook)({ cfg, state: final, loopDir, trigger: 'gate-survivor' }, { goodArtifact: final.artifact_path, badArtifact: sv.path })
+              learned += r.admitted?.length ?? 0
+            } catch (e) {
+              ;(deps.log ?? defaultLog)({ pass: final.pass, score: final.current_score, best: final.best_score, status: 'gate-survivor-error', reason: e.message })
+            }
+          }
+          probe.cleanup?.()
+        }
+        final = { ...final, gate_self_probe: probe.skipped ? { skipped: probe.skipped } : { sampled: probe.sampled, survivors: probe.survivors?.length ?? 0, learned } }
+      }
+      saveState(loopDir, final)
+      ;(deps.log ?? defaultLog)({ pass: final.pass, score: final.current_score, best: final.best_score, status: 'gate-self-probe', reason: gateSelfProbeLine(final) ?? 'skipped' })
+    } catch (e) {
+      ;(deps.log ?? defaultLog)({ pass: final.pass, score: final.current_score, best: final.best_score, status: 'gate-self-probe-error', reason: e.message })
+    }
+  }
   return { state: final, verdict }
 }
 
@@ -356,6 +393,9 @@ export function parseCli(argv, defaults = {}) {
     // AUD-08: opt-in post-done advisory — mutate the final artifact, re-score ≤6 mutants with the PRIMARY
     // scorer, report the kill-rate (a weak scorer converges confidently). Opt-in because the scorer may be paid.
     gateAudit: argv.includes('--gate-audit'),
+    // AUD-10: opt-in post-done hacker-fixer — mutate the accepted artifact, probe the COMPOSED confirm gate,
+    // route survivors into Forge learning. PAID (needs --forge --forge-store + a confirm gate); bounded per DCA.
+    gateSelfProbe: argv.includes('--gate-self-probe'),
   }
 }
 
@@ -448,7 +488,7 @@ if (process.argv[1] && (
 
   const cfg = parseCli(argv, loadConfig())
   if (!cfg.goal || !cfg.artifactPath || !cfg.scorerCmd) {
-    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--budget-tokens N] [--stability-runs N] [--plateau-window N] [--min-delta X] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>] [--allow-sibling-edits] [--gate-audit] [--forge --forge-store <path> --scorer-allow <scorer.mjs,...> [--forge-oracle "<scorer cmd>" ...] [--forge-mutation-admit [--forge-mutation-threshold 0.75]]]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--stability-runs N] [--plateau-window N] [--min-delta X] [--target T] [--model M]\n')
+    process.stderr.write('usage: driver.mjs "<goal>" --artifact <path> --scorer "<cmd>" [--confirm-scorer "<cmd>"] [--observe <cmd>] [--target 90] [--cap 10] [--budget 2.00] [--budget-tokens N] [--stability-runs N] [--plateau-window N] [--min-delta X] [--model sonnet] [--effort medium] [--model-escalate opus | --no-escalate] [--mcp-config <path>] [--loop-dir <dir>] [--allow-sibling-edits] [--gate-audit] [--gate-self-probe] [--forge --forge-store <path> --scorer-allow <scorer.mjs,...> [--forge-oracle "<scorer cmd>" ...] [--forge-mutation-admit [--forge-mutation-threshold 0.75]]]\n  resume: driver.mjs --resume --loop-dir <existing run dir> [--cap N] [--budget X] [--budget-tokens N] [--stability-runs N] [--plateau-window N] [--min-delta X] [--target T] [--model M]\n')
     process.exit(2)
   }
   // Mutation-backed admit needs an independent oracle (codex finding 7): refuse the explicit flag without one

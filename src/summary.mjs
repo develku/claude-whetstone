@@ -47,6 +47,15 @@ export function gateAuditLine(state) {
   return `gate-audit: the primary scorer killed ${a.killed}/${a.sampled} sampled mutants${errNote} — a low kill-rate means a weak gate.`;
 }
 
+// AUD-10: the opt-in --gate-self-probe result — how many mutants of the accepted artifact the COMPOSED
+// confirm gate let through (holes), and how many hardening checks the Forge learned from them.
+export function gateSelfProbeLine(state) {
+  const p = state.gate_self_probe;
+  if (!p) return null;
+  if (p.skipped) return `gate-self-probe: skipped — ${p.skipped}`;
+  return `gate-self-probe: ${p.survivors}/${p.sampled} mutant(s) SURVIVED the confirm gate (holes it can't catch); learned ${p.learned} hardening check(s).`;
+}
+
 export function summarizeRun(state) {
   const passes = state.history.length;
   // best_score is null on a baseline-error run — render '—' rather than 'best null @ pass 0'.
@@ -68,5 +77,7 @@ export function summarizeRun(state) {
   if (blast) out += `\n${blast}`;
   const gaudit = gateAuditLine(state);
   if (gaudit) out += `\n${gaudit}`;
+  const gprobe = gateSelfProbeLine(state);
+  if (gprobe) out += `\n${gprobe}`;
   return out;
 }

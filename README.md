@@ -9,12 +9,17 @@
 A deterministic <b>loop-engineering</b> driver for Claude Code: <b>code owns the gate</b>, the <b>model owns only diagnosis + edits</b>.
 </p>
 
-> Status: **v1.10.0** — the single-file core is **stable**; the multi-file and orchestration layers are
+> Status: **v1.11.0** — the single-file core is **stable**; the multi-file and orchestration layers are
 > alpha. Matured by running it on itself (dogfooding), so the cost, auth, and security model are exercised
 > end-to-end, not speculative. Requires **Node ≥ 23.5** — the behavioural scorers isolate untrusted code
 > with `module.registerHooks` + the Permission Model. See [What's stable in v1](#whats-stable-in-v1).
 >
-> **New in v1.10.0** (alpha): a converge objective that fails and is **retried** now hands the retry a fenced,
+> **New in v1.11.0** (alpha, opt-in, PAID): `--gate-self-probe` — after a `done`, mutate the accepted
+> artifact and run the **composed confirm gate** against each mutant; a mutant the gate *passes* is a hole,
+> and the Forge learns a check that catches it (self-healing gate). Bounded (≤4 mutants, ≤1 survivor,
+> sequential early-stop) and opt-in because each survivor is a paid Forge generation.
+>
+> **v1.10.0** (alpha): a converge objective that fails and is **retried** now hands the retry a fenced,
 > code-composed memo of what prior attempts tried and why they failed, so it changes strategy instead of
 > repeating a dead approach.
 >

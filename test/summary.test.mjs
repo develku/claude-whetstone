@@ -1,6 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { summarizeRun, thinScorerWarning, blastRadiusWarning, gateAuditLine } from '../src/summary.mjs'
+import { summarizeRun, thinScorerWarning, blastRadiusWarning, gateAuditLine, gateSelfProbeLine } from '../src/summary.mjs'
+
+test('gateSelfProbeLine: null with no probe; survivor+learned line; skip note (AUD-10)', () => {
+  assert.equal(gateSelfProbeLine({}), null)
+  assert.match(gateSelfProbeLine({ gate_self_probe: { sampled: 4, survivors: 1, learned: 1 } }), /1\/4 mutant\(s\) SURVIVED.*learned 1 hardening check/)
+  assert.match(gateSelfProbeLine({ gate_self_probe: { skipped: 'no composed confirm gate to probe' } }), /skipped — no composed confirm gate/)
+})
 
 test('gateAuditLine: null with no audit; kill-rate line with an errored note; skip note (AUD-08)', () => {
   assert.equal(gateAuditLine({}), null)
