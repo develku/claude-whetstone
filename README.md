@@ -9,34 +9,21 @@
 A deterministic <b>loop-engineering</b> driver for Claude Code: <b>code owns the gate</b>, the <b>model owns only diagnosis + edits</b>.
 </p>
 
-> Status: **v1.12.0** — the single-file core is **stable**; the multi-file and orchestration layers are
+> **Status: v1.12.0** — the single-file core is **stable**; the multi-file and orchestration layers are
 > alpha. Matured by running it on itself (dogfooding), so the cost, auth, and security model are exercised
 > end-to-end, not speculative. Requires **Node ≥ 23.5** — the behavioural scorers isolate untrusted code
-> with `module.registerHooks` + the Permission Model. See [What's stable in v1](#whats-stable-in-v1).
->
-> **New in v1.12.0**: doc claims are now under the same code-owned gate as code. `doc-lint` (precision),
-> `doc-coverage` (recall — did the doc *substantively* cover every required topic, not just name-drop it),
-> and `doc-exec` (does every fenced example actually run, in the locked-down `iso-runner.mjs` child) compose
-> under `composite.mjs` so a doc can't ship complete-looking but wrong, thin but accurate, or accurate but broken.
->
-> **v1.11.0** (alpha, opt-in, PAID): `--gate-self-probe` — after a `done`, mutate the accepted
-> artifact and run the **composed confirm gate** against each mutant; a mutant the gate *passes* is a hole,
-> and the Forge learns a check that catches it (self-healing gate). Bounded (≤4 mutants, ≤1 survivor,
-> sequential early-stop) and opt-in because each survivor is a paid Forge generation.
->
-> **v1.10.0** (alpha): a converge objective that fails and is **retried** now hands the retry a fenced,
-> code-composed memo of what prior attempts tried and why they failed, so it changes strategy instead of
-> repeating a dead approach.
->
-> **v1.9.0** (feedback-fidelity hardening): a keep-best rollback now re-points the editor's steering
-> critique at the version actually on disk (it used to critique the reverted, dead one); the single-file loop
-> **code-enforces** "edit ONLY the artifact" — sibling edits are reverted (`--allow-sibling-edits` opts out);
-> the Forge's exploit-regression archive now **grows** from real confirm-vetoed snapshots; and an opt-in
-> `--gate-audit` mutates the finished artifact and re-scores a few mutants to report the primary scorer's
-> kill-rate (a low rate = a weak gate). Each candidate mutant is a full scorer run, so it is opt-in (the
-> scorer may be paid).
+> with `module.registerHooks` + the Permission Model. The full release history lives in
+> [CHANGELOG.md](CHANGELOG.md); this README stays a description of *what the tool does and why*.
+> Just want to run it? Jump to [Install](#install-as-a-claude-code-plugin). See
+> [What's stable in v1](#whats-stable-in-v1).
 
-## Introduction
+This README is in three movements: **Understand** the ideas, **Use** the tool, then the full **Reference**.
+
+---
+
+> **Part 1 — Understand:** what it is, the five core ideas, and how the whole stack fits under one gate.
+
+## What whetstone is
 
 whetstone is easy to mistake for two adjacent things it isn't:
 
@@ -54,6 +41,19 @@ rollback when an edit makes things worse, a **plateau → escalation ladder** (o
 proven stall, e.g. opus then Fable 5) before giving up,
 dual **token/USD budgets with crash-resume**, and an optional **confirm-scorer** layer that
 re-checks the artifact only at the done branch to catch reward-hacking.
+
+## Core concepts — and why each exists
+
+whetstone is five ideas stacked on one. Each row below is a decision the design makes and the reason
+it makes it — read them before the mechanics, and the rest of this README is just detail on these five.
+
+| Concept | What it means | Why it exists |
+|---|---|---|
+| **Code owns the gate** | the stop/continue decision is a pure function in `src/gate.mjs`, not a prompt; the model only edits and diagnoses, a scorer only produces a number, and code compares it to your target | a soft loop lets the same model that wants to stop decide it is done, so it quits early or declares false victory — moving the decision into code makes "done" a measured fact instead of an opinion |
+| **A gate is only as strong as its scorer** | the gate is whatever scorer returns 0–100; different scorers measure different truths — do the tests pass, do the claims hold, is anything important missing | pick the wrong axis and a bad artifact sails through; the composed doc gate exists precisely because one scorer measured claim precision but was blind to omission |
+| **Forge — the verifier that learns** | when a `done` is vetoed or reached too easily, the loop learns a new per-file check that separates the good version from the bad and stores it beyond the editor's reach | a fixed target gets gamed over a long unattended run, so the gate has to grow stronger rather than stay a static bar a clever editor eventually walks around |
+| **Sandbox the untrusted code** | every behavioural scorer runs candidate code inside a locked-down out-of-process child — no filesystem writes, no network, no subprocess spawning | scoring by *running* the artifact means executing code the model wrote, which must never reach the scorer's own process or the host machine around it |
+| **Widen scope under an AND-gate** | the alpha control plane raises many objectives at once and only calls the whole thing done when every objective is met, picking winners on a held-out truth | one file is not a whole repo; a repo-wide goal is a set of objectives, and "each part looks done" is emphatically not "the real goal is done" |
 
 ## How the loop works
 
@@ -82,7 +82,12 @@ budget is reached, the loop stops on its own.
 Stop conditions, all decided in code (`gateVerdict`): `score >= target` → **done**;
 `pass >= hard_cap` → **capped**; best score stalls under `min_delta` across `plateau_window` passes →
 **plateau**; malformed score or spend over budget → **error/capped**. Precedence:
-`error > done > capped > plateau > running`.
+`error > done > capped > plateau > running`. That decision, in order, is the whole gate:
+
+<p align="center">
+  <img src="assets/whetstone-loop.svg" width="900"
+       alt="The gate decision tree. After every pass, code runs gateVerdict in fixed precedence order: (1) is the score a finite number 0 to 100 — if not, ERROR; (2) is score at or above target — if so, DONE, then a confirm-scorer veto and stability re-check, and the Forge may learn a check; (3) has the pass count reached the cap or spend passed the budget — if so, CAPPED; (4) has the best score stalled below min-delta over the plateau window — if so, PLATEAU, which climbs the escalation ladder opus then Fable 5 one rung per stall; otherwise RUNNING, which loops back to ACT for one more edit. Every box is code; the model never runs this decision.">
+</p>
 
 **Done-branch confirmation (optional).** `--confirm-scorer "<cmd>"` adds an independent scorer that
 re-checks the artifact **only when the gate says done** — cheap normal passes, skepticism paid only
@@ -179,6 +184,88 @@ budgets, rollback, crash-recovery); the Claude Code Workflow tool is an *optiona
 never the orchestrator or the gate owner (see [Backends & the Workflow tool](#backends--the-claude-code-workflow-tool)).
 Caveat on "portable": only the single-file `driver` is VCS-free (any artifact, cron, no repo). `scope`
 and `converge` use **git** commits as their keep-best unit, so they require a clean git repo.
+
+## Scaling to a whole repo (experimental)
+
+The `whetstone-scope` loop (`src/scope-cli.mjs`, design in
+[`docs/orchestrator-design.md`](docs/orchestrator-design.md)) points the *same* code-owned loop at a whole
+repo instead of one file: the model edits across a `--scope` directory, an external scorer measures the
+whole project (build + tests), and **git** is the keep-best snapshot — each pass is a commit, and a
+regressing pass is rolled back with `git reset --hard`.
+
+```bash
+node src/scope-cli.mjs "make the suite pass" \
+  --scope /path/to/repo \
+  --scorer 'node scorers/test-pass-rate.mjs --cmd "npm test"' \
+  --confirm-scorer 'node scorers/test-pass-rate.mjs --cmd "npm run test:held-out"' \
+  --read-only test/,scripts/ --target 100 --cap 20 --budget-tokens 3000000 \
+  --mcp-config empty-mcp.json
+```
+
+Two code-owned safety guards — enforced, not prompt-only:
+
+- **The editor can't edit its own gate.** Anything under `--read-only` (your tests / scorer config) is
+  hard-reverted after each pass, so a pass can't raise the score by weakening the test.
+- **It won't run on a dirty tree.** Because the loop commits and `git reset --hard`s the scope, it refuses
+  to start unless the repo is clean — an unattended rollback can't clobber your uncommitted work. Run it
+  on a clean checkout or a dedicated branch.
+
+The done-edge `--confirm-scorer` re-runs a **held-out** suite from a *clean checkout* of the committed
+pass, so a model that games the visible score still can't reach done. It raises a fixed, measured bar —
+it is not (yet) an open-ended planner; that's the v2 tier in the design doc.
+
+**Forge — the verifier that learns (`--forge`, opt-in).** When the held-out confirm *vetoes* a `done`,
+that's evidence the visible scorer was gamed. Forge materialises the good (committed) and bad (vetoed)
+versions into separate worktrees and learns a new **per-file** check that tells them apart — corroborated
+by an independent oracle, regression-tested against the exploit it just caught, and auto-retired if it
+later turns flaky. The learned checks are stored *outside* the scope (`--forge-store`) so the editor
+can't reach them. It's how the gate gets *stronger* over a long run instead of staying a fixed target —
+experimental, and (for the veto trigger) it needs `--confirm-scorer`.
+
+**Easy-done trigger (v1.8.0, single-file runs).** The Forge also fires on the *opposite* signal: a run
+that reaches `done` in **one edit pass with no done-edge check wired** (the thin-scorer-suspicion
+condition) converged too easily to be trusted. There is no gamed snapshot to learn from, but a
+legitimate discriminating pair exists — the **baseline** (`snapshots/iter_000`, which scored below
+target) vs the final artifact — so Forge learns what the successful edit actually changed. Honest
+limitation: checks admitted from that pair pass the current final *by construction*, so they can never
+veto the run that learned them — the payoff is the **next** run. That next run consumes them
+automatically: with `--forge` + `--forge-store` set, a run with **no** `--confirm-scorer` now composes
+its confirm gate **from the store alone** ([src/forge/hook.mjs](src/forge/hook.mjs)
+`composeConfirmFromStore`), so run N's learning gives run N+1 a done-edge gate for free — and once that
+gate exists, the run is no longer "easy" and the trigger self-quiets. A 0-edit baseline-done has no pair
+at all; there the [thin-scorer warning](src/summary.mjs) stays the only response. (Scope-mode easy-done
+— baseline git SHA as the bad side — is deferred; the trigger parameter and kind-namespaced store are
+the ready seams.)
+
+**Discard-memory (v1.8.0).** The code-owned iteration ledger tells the editor *that* the last edit
+failed, but not *which strategy classes* already failed. The loop now also keeps a per-run
+`area_ledger` ([src/area-registry.mjs](src/area-registry.mjs)): every scorer `findings[].area` is
+tracked, and areas attacked **≥2×** with **no best-score gain** are listed to the editor — *inside
+their own nonce fence* (`TRIED-AREAS`), because area strings are scorer-authored (a model-backed
+scorer writes them from artifact content the editor influences — an indirect capture channel), so they
+never enter the trusted prompt region, even sanitized. Code decides *which* areas qualify (pure number
+rules); the fence carries the strings. Survives `--resume`; renders nothing (zero prompt tax) until an
+area actually goes stale.
+
+## Backends & the Claude Code Workflow tool
+
+The gate (`gate.mjs`), the loop (`loop.mjs`), and the scorers are backend-agnostic — they don't care
+*how* the edit happens. The shipped, guaranteed backend is the headless `claude -p` act step
+(`act-claude.mjs`): it runs from any plain terminal or cron with just the `claude` CLI. That
+portability — detached, unattended, own-quota — is whetstone's reason to exist, so it takes **no
+dependency on the Claude Code Workflow tool**, which is entitlement-gated (e.g. Max 20×) and tied to a
+live session (it can't run detached/cron).
+
+If you're already *in* an interactive session with the Workflow tool, you don't need whetstone for
+that — a short Workflow script with a `while (score < target)` gate does the same code-owned loop
+in-session, and cheaper (warm subagents skip the per-spawn context-reload tax the CLI pays on each
+act). Pick by quadrant: **Workflow for attended/interactive, whetstone for detached/unattended/cron.**
+The `act` step is just an injectable function returning `{ changed, costUsd, tokens }`, so a
+Workflow-backed `act` would be a drop-in if anyone ever wants it — a future option, not a dependency.
+
+---
+
+> **Part 2 — Use:** install it, drive it with the launcher, bound the spend, and run it for hours.
 
 ## Install as a Claude Code plugin
 
@@ -296,64 +383,6 @@ Run state lands in `.loop/<run>/` (gitignored): `state.json`, `snapshots/iter_NN
 with `artifact_size × total passes`; there's no automatic snapshot pruning. `npm test` runs the full
 suite with no spend — the loop/driver tests inject a stub `act` and the scorers are deterministic.
 
-## Flag, config & module reference
-
-The tables above cover the everyday flags; these are the rest of `driver.mjs`'s surface.
-
-| Flag | What it does |
-|---|---|
-| `--artifact <path>` | the *one* file the loop repeatedly edits and re-scores (required) |
-| `--goal "<text>"` | the improvement objective handed to the editor each pass — the first positional arg if given, else this flag |
-| `--scorer "<cmd>"` | the shell command that scores the artifact/observed output each pass, producing the number the gate compares to `--target` (required) |
-| `--loop-dir <dir>` | where this run's `state.json`, `snapshots/`, and `reviews/` live; also selects which run `--resume` continues |
-| `--observe "<cmd>"` | a command that produces the artifact's real output (build/execute it) before scoring, instead of scoring the raw file |
-| `--plateau-window N` / `--min-delta X` | the plateau-detection pair: if the best score improves by less than `min-delta` over the last `plateau-window` passes, the gate stops the run as `plateau` |
-| `--scorer-allow <a.mjs,b.mjs>` | comma-separated allowlist of scorer script paths the Forge may run or generate checks against — the trust boundary for Forge-learned checks |
-| `--forge-oracle "<cmd>"` | repeatable; an independent, operator-trusted scorer that must corroborate a veto before Forge learns a check from it (run verbatim, same trust class as `--confirm-scorer`) |
-| `--forge-mutation-admit` | strengthens Forge admission from "fails the one observed bad artifact" to "kills an oracle-confirmed mutant neighbourhood"; requires at least one `--forge-oracle` |
-| `--forge-mutation-threshold X` | the mutant kill-rate in `[0,1]` (default `0.75`) a candidate check must clear under `--forge-mutation-admit` |
-| `--forge-exploit-regression` | composes after mutation-admit: an admitted check must also survive the executable exploit archive, rejecting one a known gaming pattern could dodge |
-| `--forge-retire` | standalone maintenance command — `node src/driver.mjs --forge-retire --forge-store <path> --check "<cmd>"` tombstones a false-positive Forge-learned check without deleting its record |
-| `--forge-store <path>` | where Forge persists learned checks, *outside* `--artifact`'s scope, so a later pass can't edit away the check that's watching it; required alongside `--forge` |
-| `--effort <level>` | reasoning effort for the editor's forward passes (`low`/`medium`/`high`/`max`, default `medium`); escalation rungs step this up independently, see the Model Selection table |
-| `--stability-runs N` | re-runs a candidate `done` artifact N times before accepting it, catching a pass that only looked done because of run-to-run non-determinism |
-| `--no-escalate` | disables the plateau escalation ladder — a stuck run stays on the cheap editor and reports `plateau` instead of climbing to opus/fable |
-
-Persisted equivalents live in `whetstone.config.json` / `~/.config/whetstone/config.json` (project file
-wins), one config key per CLI flag:
-
-| Config key | What it persists |
-|---|---|
-| `targetScore` | the `--target` counterpart — the measured score that counts as done for every run |
-| `hardCap` | the `--cap` counterpart — the pass-count ceiling no run may exceed unattended |
-| `budgetUsd` | the `--budget` counterpart — the dollar ceiling, checked after each completed pass |
-| `budgetTokens` | the `--budget-tokens` counterpart — the token ceiling, the meaningful bound on a Max/Pro plan where dollars are only notional |
-| `plateauWindow` | how many recent passes the gate inspects when deciding the run has stalled |
-| `minDelta` | the minimum best-score improvement across that window that still counts as progress |
-| `model` | the default editor model for forward passes (`haiku` / `sonnet` / `opus`) |
-| `effort` | the default reasoning effort for forward passes; escalation rungs step it up independently |
-| `escalateModel` | the standing plateau-rescue ladder (`fable` expands to `opus,fable`) so the launcher stops asking per run |
-| `mcpConfig` | a path to an MCP config (e.g. `empty-mcp.json`) passed via `--mcp-config --strict-mcp-config` to suppress the default MCP tool surface during edits |
-
-**The composed doc gate.** A doc can fail two different ways, so three scorers cover it: `doc-lint`
-(precision — flags a claim the doc makes that the repo contradicts), `doc-coverage` (recall — walks a
-committed required-token set and scores the percentage *substantively* documented, excluding bare
-name-drops and code-block-only mentions, so an omission can't hide as a passing lint), and `doc-exec`
-(executable accuracy — runs every fenced `js` example that imports from the repo in the locked-down
-`iso-runner.mjs` child and scores the percentage that execute without failing, catching stale examples
-lint can't see). `examples/doc-depth.scorers` composes all three under `composite.mjs` so a doc can't
-ship complete-looking but wrong, thin-looking but accurate, or accurate-looking but broken.
-
-**Hardening modules (v1.9–v1.11).**
-
-| Module | What it does |
-|---|---|
-| `src/blast-radius.mjs` | code-enforces "edit ONLY `--artifact`": snapshots sibling files before an edit and reverts any the editor also touched, so a pass can't launder score gains through files outside the artifact; `--allow-sibling-edits` opts out |
-| `src/gate-audit.mjs` | `--gate-audit`, opt-in, post-done: mutates the finished artifact and re-scores a sample of mutants with the *primary* scorer, reporting its kill-rate — advisory only, never changes the verdict |
-| `src/forge/gate-probe.mjs` | `--gate-self-probe`, opt-in, paid: mutates the accepted artifact and runs the *composed confirm* gate against each mutant; a mutant the gate passes is a hole, and Forge learns a check that catches it — the gate hardens itself |
-| `src/prompt-fence.mjs` | the shared nonce-fence primitive: wraps untrusted, editor-influenced text (scorer critiques, `TRIED-AREAS`, doc-exec output) in an unforgeable per-run marker with data-only framing so it can never be read as instructions |
-| `src/iso-runner.mjs` | the locked-down out-of-process child every behavioural scorer (`io-*`, `doc-exec`) runs untrusted candidate code in — no fs-write, no network, no `child_process` — keeping untrusted code out of the scorer's own process |
-
 ## Long, unattended runs
 
 Want it to grind for hours on its own? Just ask the launcher in plain words — for example:
@@ -394,68 +423,6 @@ node src/driver.mjs --resume --loop-dir .loop/longrun-01 --cap 120 --budget-toke
 > Caveats: every pass writes a full artifact snapshot with no pruning, so disk ≈ `artifact_size ×
 > passes`; the editor auto-accepts edits unattended for hours, so scope the artifact's project
 > permissions tightly; and a run still raises **one** artifact — not a whole-repo refactor.
-
-## Scaling to a whole repo (experimental)
-
-The `whetstone-scope` loop (`src/scope-cli.mjs`, design in
-[`docs/orchestrator-design.md`](docs/orchestrator-design.md)) points the *same* code-owned loop at a whole
-repo instead of one file: the model edits across a `--scope` directory, an external scorer measures the
-whole project (build + tests), and **git** is the keep-best snapshot — each pass is a commit, and a
-regressing pass is rolled back with `git reset --hard`.
-
-```bash
-node src/scope-cli.mjs "make the suite pass" \
-  --scope /path/to/repo \
-  --scorer 'node scorers/test-pass-rate.mjs --cmd "npm test"' \
-  --confirm-scorer 'node scorers/test-pass-rate.mjs --cmd "npm run test:held-out"' \
-  --read-only test/,scripts/ --target 100 --cap 20 --budget-tokens 3000000 \
-  --mcp-config empty-mcp.json
-```
-
-Two code-owned safety guards — enforced, not prompt-only:
-
-- **The editor can't edit its own gate.** Anything under `--read-only` (your tests / scorer config) is
-  hard-reverted after each pass, so a pass can't raise the score by weakening the test.
-- **It won't run on a dirty tree.** Because the loop commits and `git reset --hard`s the scope, it refuses
-  to start unless the repo is clean — an unattended rollback can't clobber your uncommitted work. Run it
-  on a clean checkout or a dedicated branch.
-
-The done-edge `--confirm-scorer` re-runs a **held-out** suite from a *clean checkout* of the committed
-pass, so a model that games the visible score still can't reach done. It raises a fixed, measured bar —
-it is not (yet) an open-ended planner; that's the v2 tier in the design doc.
-
-**Forge — the verifier that learns (`--forge`, opt-in).** When the held-out confirm *vetoes* a `done`,
-that's evidence the visible scorer was gamed. Forge materialises the good (committed) and bad (vetoed)
-versions into separate worktrees and learns a new **per-file** check that tells them apart — corroborated
-by an independent oracle, regression-tested against the exploit it just caught, and auto-retired if it
-later turns flaky. The learned checks are stored *outside* the scope (`--forge-store`) so the editor
-can't reach them. It's how the gate gets *stronger* over a long run instead of staying a fixed target —
-experimental, and (for the veto trigger) it needs `--confirm-scorer`.
-
-**Easy-done trigger (v1.8.0, single-file runs).** The Forge also fires on the *opposite* signal: a run
-that reaches `done` in **one edit pass with no done-edge check wired** (the thin-scorer-suspicion
-condition) converged too easily to be trusted. There is no gamed snapshot to learn from, but a
-legitimate discriminating pair exists — the **baseline** (`snapshots/iter_000`, which scored below
-target) vs the final artifact — so Forge learns what the successful edit actually changed. Honest
-limitation: checks admitted from that pair pass the current final *by construction*, so they can never
-veto the run that learned them — the payoff is the **next** run. That next run consumes them
-automatically: with `--forge` + `--forge-store` set, a run with **no** `--confirm-scorer` now composes
-its confirm gate **from the store alone** ([src/forge/hook.mjs](src/forge/hook.mjs)
-`composeConfirmFromStore`), so run N's learning gives run N+1 a done-edge gate for free — and once that
-gate exists, the run is no longer "easy" and the trigger self-quiets. A 0-edit baseline-done has no pair
-at all; there the [thin-scorer warning](src/summary.mjs) stays the only response. (Scope-mode easy-done
-— baseline git SHA as the bad side — is deferred; the trigger parameter and kind-namespaced store are
-the ready seams.)
-
-**Discard-memory (v1.8.0).** The code-owned iteration ledger tells the editor *that* the last edit
-failed, but not *which strategy classes* already failed. The loop now also keeps a per-run
-`area_ledger` ([src/area-registry.mjs](src/area-registry.mjs)): every scorer `findings[].area` is
-tracked, and areas attacked **≥2×** with **no best-score gain** are listed to the editor — *inside
-their own nonce fence* (`TRIED-AREAS`), because area strings are scorer-authored (a model-backed
-scorer writes them from artifact content the editor influences — an indirect capture channel), so they
-never enter the trusted prompt region, even sanitized. Code decides *which* areas qualify (pure number
-rules); the fence carries the strings. Survives `--resume`; renders nothing (zero prompt tax) until an
-area actually goes stale.
 
 ## ⚠️ Cost, auth & budgets (read before the first live run)
 
@@ -537,22 +504,6 @@ easily — evidence the *scorer* may be thin, not that the artifact is good. The
 fixed prose + numbers (it can never carry model text), and it stays quiet when the done-edge already
 paid skepticism or when convergence took real work.
 
-## Backends & the Claude Code Workflow tool
-
-The gate (`gate.mjs`), the loop (`loop.mjs`), and the scorers are backend-agnostic — they don't care
-*how* the edit happens. The shipped, guaranteed backend is the headless `claude -p` act step
-(`act-claude.mjs`): it runs from any plain terminal or cron with just the `claude` CLI. That
-portability — detached, unattended, own-quota — is whetstone's reason to exist, so it takes **no
-dependency on the Claude Code Workflow tool**, which is entitlement-gated (e.g. Max 20×) and tied to a
-live session (it can't run detached/cron).
-
-If you're already *in* an interactive session with the Workflow tool, you don't need whetstone for
-that — a short Workflow script with a `while (score < target)` gate does the same code-owned loop
-in-session, and cheaper (warm subagents skip the per-spawn context-reload tax the CLI pays on each
-act). Pick by quadrant: **Workflow for attended/interactive, whetstone for detached/unattended/cron.**
-The `act` step is just an injectable function returning `{ changed, costUsd, tokens }`, so a
-Workflow-backed `act` would be a drop-in if anyone ever wants it — a future option, not a dependency.
-
 ## When to use (and not)
 
 USE it only when one-shot already failed **and** progress is *measurable* (a real scorer exists) —
@@ -560,6 +511,68 @@ raise a test pass-rate, a rubric score, an image/embedding similarity. Do **not*
 task in a loop (wrong scale wastes tokens), don't point it at a whole-repo refactor (it raises *one*
 artifact), and don't hand-craft a rigid static harness — the scorer is the pluggable seam exactly so
 you don't have to. Most tasks don't need a feedback controller.
+
+---
+
+> **Part 3 — Reference:** every flag, config key, and module, plus the file map and prior art.
+
+## Flag, config & module reference
+
+The tables above cover the everyday flags; these are the rest of `driver.mjs`'s surface.
+
+| Flag | What it does |
+|---|---|
+| `--artifact <path>` | the *one* file the loop repeatedly edits and re-scores (required) |
+| `--goal "<text>"` | the improvement objective handed to the editor each pass — the first positional arg if given, else this flag |
+| `--scorer "<cmd>"` | the shell command that scores the artifact/observed output each pass, producing the number the gate compares to `--target` (required) |
+| `--loop-dir <dir>` | where this run's `state.json`, `snapshots/`, and `reviews/` live; also selects which run `--resume` continues |
+| `--observe "<cmd>"` | a command that produces the artifact's real output (build/execute it) before scoring, instead of scoring the raw file |
+| `--plateau-window N` / `--min-delta X` | the plateau-detection pair: if the best score improves by less than `min-delta` over the last `plateau-window` passes, the gate stops the run as `plateau` |
+| `--scorer-allow <a.mjs,b.mjs>` | comma-separated allowlist of scorer script paths the Forge may run or generate checks against — the trust boundary for Forge-learned checks |
+| `--forge-oracle "<cmd>"` | repeatable; an independent, operator-trusted scorer that must corroborate a veto before Forge learns a check from it (run verbatim, same trust class as `--confirm-scorer`) |
+| `--forge-mutation-admit` | strengthens Forge admission from "fails the one observed bad artifact" to "kills an oracle-confirmed mutant neighbourhood"; requires at least one `--forge-oracle` |
+| `--forge-mutation-threshold X` | the mutant kill-rate in `[0,1]` (default `0.75`) a candidate check must clear under `--forge-mutation-admit` |
+| `--forge-exploit-regression` | composes after mutation-admit: an admitted check must also survive the executable exploit archive, rejecting one a known gaming pattern could dodge |
+| `--forge-retire` | standalone maintenance command — `node src/driver.mjs --forge-retire --forge-store <path> --check "<cmd>"` tombstones a false-positive Forge-learned check without deleting its record |
+| `--forge-store <path>` | where Forge persists learned checks, *outside* `--artifact`'s scope, so a later pass can't edit away the check that's watching it; required alongside `--forge` |
+| `--effort <level>` | reasoning effort for the editor's forward passes (`low`/`medium`/`high`/`max`, default `medium`); escalation rungs step this up independently, see the Model Selection table |
+| `--stability-runs N` | re-runs a candidate `done` artifact N times before accepting it, catching a pass that only looked done because of run-to-run non-determinism |
+| `--no-escalate` | disables the plateau escalation ladder — a stuck run stays on the cheap editor and reports `plateau` instead of climbing to opus/fable |
+
+Persisted equivalents live in `whetstone.config.json` / `~/.config/whetstone/config.json` (project file
+wins), one config key per CLI flag:
+
+| Config key | What it persists |
+|---|---|
+| `targetScore` | the `--target` counterpart — the measured score that counts as done for every run |
+| `hardCap` | the `--cap` counterpart — the pass-count ceiling no run may exceed unattended |
+| `budgetUsd` | the `--budget` counterpart — the dollar ceiling, checked after each completed pass |
+| `budgetTokens` | the `--budget-tokens` counterpart — the token ceiling, the meaningful bound on a Max/Pro plan where dollars are only notional |
+| `plateauWindow` | how many recent passes the gate inspects when deciding the run has stalled |
+| `minDelta` | the minimum best-score improvement across that window that still counts as progress |
+| `model` | the default editor model for forward passes (`haiku` / `sonnet` / `opus`) |
+| `effort` | the default reasoning effort for forward passes; escalation rungs step it up independently |
+| `escalateModel` | the standing plateau-rescue ladder (`fable` expands to `opus,fable`) so the launcher stops asking per run |
+| `mcpConfig` | a path to an MCP config (e.g. `empty-mcp.json`) passed via `--mcp-config --strict-mcp-config` to suppress the default MCP tool surface during edits |
+
+**The composed doc gate.** A doc can fail two different ways, so three scorers cover it: `doc-lint`
+(precision — flags a claim the doc makes that the repo contradicts), `doc-coverage` (recall — walks a
+committed required-token set and scores the percentage *substantively* documented, excluding bare
+name-drops and code-block-only mentions, so an omission can't hide as a passing lint), and `doc-exec`
+(executable accuracy — runs every fenced `js` example that imports from the repo in the locked-down
+`iso-runner.mjs` child and scores the percentage that execute without failing, catching stale examples
+lint can't see). `examples/doc-depth.scorers` composes all three under `composite.mjs` so a doc can't
+ship complete-looking but wrong, thin-looking but accurate, or accurate-looking but broken.
+
+**Hardening modules (v1.9–v1.11).**
+
+| Module | What it does |
+|---|---|
+| `src/blast-radius.mjs` | code-enforces "edit ONLY `--artifact`": snapshots sibling files before an edit and reverts any the editor also touched, so a pass can't launder score gains through files outside the artifact; `--allow-sibling-edits` opts out |
+| `src/gate-audit.mjs` | `--gate-audit`, opt-in, post-done: mutates the finished artifact and re-scores a sample of mutants with the *primary* scorer, reporting its kill-rate — advisory only, never changes the verdict |
+| `src/forge/gate-probe.mjs` | `--gate-self-probe`, opt-in, paid: mutates the accepted artifact and runs the *composed confirm* gate against each mutant; a mutant the gate passes is a hole, and Forge learns a check that catches it — the gate hardens itself |
+| `src/prompt-fence.mjs` | the shared nonce-fence primitive: wraps untrusted, editor-influenced text (scorer critiques, `TRIED-AREAS`, doc-exec output) in an unforgeable per-run marker with data-only framing so it can never be read as instructions |
+| `src/iso-runner.mjs` | the locked-down out-of-process child every behavioural scorer (`io-*`, `doc-exec`) runs untrusted candidate code in — no fs-write, no network, no `child_process` — keeping untrusted code out of the scorer's own process |
 
 ## Layout
 
@@ -602,7 +615,8 @@ src/plan*.mjs / src/replan*.mjs / src/outer*.mjs  proactive planner · re-decomp
 src/whet.mjs        intake router (driver / scope / converge)
 ```
 
-See `SPEC.md` for the file/scorer/gate contracts and the config format.
+See `SPEC.md` for the file/scorer/gate contracts and the config format, and
+[CHANGELOG.md](CHANGELOG.md) for the version-by-version release history.
 
 ## Prior art & inspiration
 

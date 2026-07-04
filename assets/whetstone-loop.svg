@@ -1,92 +1,88 @@
-<svg viewBox="0 0 1000 720" width="1000" height="720" role="img" xmlns="http://www.w3.org/2000/svg">
-<title>whetstone loop — every decision</title>
-<desc>The whetstone control loop with the model used at each step. A code-owned pipeline: baseline score (code), then each pass the model makes one edit (ACT, haiku or sonnet), a scorer observes and scores the real output 0 to 100 (code or an opus judge), the best result is kept (code), and a code-owned GATE decides the verdict: running (loop back to ACT), done, capped, plateau (one opus rescue), or error. Two budget dials cap spend.</desc>
-<defs>
-  <marker id="aF" markerWidth="10" markerHeight="10" refX="6.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3 L0,6 Z" fill="#88C0D0"/></marker>
-  <marker id="aA" markerWidth="10" markerHeight="10" refX="6.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3 L0,6 Z" fill="#D08770"/></marker>
-</defs>
-<rect x="6" y="6" width="988" height="708" rx="22" fill="#2E3440" stroke="#434C5E" stroke-width="1.5"/>
+<svg viewBox="0 0 820 860" width="820" height="860" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>whetstone — the gate decision tree (gateVerdict)</title>
+<desc>The code-owned decision that runs after every pass, as a top-down list. gateVerdict() checks four things in fixed precedence order: (1) is the score a finite number in 0 to 100 — if not, ERROR; (2) is the score at or above the target — if so, DONE (then a confirm-scorer veto and stability re-check, and the Forge may learn a check); (3) has the pass count reached the cap, or has spend passed the budget — if so, CAPPED; (4) has the best score stalled below min-delta across the plateau window — if so, PLATEAU (which climbs the escalation ladder: opus, then Fable 5, one rung per stall, then stops); otherwise RUNNING, which loops back to ACT for one more edit. The model never runs this decision — only code writes done. Design source: assets/whetstone-loop.html.</desc>
+<rect x="6" y="6" width="808" height="848" rx="20" fill="#2E3440" stroke="#434C5E" stroke-width="1.5"/>
 <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
-  <text x="36" y="50" font-size="25" font-weight="700" fill="#ECEFF4">whetstone — one loop, every decision</text>
-  <text x="36" y="75" font-size="14" fill="#9AA5B8">code owns the gate · model owns the edit · scorer owns the number</text>
+  <text x="30" y="44" font-size="22" font-weight="700" fill="#ECEFF4">whetstone — the gate decision tree</text>
+  <text x="30" y="65" font-size="12.5" fill="#9AA5B8">gateVerdict() runs after every pass · the model never sees it · first branch that matches wins</text>
+  <rect x="686" y="34" width="12" height="12" rx="3" fill="#81A1C1"/><text x="703" y="44" font-size="11.5" fill="#D8DEE9">every box is CODE</text>
 
-  <rect x="650" y="36" width="13" height="13" rx="3" fill="#81A1C1"/><text x="668" y="47" font-size="12.5" fill="#D8DEE9">CODE</text>
-  <rect x="724" y="36" width="13" height="13" rx="3" fill="#EBCB8B"/><text x="742" y="47" font-size="12.5" fill="#D8DEE9">MODEL</text>
-  <rect x="812" y="36" width="13" height="13" rx="3" fill="#A3BE8C"/><text x="830" y="47" font-size="12.5" fill="#D8DEE9">SCORER</text>
+  <!-- left spine: upright, stacked letters -->
+  <rect x="18" y="96" width="4" height="672" rx="2" fill="#81A1C1" opacity="0.5"/>
+  <text x="34" y="310" text-anchor="middle" font-size="11.5" font-weight="700" fill="#81A1C1" letter-spacing="1"><tspan x="34">C</tspan><tspan x="34" dy="15">O</tspan><tspan x="34" dy="15">D</tspan><tspan x="34" dy="15">E</tspan><tspan x="34" dy="24">O</tspan><tspan x="34" dy="15">W</tspan><tspan x="34" dy="15">N</tspan><tspan x="34" dy="15">S</tspan><tspan x="34" dy="24">T</tspan><tspan x="34" dy="15">H</tspan><tspan x="34" dy="15">E</tspan><tspan x="34" dy="24">G</tspan><tspan x="34" dy="15">A</tspan><tspan x="34" dy="15">T</tspan><tspan x="34" dy="15">E</tspan></text>
 
-  <path d="M60,535 C14,520 14,380 14,300 C14,240 30,196 72,196" fill="none" stroke="#81A1C1" stroke-width="1.6" marker-end="url(#aF)"/>
-  <text transform="rotate(-90 34 332)" x="34" y="332" text-anchor="middle" font-size="11" fill="#88C0D0">running · score &lt; target</text>
+  <!-- ENTRY -->
+  <rect x="54" y="92" width="724" height="46" rx="10" fill="#3B4252" stroke="#4C566A"/>
+  <rect x="54" y="92" width="4" height="46" rx="2" fill="#81A1C1"/>
+  <text x="72" y="112" font-size="13.5" font-weight="700" fill="#ECEFF4">EACH PASS → gateVerdict(state)</text>
+  <text x="72" y="130" font-size="11.5" fill="#9AA5B8">inputs: score · pass count · best-score history — keep-best already restored the best</text>
 
-  <path d="M144,290 C104,294 72,286 68,256 C65,232 70,210 72,210" fill="none" stroke="#D08770" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#aA)"/>
-  <text x="98" y="244" font-size="10" fill="#D08770">no-op</text>
+  <!-- D1 -->
+  <rect x="54" y="148" width="724" height="106" rx="10" fill="#3B4252"/>
+  <rect x="54" y="148" width="4" height="106" rx="2" fill="#81A1C1"/>
+  <circle cx="90" cy="174" r="11" fill="#434C5E"/><text x="90" y="178" text-anchor="middle" font-size="12" font-weight="700" fill="#ECEFF4">1</text>
+  <text x="110" y="179" font-size="14" font-weight="700" fill="#ECEFF4">is the score a finite number 0–100?</text>
+  <text x="72" y="199" font-size="11.5" fill="#9AA5B8">a malformed / missing score is not a verdict the model can fake</text>
+  <rect x="72" y="208" width="536" height="38" rx="7" fill="#3A2C2F" stroke="#BF616A" stroke-opacity="0.5"/>
+  <text x="84" y="225" font-size="11"><tspan font-weight="700" fill="#d98b93">no → ERROR</tspan><tspan fill="#e0a6ac">  invalid score, or the pass threw —</tspan></text>
+  <text x="84" y="239" font-size="11" fill="#e0a6ac">the run stops</text>
+  <rect x="622" y="216" width="140" height="22" rx="7" fill="#2F363B" stroke="#88C0D0" stroke-opacity="0.55" stroke-dasharray="4 3"/>
+  <text x="692" y="231" text-anchor="middle" font-size="11" fill="#9fd0dd">yes ↓</text>
 
-  <path d="M220,146 L220,178" stroke="#88C0D0" stroke-width="1.6" marker-end="url(#aF)"/>
-  <path d="M220,234 L220,258" stroke="#88C0D0" stroke-width="1.6" marker-end="url(#aF)"/>
-  <path d="M220,318 L220,346" stroke="#88C0D0" stroke-width="1.6" marker-end="url(#aF)"/>
-  <text x="230" y="338" font-size="10.5" fill="#A3BE8C">edited</text>
-  <path d="M220,402 L220,424" stroke="#88C0D0" stroke-width="1.6" marker-end="url(#aF)"/>
-  <path d="M220,474 L220,498" stroke="#88C0D0" stroke-width="1.6" marker-end="url(#aF)"/>
+  <!-- D2 -->
+  <rect x="54" y="264" width="724" height="106" rx="10" fill="#3B4252"/>
+  <rect x="54" y="264" width="4" height="106" rx="2" fill="#81A1C1"/>
+  <circle cx="90" cy="290" r="11" fill="#434C5E"/><text x="90" y="294" text-anchor="middle" font-size="12" font-weight="700" fill="#ECEFF4">2</text>
+  <text x="110" y="295" font-size="14" font-weight="700" fill="#ECEFF4">score ≥ --target ?</text>
+  <text x="72" y="315" font-size="11.5" fill="#9AA5B8">the only branch that can say done — and it lives in code, not a prompt</text>
+  <rect x="72" y="324" width="536" height="38" rx="7" fill="#333B31" stroke="#A3BE8C" stroke-opacity="0.5"/>
+  <text x="84" y="341" font-size="11"><tspan font-weight="700" fill="#a3be8c">yes → DONE</tspan><tspan fill="#c2d4b0">  then --confirm-scorer veto + --stability-runs</tspan></text>
+  <text x="84" y="355" font-size="11" fill="#c2d4b0">re-check · the Forge may learn a check</text>
+  <rect x="622" y="332" width="140" height="22" rx="7" fill="#2F363B" stroke="#88C0D0" stroke-opacity="0.55" stroke-dasharray="4 3"/>
+  <text x="692" y="347" text-anchor="middle" font-size="11" fill="#9fd0dd">no ↓</text>
 
-  <rect x="70" y="100" width="7" height="46" rx="3.5" fill="#81A1C1"/>
-  <rect x="74" y="100" width="296" height="46" rx="11" fill="#3B4252" stroke="#4C566A"/>
-  <text x="90" y="122" font-size="14.5" font-weight="700" fill="#ECEFF4">1 · BASELINE</text>
-  <text x="90" y="139" font-size="11.5" fill="#9AA5B8">code · score iter_000 (skipped on --resume)</text>
+  <!-- D3 -->
+  <rect x="54" y="380" width="724" height="106" rx="10" fill="#3B4252"/>
+  <rect x="54" y="380" width="4" height="106" rx="2" fill="#81A1C1"/>
+  <circle cx="90" cy="406" r="11" fill="#434C5E"/><text x="90" y="410" text-anchor="middle" font-size="12" font-weight="700" fill="#ECEFF4">3</text>
+  <text x="110" y="411" font-size="14" font-weight="700" fill="#ECEFF4">pass ≥ --cap ?  ·  spend &gt; budget ?</text>
+  <text x="72" y="431" font-size="11.5" fill="#9AA5B8">--budget / --budget-tokens are checked after a pass, so may overshoot by one</text>
+  <rect x="72" y="440" width="536" height="38" rx="7" fill="#3B3830" stroke="#EBCB8B" stroke-opacity="0.5"/>
+  <text x="84" y="457" font-size="11"><tspan font-weight="700" fill="#ebcb8b">yes → CAPPED</tspan><tspan fill="#e2d0a6">  the hard stop — --cap is the true ceiling</tspan></text>
+  <text x="84" y="471" font-size="11" fill="#e2d0a6">no unattended run may exceed</text>
+  <rect x="622" y="448" width="140" height="22" rx="7" fill="#2F363B" stroke="#88C0D0" stroke-opacity="0.55" stroke-dasharray="4 3"/>
+  <text x="692" y="463" text-anchor="middle" font-size="11" fill="#9fd0dd">no ↓</text>
 
-  <rect x="70" y="182" width="7" height="52" rx="3.5" fill="#EBCB8B"/>
-  <rect x="74" y="182" width="296" height="52" rx="11" fill="#3B4252" stroke="#4C566A"/>
-  <text x="90" y="205" font-size="14.5" font-weight="700" fill="#ECEFF4">2 · ACT — one edit</text>
-  <text x="90" y="223" font-size="11.5" fill="#9AA5B8">haiku / sonnet · edit from the last critique</text>
+  <!-- D4 -->
+  <rect x="54" y="496" width="724" height="106" rx="10" fill="#3B4252"/>
+  <rect x="54" y="496" width="4" height="106" rx="2" fill="#81A1C1"/>
+  <circle cx="90" cy="522" r="11" fill="#434C5E"/><text x="90" y="526" text-anchor="middle" font-size="12" font-weight="700" fill="#ECEFF4">4</text>
+  <text x="110" y="527" font-size="14" font-weight="700" fill="#ECEFF4">best stalled &lt; --min-delta ?</text>
+  <text x="72" y="547" font-size="11.5" fill="#9AA5B8">measured across the last --plateau-window passes of best score</text>
+  <rect x="72" y="556" width="536" height="38" rx="7" fill="#3A322E" stroke="#D08770" stroke-opacity="0.5"/>
+  <text x="84" y="573" font-size="11"><tspan font-weight="700" fill="#d08770">yes → PLATEAU</tspan><tspan fill="#e2b6a4">  escalation ladder: opus, then Fable 5 —</tspan></text>
+  <text x="84" y="587" font-size="11" fill="#e2b6a4">one rung per stall, then it stops</text>
+  <rect x="622" y="564" width="140" height="22" rx="7" fill="#2F363B" stroke="#88C0D0" stroke-opacity="0.55" stroke-dasharray="4 3"/>
+  <text x="692" y="579" text-anchor="middle" font-size="11" fill="#9fd0dd">no ↓</text>
 
-  <path d="M220,262 L296,290 L220,318 L144,290 Z" fill="#3B4252" stroke="#81A1C1" stroke-width="1.5"/>
-  <text x="220" y="294" font-size="13.5" fill="#E5E9F0" text-anchor="middle">changed?</text>
+  <!-- RUNNING -->
+  <rect x="54" y="612" width="724" height="58" rx="10" fill="#3B4252"/>
+  <rect x="54" y="612" width="4" height="58" rx="2" fill="#88C0D0"/>
+  <circle cx="90" cy="638" r="11" fill="#88C0D0"/><text x="90" y="643" text-anchor="middle" font-size="13" font-weight="700" fill="#2E3440">↻</text>
+  <text x="110" y="643" font-size="14" font-weight="700" fill="#ECEFF4">RUNNING</text>
+  <text x="72" y="663" font-size="11.5" fill="#b8c8d0">score &lt; target, room left → loop back to ACT for one more edit, then gateVerdict runs again</text>
 
-  <rect x="70" y="350" width="7" height="52" rx="3.5" fill="#A3BE8C"/>
-  <rect x="74" y="350" width="296" height="52" rx="11" fill="#3B4252" stroke="#4C566A"/>
-  <text x="90" y="373" font-size="14.5" font-weight="700" fill="#ECEFF4">3 · OBSERVE + SCORE</text>
-  <text x="90" y="391" font-size="11.5" fill="#9AA5B8">run tests / render → 0–100 · code or opus judge</text>
+  <!-- FORGE -->
+  <rect x="54" y="680" width="724" height="86" rx="10" fill="#363D4A" stroke="#A3BE8C" stroke-opacity="0.6" stroke-dasharray="6 3"/>
+  <text x="72" y="702" font-size="12" font-weight="700" fill="#ECEFF4">on a DONE, the gate can get STRONGER (--forge)</text>
+  <text x="72" y="721" font-size="11" fill="#CED4DE">recovered-veto → learn what the gamed version got wrong</text>
+  <text x="72" y="739" font-size="11" fill="#CED4DE">easy-done (1 edit, no confirm) → learn from baseline → final</text>
+  <text x="72" y="757" font-size="11" fill="#CED4DE">--gate-self-probe → learn a check for any mutant the gate passed</text>
 
-  <rect x="70" y="428" width="7" height="46" rx="3.5" fill="#81A1C1"/>
-  <rect x="74" y="428" width="296" height="46" rx="11" fill="#3B4252" stroke="#4C566A"/>
-  <text x="90" y="450" font-size="14.5" font-weight="700" fill="#ECEFF4">4 · KEEP-BEST restore</text>
-  <text x="90" y="467" font-size="11.5" fill="#9AA5B8">code · roll back a regressed pass</text>
-
-  <rect x="60" y="502" width="7" height="66" rx="3.5" fill="#81A1C1"/>
-  <rect x="64" y="502" width="316" height="66" rx="12" fill="#3B4252" stroke="#81A1C1" stroke-width="2"/>
-  <text x="84" y="530" font-size="15" font-weight="700" fill="#ECEFF4">5 · GATE — gateVerdict (code)</text>
-  <text x="84" y="552" font-size="10.5" fill="#B8C0CF">precedence  error › done › capped › plateau › running</text>
-
-  <path d="M380,520 C470,400 510,230 596,182" fill="none" stroke="#A3BE8C" stroke-width="1.8"/>
-  <path d="M380,528 C480,440 520,300 596,270" fill="none" stroke="#EBCB8B" stroke-width="1.8"/>
-  <path d="M380,540 C490,486 520,392 596,358" fill="none" stroke="#D08770" stroke-width="1.8"/>
-  <path d="M380,548 C470,524 520,470 596,446" fill="none" stroke="#BF616A" stroke-width="1.8"/>
-
-  <rect x="600" y="150" width="7" height="62" rx="3.5" fill="#A3BE8C"/>
-  <rect x="604" y="150" width="356" height="62" rx="11" fill="#3B4252" stroke="#4C566A"/>
-  <circle cx="626" cy="177" r="6" fill="#A3BE8C"/>
-  <text x="642" y="182" font-size="15" font-weight="700" fill="#ECEFF4">DONE</text>
-  <text x="620" y="200" font-size="11.5" fill="#9AA5B8">score ≥ target → confirm-scorer veto check</text>
-
-  <rect x="600" y="238" width="7" height="62" rx="3.5" fill="#EBCB8B"/>
-  <rect x="604" y="238" width="356" height="62" rx="11" fill="#3B4252" stroke="#4C566A"/>
-  <circle cx="626" cy="265" r="6" fill="#EBCB8B"/>
-  <text x="642" y="270" font-size="15" font-weight="700" fill="#ECEFF4">CAPPED</text>
-  <text x="620" y="288" font-size="11.5" fill="#9AA5B8">pass ≥ cap · over --budget / --budget-tokens</text>
-
-  <rect x="600" y="326" width="7" height="62" rx="3.5" fill="#D08770"/>
-  <rect x="604" y="326" width="356" height="62" rx="11" fill="#3B4252" stroke="#4C566A"/>
-  <circle cx="626" cy="353" r="6" fill="#D08770"/>
-  <text x="642" y="358" font-size="15" font-weight="700" fill="#ECEFF4">PLATEAU</text>
-  <text x="620" y="376" font-size="11.5" fill="#9AA5B8">best stalled → one opus rescue, then stands</text>
-
-  <rect x="600" y="414" width="7" height="62" rx="3.5" fill="#BF616A"/>
-  <rect x="604" y="414" width="356" height="62" rx="11" fill="#3B4252" stroke="#4C566A"/>
-  <circle cx="626" cy="441" r="6" fill="#BF616A"/>
-  <text x="642" y="446" font-size="15" font-weight="700" fill="#ECEFF4">ERROR</text>
-  <text x="620" y="464" font-size="11.5" fill="#9AA5B8">invalid score · or a pass threw</text>
-
-  <rect x="36" y="596" width="924" height="62" rx="10" fill="#333A48" stroke="#3B4252"/>
-  <rect x="36" y="596" width="6" height="62" rx="3" fill="#81A1C1"/>
-  <text x="56" y="620" font-size="11.5" fill="#D8DEE9">Two budget dials (code-owned), checked after every pass — may overshoot by one:  --budget &lt;USD&gt; · --budget-tokens &lt;N&gt;.</text>
-  <text x="56" y="640" font-size="11.5" fill="#9AA5B8">No-op pass (editor changed nothing) is still charged → retry, escalate to opus after 2, then error. On Max/Pro, tokens are the real ceiling.</text>
+  <!-- footer -->
+  <rect x="30" y="784" width="760" height="50" rx="10" fill="#333A48" stroke="#3B4252"/>
+  <rect x="30" y="784" width="6" height="50" rx="3" fill="#81A1C1"/>
+  <text x="50" y="808" font-size="11.5" fill="#D8DEE9">Precedence  <tspan fill="#BF616A">error</tspan> › <tspan fill="#A3BE8C">done</tspan> › <tspan fill="#EBCB8B">capped</tspan> › <tspan fill="#D08770">plateau</tspan> › <tspan fill="#88C0D0">running</tspan>  — the first branch that matches wins.</text>
+  <text x="50" y="826" font-size="11" fill="#9AA5B8">The model never runs this decision — it only edits and diagnoses. Only code writes “done”, so the model cannot vote itself finished.</text>
 </g>
 </svg>

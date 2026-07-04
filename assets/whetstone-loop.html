@@ -1,0 +1,118 @@
+<!doctype html>
+<!--
+  DESIGN SOURCE for assets/whetstone-loop.svg (the gate decision tree embedded in README.md).
+  GitHub READMEs strip raw HTML, so this file is NOT embedded directly — it is the editable
+  source of truth. Edit here first (CSS auto-wraps text, `writing-mode` handles the vertical
+  spine), preview in a browser, then hand-port the layout to the committed SVG.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>whetstone — the gate decision tree</title>
+<style>
+  body{margin:0;padding:32px;background:#22272e;display:flex;justify-content:center;}
+  .wl-panel{max-width:740px;width:100%;background:#2E3440;border:1px solid #434C5E;border-radius:18px;padding:20px 22px;color:#E5E9F0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;line-height:1.45;}
+  .wl-head{margin-bottom:16px;}
+  .wl-title{font-size:22px;font-weight:700;color:#ECEFF4;}
+  .wl-sub{font-size:12.5px;color:#9AA5B8;margin-top:3px;}
+  .wl-body{display:flex;gap:14px;align-items:stretch;}
+  .wl-spine{writing-mode:vertical-rl;text-orientation:upright;letter-spacing:2px;font-weight:700;font-size:12px;color:#81A1C1;background:linear-gradient(#81A1C1,#81A1C1) left/4px 100% no-repeat;padding-left:12px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
+  .wl-flow{flex:1 1 auto;display:flex;flex-direction:column;gap:9px;min-width:0;}
+  .wl-entry{background:#3B4252;border:1px solid #4C566A;border-radius:10px;padding:9px 12px;font-size:11.5px;color:#9AA5B8;}
+  .wl-entry b{display:block;color:#ECEFF4;font-size:13.5px;margin-bottom:2px;}
+  .wl-step,.wl-run{background:#3B4252;border-radius:10px;padding:9px 12px;border-left:4px solid #81A1C1;}
+  .wl-run{border-left-color:#88C0D0;}
+  .wl-q{font-size:14px;font-weight:700;color:#ECEFF4;display:flex;align-items:center;gap:2px;}
+  .wl-num{display:inline-flex;width:21px;height:21px;border-radius:50%;background:#434C5E;color:#ECEFF4;align-items:center;justify-content:center;font-size:12px;margin-right:7px;flex:0 0 auto;}
+  .wl-num.run{background:#88C0D0;color:#2E3440;}
+  .wl-desc{font-size:11.5px;color:#9AA5B8;margin:4px 0 0;}
+  .wl-outs{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;}
+  .wl-chip{font-size:11.5px;padding:6px 10px;border-radius:8px;flex:1 1 60%;min-width:200px;}
+  .wl-chip b{font-weight:700;}
+  .wl-chip.cont{flex:0 0 auto;min-width:0;color:#9fd0dd;background:rgba(136,192,208,.10);border:1px dashed rgba(136,192,208,.45);align-self:center;}
+  .wl-chip.err{background:rgba(191,97,106,.14);border:1px solid rgba(191,97,106,.45);color:#e0a6ac;}
+  .wl-chip.err b{color:#d98b93;}
+  .wl-chip.done{background:rgba(163,190,140,.14);border:1px solid rgba(163,190,140,.45);color:#c2d4b0;}
+  .wl-chip.done b{color:#a3be8c;}
+  .wl-chip.capped{background:rgba(235,203,139,.14);border:1px solid rgba(235,203,139,.45);color:#e2d0a6;}
+  .wl-chip.capped b{color:#ebcb8b;}
+  .wl-chip.plateau{background:rgba(208,135,112,.14);border:1px solid rgba(208,135,112,.45);color:#e2b6a4;}
+  .wl-chip.plateau b{color:#d08770;}
+  .wl-run .wl-desc{color:#b8c8d0;}
+  .wl-forge{margin-top:2px;background:#363D4A;border:1px dashed rgba(163,190,140,.6);border-radius:10px;padding:9px 12px;font-size:11px;color:#CED4DE;}
+  .wl-forge b{display:block;color:#ECEFF4;font-size:12px;margin-bottom:4px;}
+  .wl-forge div{margin-top:2px;}
+  .wl-foot{margin-top:14px;padding-top:12px;border-top:1px solid #3B4252;font-size:11.5px;color:#9AA5B8;}
+  .wl-foot b{color:#D8DEE9;}
+  .err-t{color:#BF616A!important;}.done-t{color:#A3BE8C!important;}.capped-t{color:#EBCB8B!important;}.plateau-t{color:#D08770!important;}.run-t{color:#88C0D0!important;}
+  .wl-panel code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;background:rgba(129,161,193,.16);color:#cdd9e6;padding:1px 4px;border-radius:4px;}
+  @media(max-width:560px){.wl-chip{flex-basis:100%;}.wl-title{font-size:19px;}}
+</style>
+</head>
+<body>
+<div class="wl-panel">
+  <div class="wl-head">
+    <div class="wl-title">whetstone — the gate decision tree</div>
+    <div class="wl-sub">gateVerdict() runs after every pass · the model never sees it · first branch that matches wins</div>
+  </div>
+
+  <div class="wl-body">
+    <div class="wl-spine">CODE&nbsp;OWNS&nbsp;THE&nbsp;GATE</div>
+
+    <div class="wl-flow">
+      <div class="wl-entry"><b>EACH PASS → gateVerdict(state)</b><span>inputs: score · pass count · best-score history — keep-best already restored the best</span></div>
+
+      <div class="wl-step">
+        <div class="wl-q"><span class="wl-num">1</span> is the score a finite number 0–100?</div>
+        <div class="wl-desc">a malformed / missing score is not a verdict the model can fake</div>
+        <div class="wl-outs">
+          <div class="wl-chip err"><b>no → ERROR</b> invalid score, or the pass threw — the run stops</div>
+          <div class="wl-chip cont">yes ↓</div>
+        </div>
+      </div>
+
+      <div class="wl-step">
+        <div class="wl-q"><span class="wl-num">2</span> score ≥ <code>--target</code> ?</div>
+        <div class="wl-desc">the only branch that can say done — and it lives in code, not a prompt</div>
+        <div class="wl-outs">
+          <div class="wl-chip done"><b>yes → DONE</b> then <code>--confirm-scorer</code> veto + <code>--stability-runs</code> re-check · the Forge may learn a check</div>
+          <div class="wl-chip cont">no ↓</div>
+        </div>
+      </div>
+
+      <div class="wl-step">
+        <div class="wl-q"><span class="wl-num">3</span> pass ≥ <code>--cap</code> ? · spend &gt; budget ?</div>
+        <div class="wl-desc"><code>--budget</code> / <code>--budget-tokens</code> are checked after a pass, so may overshoot by one</div>
+        <div class="wl-outs">
+          <div class="wl-chip capped"><b>yes → CAPPED</b> the hard stop — <code>--cap</code> is the true ceiling no unattended run may exceed</div>
+          <div class="wl-chip cont">no ↓</div>
+        </div>
+      </div>
+
+      <div class="wl-step">
+        <div class="wl-q"><span class="wl-num">4</span> best stalled &lt; <code>--min-delta</code> ?</div>
+        <div class="wl-desc">measured across the last <code>--plateau-window</code> passes of best score</div>
+        <div class="wl-outs">
+          <div class="wl-chip plateau"><b>yes → PLATEAU</b> escalation ladder: opus, then Fable 5 — one rung per stall, then it stops</div>
+          <div class="wl-chip cont">no ↓</div>
+        </div>
+      </div>
+
+      <div class="wl-run">
+        <div class="wl-q"><span class="wl-num run">↻</span> RUNNING</div>
+        <div class="wl-desc">score &lt; target, room left → loop back to ACT for one more edit, then gateVerdict runs again</div>
+      </div>
+
+      <div class="wl-forge">
+        <b>on a DONE, the gate can get STRONGER (<code>--forge</code>)</b>
+        <div>recovered-veto → learn what the gamed version got wrong</div>
+        <div>easy-done (1 edit, no confirm) → learn from baseline → final</div>
+        <div><code>--gate-self-probe</code> → learn a check for any mutant the gate passed</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wl-foot">Precedence&nbsp; <b class="err-t">error</b> › <b class="done-t">done</b> › <b class="capped-t">capped</b> › <b class="plateau-t">plateau</b> › <b class="run-t">running</b> &nbsp;— the model never runs this decision, it only edits &amp; diagnoses. Only code writes “done”.</div>
+</div>
+</body>
+</html>
