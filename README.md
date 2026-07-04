@@ -133,31 +133,25 @@ layers are unsupported and two seats stay human. From the bottom up:
        alt="The whetstone architecture as a stack of layers under one code-owned gate. Intake & launcher routes a request and blocks without a cost ceiling. The stable single-objective inner loop (baseline → ACT → observe+score → keep-best → GATE, five verdicts, only running loops back) is the core. The experimental whole-repo scope loop applies the same gate to a --scope dir with git-backed keep-best and the Forge per-file verifier learner. The alpha dynamic control plane (converge) adds multi-objective AND-gating, a tournament, a user-authored hash-pinned global held-out truth, and a human-accepted replan. A cross-cutting scorers & isolation layer produces the 0–100 number the gate reads at every layer.">
 </p>
 
-| Layer | Adds | Gate owner | Keep-best unit |
+| Layer | Raises | Maturity | Surface · gate owner · keep-best |
 |---|---|---|---|
-| **Inner loop** (stable) | raise *one* file | `gateVerdict` (`gate.mjs`) | a per-pass artifact snapshot |
-| **Scope loop** (experimental) | raise a *whole repo* | the same `gateVerdict`, per project run | a **git** commit per pass (needs a clean git repo) |
-| **+ Forge** (experimental) | *learn* a per-file verifier when a `done` is vetoed *or reached too easily* | the recovered confirm signal, or the baseline→final pair | the learned check, stored outside the scope |
-| **Control plane** (alpha) | raise *N objectives* at once | `globalVerdict` (`converge-gate.mjs`) — `done` only when **every** objective is MET | a selective squash-merge per round |
+| **Inner loop** | *one* file | **stable** — the supported v1 | `driver.mjs` + objective scorers (`test-pass-rate`, `contains`, `io-assert`, `io-trace`, `io-invariant`, `io-effect`, `composite`, `floor`, `doc-lint`) + confirm-scorer, keep-best, plateau-escalate, crash-resume · gate `gateVerdict` (`gate.mjs`) · keep-best = a per-pass artifact snapshot |
+| **Scope loop** | a *whole repo* | **experimental** | `scope-cli.mjs` (git-backed) · the subjective `llm-judge` gate lives here · keep-best = a **git** commit per pass (needs a clean git repo) |
+| **+ Forge** | a *learned* per-file verifier when a `done` is vetoed *or reached too easily* | **experimental** | the recovered confirm signal, or the baseline→final pair, trains it; the learned check is stored outside the scope |
+| **Control plane** | *N objectives* at once | **alpha** | `converge-cli` · `--parallel` batched fan-out (editors run wall-clock concurrent) · `plan-cli` · `--candidates` tournament · `replan-cli`/`outer-cli` · gate `globalVerdict` (`converge-gate.mjs`), `done` only when **every** objective is MET · keep-best = a selective squash-merge per round |
 
-The two human seats (alpha): **authoring the global held-out truth** (the immutable, hash-pinned
-acceptance check `done` must also pass) and **accepting a replan** (the control plane only ever
-*proposes* a different decomposition — it never re-runs itself). Scorers feed the number into the gate
-at every layer; the behavioural `io-*` scorers run untrusted candidate code in a locked-down,
-out-of-process child.
+The behavioural `io-*` scorers run untrusted candidate code in a locked-down, out-of-process child, so the
+gate can score by *running* the artifact without letting model-written code reach the scorer's own process.
 
 ## What's stable in v1
 
 whetstone is honest about maturity. **v1 declares the single-file core stable**; the multi-file and
 orchestration layers exist and are tested at $0 but are **not** promoted to the supported surface —
 promoting them would assert sufficiency / scorer-capture guarantees that are not yet proven (the loop
-proves each leaf *measurable*, not that a *set* of leaves is *sufficient*).
-
-| Tier | Surface | Notes |
-|---|---|---|
-| **Stable** | `driver.mjs` single-file loop + objective scorers (`test-pass-rate`, `contains`, `io-assert`, `io-trace`, `io-invariant`, `io-effect`, `composite`, `floor`, `doc-lint`) + confirm-scorer, keep-best, plateau-escalate, crash-resume, dual token/USD budget | The supported v1. Code owns the gate; the gate is objective. |
-| **Experimental** | `scope-cli.mjs` (whole-dir, git-backed) · `llm-judge` (subjective gate) | Works; use with care. `llm-judge` is a *subjective* gate — capturable, weaker than an objective scorer. |
-| **Alpha** (in repo, unsupported) | `converge-cli` (multi-objective) · `--parallel` (batched fan-out: N objectives → one gated round, editors run **wall-clock concurrent** via async spawn) · `plan-cli` (proactive planner) · `--candidates` (tournament) · `replan-cli` + `outer-cli` (re-decomposition) | Built and $0-tested (several PAID-validated NON-NULL), but kept out of the supported surface and the `/whet` launcher until an external benchmark proves them. |
+proves each leaf *measurable*, not that a *set* of leaves is *sufficient*). The layer table above doubles
+as the maturity map: the **Inner loop** is the supported surface; **Scope**, **Forge**, and the
+**Control plane** are experimental/alpha — built and $0-tested (several PAID-validated NON-NULL), kept out
+of the supported surface and the `/whet` launcher until an external benchmark proves them.
 
 The gate is **objective for code** (tests/assertions) and **subjective for non-code** (an `llm-judge`
 rubric): whetstone runs on any artifact a scorer can measure, but it is only as strong as the scorer.
