@@ -25,7 +25,13 @@ const SCORERS_DIR = rpath(dirname(fileURLToPath(import.meta.url)), '..', 'scorer
 // doc-lint reads a markdown file + checks repo file-existence/version (node:fs reads only — no
 // child_process/spawn/exec/shell/--cmd/API); its model-authorable args redirect WHAT to read, never
 // WHAT to execute, so it is genuinely data-only and safe to be model-selectable.
-export const PLAN_DATA_ONLY = new Set(['contains', 'io-assert', 'io-trace', 'io-invariant', 'io-effect', 'doc-lint'])
+// doc-coverage is doc-lint's recall mirror: node:fs reads only (the doc + the COMMITTED
+// scorers/doc-required.json manifest — never the live tree), spawns nothing; same rationale.
+// doc-exec is io-*-class, not doc-lint-class: it DOES spawn a child, but it is the SAME hardened
+// no-shell `node --permission` static-argv iso-runner spawn the io-* scorers use (the doc's fenced
+// examples execute inside the locked sandbox); its args are paths, never a command — data-only for
+// the same post-#2 reason the io-* scorers are.
+export const PLAN_DATA_ONLY = new Set(['contains', 'io-assert', 'io-trace', 'io-invariant', 'io-effect', 'doc-lint', 'doc-coverage', 'doc-exec'])
 
 // The shell-executing scorers, HARD-subtracted. The canonical set lives in scorer-safety.mjs (SHELL_SCORERS)
 // so the Forge boundary (forge/hook.mjs) and this one share ONE definition and cannot drift; re-exported here

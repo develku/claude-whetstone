@@ -1,6 +1,6 @@
 <svg viewBox="0 0 1000 720" width="1000" height="720" role="img" xmlns="http://www.w3.org/2000/svg">
 <title>whetstone — the whole stack</title>
-<desc>The whetstone architecture as a stack of layers, all under one code-owned gate. From the top: an intake and launcher that routes a request and blocks without a cost ceiling; an alpha dynamic control plane (converge) with a global held-out truth gate and a human-accepted replan; an experimental whole-repo scope loop with git-backed keep-best and the Forge per-file verifier learner; the stable single-objective inner loop (baseline, act, observe and score, keep-best, gate, with five verdicts where only running loops back); and a cross-cutting scorers and isolation layer that produces the 0 to 100 number the gate reads. The gate weakens as scope widens; two seats stay human.</desc>
+<desc>The whetstone architecture as a stack of layers, all under one code-owned gate. From the top: an intake and launcher that routes a request and blocks without a cost ceiling; an alpha dynamic control plane (converge) with a global held-out truth gate and a human-accepted replan; an experimental whole-repo scope loop with git-backed keep-best and the Forge per-file verifier learner; the stable single-objective inner loop (baseline, act, observe and score, keep-best, gate, with five verdicts where only running loops back) whose blast-radius guard reverts sibling edits and whose done edge can be audited (gate-audit) and self-probed for gate holes the Forge then learns to close (gate-self-probe); and a cross-cutting scorers and isolation layer that produces the 0 to 100 number the gate reads, including the composed doc gate (doc-coverage recall, doc-lint precision, doc-exec executable accuracy). The gate weakens as scope widens; two seats stay human.</desc>
 <defs>
   <marker id="ar" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3 L0,6 Z" fill="#88C0D0"/></marker>
   <marker id="ag" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3 L0,6 Z" fill="#A3BE8C"/></marker>
@@ -20,7 +20,7 @@
   <text x="772" y="66" font-size="10.5" fill="#D08770">alpha</text>
 
   <!-- left spine: code owns the gate -->
-  <rect x="20" y="100" width="6" height="532" rx="3" fill="#81A1C1" opacity="0.45"/>
+  <rect x="20" y="100" width="6" height="544" rx="3" fill="#81A1C1" opacity="0.45"/>
   <text transform="rotate(-90 44 366)" x="44" y="366" text-anchor="middle" font-size="10.5" font-weight="700" fill="#81A1C1" letter-spacing="2.5">CODE OWNS THE GATE</text>
 
   <!-- right gutter: scope axis -->
@@ -54,7 +54,7 @@
   <circle cx="92" cy="386" r="4.5" fill="#A3BE8C"/><text x="103" y="390" font-size="11" fill="#CED4DE">Forge: on a confirm-veto, learns a per-file verifier — oracle corroboration · mutation-admit · exploit-regression · auto-flaky retire</text>
 
   <!-- ===== STABLE · INNER LOOP (the core) ===== -->
-  <rect x="68" y="410" width="852" height="120" rx="11" fill="#3B4252" stroke="#A3BE8C" stroke-width="2"/>
+  <rect x="68" y="410" width="852" height="132" rx="11" fill="#3B4252" stroke="#A3BE8C" stroke-width="2"/>
   <text x="86" y="433" font-size="14.5" font-weight="700" fill="#ECEFF4">SINGLE-OBJECTIVE INNER LOOP</text>
   <text x="318" y="433" font-size="11" fill="#9AA5B8">whetstone (driver.mjs) — the core</text>
   <rect x="772" y="419" width="136" height="17" rx="5" fill="none" stroke="#A3BE8C" stroke-width="1"/><text x="840" y="431" font-size="10" fill="#A3BE8C" text-anchor="middle">STABLE · the supported v1</text>
@@ -75,24 +75,25 @@
     <text x="523" y="489" text-anchor="middle" font-size="9.5" fill="#88C0D0">running · score &lt; target → loop back to ACT</text>
   </g>
   <text x="86" y="513" font-size="11" fill="#CED4DE">GATE verdicts: <tspan fill="#BF616A">error</tspan> › <tspan fill="#A3BE8C">done</tspan> › <tspan fill="#EBCB8B">capped</tspan> › <tspan fill="#D08770">plateau</tspan> › <tspan fill="#88C0D0">running</tspan>   ·   only running loops back · done-edge confirm-veto + stability re-check</text>
-  <text x="86" y="525" font-size="10.5" fill="#9AA5B8">plateau → one opus rescue, then it stands · two budget dials (USD + tokens), checked after each pass · no-op guard · crash-resume</text>
+  <text x="86" y="525" font-size="10.5" fill="#9AA5B8">plateau → escalation ladder (opus rescue, then Fable 5 via --model-escalate) · two budget dials (USD + tokens) · no-op guard · crash-resume</text>
+  <text x="86" y="537" font-size="10.5" fill="#9AA5B8">blast-radius: the editor edits ONLY the artifact — sibling edits reverted each pass · done-edge: --gate-audit mutant report · --gate-self-probe finds a gate hole → Forge learns the check</text>
 
   <!-- ===== SCORERS & ISOLATION ===== -->
-  <rect x="68" y="540" width="852" height="92" rx="11" fill="#363D4A" stroke="#4C566A" stroke-width="1.3"/>
-  <text x="86" y="563" font-size="14.5" font-weight="700" fill="#ECEFF4">SCORERS &amp; ISOLATION</text>
-  <text x="278" y="563" font-size="11" fill="#9AA5B8">scorers/ — the 0–100 number the gate reads, at every layer</text>
-  <circle cx="92" cy="582" r="4.5" fill="#A3BE8C"/><text x="103" y="586" font-size="11" fill="#CED4DE">objective (code): test-pass-rate · contains · floor · doc-lint · io-assert / io-trace / io-invariant / io-effect</text>
-  <circle cx="92" cy="600" r="4.5" fill="#A3BE8C"/><text x="103" y="604" font-size="11" fill="#CED4DE">subjective: llm-judge (opus, nonce-fenced) · composite = min-combine N → done only when the weakest dimension clears target</text>
-  <circle cx="92" cy="618" r="4.5" fill="#81A1C1"/><text x="103" y="622" font-size="11" fill="#CED4DE">io-* run untrusted candidate code in a locked-down out-of-process child — denies v8 / vm / child_process · canonical JSON · nonce frame</text>
+  <rect x="68" y="552" width="852" height="92" rx="11" fill="#363D4A" stroke="#4C566A" stroke-width="1.3"/>
+  <text x="86" y="575" font-size="14.5" font-weight="700" fill="#ECEFF4">SCORERS &amp; ISOLATION</text>
+  <text x="278" y="575" font-size="11" fill="#9AA5B8">scorers/ — the 0–100 number the gate reads, at every layer</text>
+  <circle cx="92" cy="594" r="4.5" fill="#A3BE8C"/><text x="103" y="598" font-size="11" fill="#CED4DE">objective: test-pass-rate · contains · floor · io-assert / io-trace / io-invariant / io-effect · docs: doc-lint + doc-coverage + doc-exec</text>
+  <circle cx="92" cy="612" r="4.5" fill="#A3BE8C"/><text x="103" y="616" font-size="11" fill="#CED4DE">subjective: llm-judge (opus, nonce-fenced) · composite = min-combine N → done only when the weakest dimension clears target</text>
+  <circle cx="92" cy="630" r="4.5" fill="#81A1C1"/><text x="103" y="634" font-size="11" fill="#CED4DE">io-* and doc-exec run untrusted candidate code in a locked-down out-of-process child — denies v8 / vm / child_process · nonce frame</text>
 
   <!-- score feeds the gate -->
-  <path d="M824,555 C868,548 872,500 840,478" fill="none" stroke="#A3BE8C" stroke-width="1.4" marker-end="url(#ag)"/>
-  <text x="884" y="520" font-size="9.5" fill="#A3BE8C" text-anchor="middle" transform="rotate(90 884 520)">score → gate</text>
+  <path d="M824,567 C868,558 872,505 840,478" fill="none" stroke="#A3BE8C" stroke-width="1.4" marker-end="url(#ag)"/>
+  <text x="884" y="526" font-size="9.5" fill="#A3BE8C" text-anchor="middle" transform="rotate(90 884 526)">score → gate</text>
 
   <!-- footer -->
-  <rect x="34" y="648" width="932" height="50" rx="10" fill="#333A48" stroke="#3B4252"/>
-  <rect x="34" y="648" width="6" height="50" rx="3" fill="#81A1C1"/>
-  <text x="54" y="670" font-size="11.5" fill="#D8DEE9">Every layer reuses the SAME code-owned gate. The <tspan fill="#A3BE8C">scorer</tspan> owns the number · the <tspan fill="#EBCB8B">model</tspan> owns the edit · <tspan fill="#81A1C1">code</tspan> owns “done”.</text>
-  <text x="54" y="688" font-size="11" fill="#9AA5B8">The model literally cannot vote itself done — the  score ≥ target  branch lives in gate.mjs, not in a prompt.</text>
+  <rect x="34" y="660" width="932" height="48" rx="10" fill="#333A48" stroke="#3B4252"/>
+  <rect x="34" y="660" width="6" height="48" rx="3" fill="#81A1C1"/>
+  <text x="54" y="681" font-size="11.5" fill="#D8DEE9">Every layer reuses the SAME code-owned gate. The <tspan fill="#A3BE8C">scorer</tspan> owns the number · the <tspan fill="#EBCB8B">model</tspan> owns the edit · <tspan fill="#81A1C1">code</tspan> owns “done”.</text>
+  <text x="54" y="699" font-size="11" fill="#9AA5B8">The model literally cannot vote itself done — the  score ≥ target  branch lives in gate.mjs, not in a prompt.</text>
 </g>
 </svg>

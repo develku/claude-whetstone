@@ -1,0 +1,24 @@
+{
+  "docKind": "readme",
+  "flags": [
+    "--allow-sibling-edits", "--artifact", "--budget", "--budget-tokens", "--cap",
+    "--confirm-scorer", "--effort", "--forge", "--forge-exploit-regression",
+    "--forge-mutation-admit", "--forge-mutation-threshold", "--forge-oracle",
+    "--forge-retire", "--forge-store", "--gate-audit", "--gate-self-probe", "--goal",
+    "--loop-dir", "--mcp-config", "--min-delta", "--model", "--model-escalate",
+    "--no-escalate", "--observe", "--plateau-window", "--resume", "--scorer",
+    "--scorer-allow", "--stability-runs", "--target"
+  ],
+  "scorers": [
+    "doc-lint", "contains", "test-pass-rate", "io-assert", "io-effect",
+    "io-invariant", "io-trace", "llm-judge", "doc-coverage", "doc-exec"
+  ],
+  "configKeys": [
+    "budgetTokens", "budgetUsd", "hardCap", "targetScore", "plateauWindow",
+    "minDelta", "model", "effort", "escalateModel", "mcpConfig"
+  ],
+  "modules": [
+    "blast-radius", "gate-audit", "gate-probe", "prompt-fence", "iso-runner"
+  ],
+  "wordFloors": { "desc": 4, "prose": 8 }
+}

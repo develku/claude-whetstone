@@ -1,0 +1,11 @@
+# DOC-DEPTH-FLOOR — the composed $0 deterministic doc gate (run the driver from the repo root).
+# Three axes MIN-combined by scorers/composite.mjs; the weakest honest axis binds:
+#   recall    — doc-coverage: every item in scorers/doc-required.json substantively documented
+#   precision — doc-lint:     every repo ref in the doc resolves + the advertised version matches
+#   accuracy  — doc-exec:     every runnable ```js example executes-and-passes in the locked child
+# Each line inherits --output (the artifact) from composite; --repo defaults to the artifact's dir,
+# so only the script paths below are cwd-relative.
+# Usage: --scorer 'node scorers/composite.mjs --scorers-file examples/doc-depth.scorers'
+node scorers/doc-coverage.mjs
+node scorers/doc-lint.mjs
+node scorers/doc-exec.mjs
