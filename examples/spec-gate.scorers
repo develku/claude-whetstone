@@ -1,0 +1,7 @@
+# SPEC.md gate — the COMPLETE reference doc is the completeness-gated surface.
+# doc-coverage (recall) asserts every item in scorers/doc-required.json is substantively documented
+# here; doc-lint (precision) asserts every repo ref resolves and the advertised version matches.
+# The README carries concepts + usage and is gated separately (examples/readme-gate.scorers).
+# Usage: node scorers/composite.mjs --scorers-file examples/spec-gate.scorers --output SPEC.md
+node scorers/doc-coverage.mjs
+node scorers/doc-lint.mjs

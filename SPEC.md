@@ -1,6 +1,7 @@
 # whetstone contracts
 
-The durable design record. Three contracts make the loop work; keep them stable.
+The durable design record for **v1.12.0** — the complete, gated reference (flags, scorers, config,
+modules). Three contracts make the loop work; keep them stable.
 
 ## 1. The gate (`gateVerdict(state) -> { status, reason }`)
 
@@ -131,8 +132,8 @@ area_ledger: [{ area, first_pass, last_pass, seen_count, best_at_first }]   # v1
 
 ```
 state.json
-snapshots/iter_NNN.<ext>   verbatim artifact at end of pass NNN (iter_000 = baseline)
-reviews/review_NNN.json    the scorer's {score, critique, findings[, usage]} for pass NNN
+snapshots/iter_<NNN>.<ext>   verbatim artifact at end of pass NNN (iter_000 = baseline)
+reviews/review_<NNN>.json    the scorer's {score, critique, findings[, usage]} for pass NNN
 ```
 
 `zip(snapshots, reviews)` over `history` is the full score trajectory — for
@@ -149,6 +150,98 @@ config is the normal case; malformed JSON throws a clear error rather than runni
 defaults. This is the answer to "`--budget-tokens` is awkward to size by hand" — set it once (each
 pass burns ~100–150K tokens, so a per-run budget is roughly `cap × 150000`). Example:
 `examples/whetstone.config.json`.
+
+## 4. Flags — the full CLI surface
+
+Everyday flags appear in the [README](README.md) usage guide; this is the complete `driver.mjs`
+surface, one row per flag.
+
+| Flag | What it does |
+|---|---|
+| `--artifact <path>` | the one file the loop repeatedly edits and re-scores each pass (required) |
+| `--goal "<text>"` | the improvement objective handed to the editor every pass — the first positional arg if given, else this flag |
+| `--scorer "<cmd>"` | the shell command that grades the artifact or observed output, producing the number the gate compares to `--target` (required) |
+| `--target <N>` | the measured score that counts as done for the run |
+| `--cap <N>` | the hard pass-count ceiling — the true stop; always set one so a paid loop can never run away |
+| `--budget <USD>` | the dollar ceiling, checked after each completed pass so it may overshoot by one |
+| `--budget-tokens <N>` | the token ceiling, the meaningful bound on a subscription plan where the dollar figure is only notional |
+| `--confirm-scorer "<cmd>"` | an independent scorer re-run only at the done edge to veto a gamed finish and steer the loop onward |
+| `--model <m>` | the editor model for forward passes (haiku / sonnet / opus) |
+| `--model-escalate <m>` | the standing plateau-rescue ladder; a bare `fable` auto-expands to `opus,fable` so opus rescues first |
+| `--no-escalate` | disable the plateau escalation ladder — a stuck run stays on the cheap editor and reports plateau |
+| `--effort <level>` | reasoning effort for the editor's forward passes (`low`/`medium`/`high`/`max`, default `medium`); rescue rungs step it up independently |
+| `--observe "<cmd>"` | a command that produces the artifact's real output (build or execute it) before scoring, instead of scoring the raw file |
+| `--loop-dir <dir>` | where this run's `state.json`, `snapshots/`, and `reviews/` live; also selects which run `--resume` continues |
+| `--plateau-window <N>` | how many recent passes the gate inspects when deciding the run has stalled |
+| `--min-delta <X>` | the minimum best-score improvement across that window that still counts as real progress |
+| `--stability-runs <N>` | re-run a candidate done artifact N times before accepting it, catching a pass that only looked done through run-to-run noise |
+| `--resume` | continue a stopped run — its history, best score, snapshots, and spend all carry forward instead of starting over |
+| `--mcp-config <path>` | an MCP config (e.g. `empty-mcp.json`) passed with `--strict-mcp-config` to suppress the default MCP tool surface during edits |
+| `--allow-sibling-edits` | opt out of the blast-radius guard so the editor may also touch files beside the artifact |
+| `--gate-audit` | opt-in, post-done: mutate the finished artifact and re-score a sample with the primary scorer, reporting its kill-rate (advisory only) |
+| `--gate-self-probe` | opt-in, paid: mutate the accepted artifact against the composed confirm gate, and have Forge learn a check for any mutant the gate passes |
+| `--forge` | opt-in: learn a new per-file verifier when a done is vetoed or reached too easily |
+| `--forge-store <path>` | where Forge persists learned checks, outside the artifact's scope so a later pass cannot edit them away; required alongside `--forge` |
+| `--scorer-allow <a.mjs,b.mjs>` | comma-separated allowlist of scorer script paths the Forge may run or generate checks against — the trust boundary |
+| `--forge-oracle "<cmd>"` | repeatable; an independent operator-trusted scorer that must corroborate a veto before Forge learns a check from it |
+| `--forge-mutation-admit` | strengthen Forge admission from "fails the one observed bad artifact" to "kills an oracle-confirmed mutant neighbourhood" |
+| `--forge-mutation-threshold <X>` | the mutant kill-rate in `[0,1]` (default `0.75`) a candidate check must clear under mutation admission |
+| `--forge-exploit-regression` | require an admitted check to also survive the executable exploit archive, rejecting one a known gaming pattern could dodge |
+| `--forge-retire` | standalone maintenance command that tombstones a false-positive Forge-learned check without deleting its record |
+
+## 5. Scorers — the shipped catalog
+
+Every scorer honors the contract in §2. Objective scorers need no model; the subjective one calls a judge.
+
+| Scorer | Axis / what it measures |
+|---|---|
+| `test-pass-rate` | runs a test command and scores the pass fraction — the deterministic reference scorer, zero extra deps |
+| `contains` | checks the produced output for required substrings or patterns; a pure data comparison, no shell |
+| `io-assert` | executes candidate code in the locked child and asserts a function returns the expected value |
+| `io-trace` | records the call trace of executed candidate code and scores it against an expected sequence |
+| `io-invariant` | runs candidate code and checks a stated invariant holds across generated inputs |
+| `io-effect` | runs candidate code and scores its observable side effects against a declared expectation |
+| `doc-lint` | precision — flags a claim the doc makes that the repo contradicts (a dangling ref, a wrong version) |
+| `doc-coverage` | recall — scores the percentage of the committed required set substantively documented, excluding name-drops |
+| `doc-exec` | executable accuracy — runs every fenced example that imports from the repo and scores the fraction that pass |
+| `llm-judge` | subjective quality — an Opus judge scores against a rubric when good cannot be checked by code (nonce-fenced) |
+| `composite` | MIN-combines N sub-scorers so the gate reaches done only when the weakest dimension clears target |
+| `floor` | runs an operator command and gates a hard pass/fail floor beneath the measured score |
+
+## 6. Config keys (persistent defaults)
+
+Every knob you repeat has a camelCase key in `whetstone.config.json` / `~/.config/whetstone/config.json`
+(project file wins). CLI flag beats config file beats built-in default.
+
+| Config key | What it persists |
+|---|---|
+| `targetScore` | the `--target` counterpart — the score that counts as done for every run |
+| `hardCap` | the `--cap` counterpart — the pass-count ceiling no unattended run may exceed |
+| `budgetUsd` | the `--budget` counterpart — the dollar ceiling checked after each completed pass |
+| `budgetTokens` | the `--budget-tokens` counterpart — the token ceiling, the real bound on a Max/Pro plan |
+| `plateauWindow` | how many recent passes the gate inspects when deciding the run has stalled |
+| `minDelta` | the minimum best-score improvement across that window that still counts as progress |
+| `model` | the default editor model for forward passes |
+| `effort` | the default reasoning effort for forward passes; rescue rungs step it up independently |
+| `escalateModel` | the standing plateau-rescue ladder so the launcher stops asking per run |
+| `mcpConfig` | a path to an MCP config passed through to suppress the default MCP tool surface during edits |
+
+## 7. Hardening modules (opt-in, v1.9–v1.11)
+
+| Module | What it does |
+|---|---|
+| `src/blast-radius.mjs` | code-enforces "edit ONLY the artifact": snapshots sibling files before an edit and reverts any the editor also touched, so a pass cannot launder score gains through files outside the artifact |
+| `src/gate-audit.mjs` | `--gate-audit`, post-done: mutates the finished artifact and re-scores a sample of mutants with the primary scorer, reporting its kill-rate — advisory, never changes the verdict |
+| `src/forge/gate-probe.mjs` | `--gate-self-probe`, paid: mutates the accepted artifact and runs the composed confirm gate against each mutant; a mutant the gate passes is a hole, and Forge learns a check that catches it |
+| `src/prompt-fence.mjs` | the shared nonce-fence primitive: wraps untrusted, editor-influenced text (scorer critiques, TRIED-AREAS, doc-exec output) in an unforgeable per-run marker so it can never be read as instructions |
+| `src/iso-runner.mjs` | the locked-down out-of-process child every behavioural scorer runs untrusted candidate code in — no fs-write, no network, no child_process — keeping that code out of the scorer's own process |
+
+**The composed doc gate.** A doc fails two ways, so three scorers cover it under `composite`: `doc-lint`
+(precision), `doc-coverage` (recall — walks the committed required-token set and scores the percentage
+substantively documented, excluding bare name-drops and code-block-only mentions), and `doc-exec`
+(executable accuracy — runs every fenced `js` example that imports from the repo in the locked-down
+`iso-runner.mjs` child). `examples/spec-gate.scorers` gates this SPEC for completeness + precision;
+`examples/readme-gate.scorers` gates the README for precision + runnable examples.
 
 ## Open questions for the self-hosting phase (running whetstone on its own codebase — dogfooding)
 

@@ -30,22 +30,16 @@ control plane are experimental/alpha and deliberately unsupported.
 - `npm test` — the full `node:test` suite. It must stay **green** (1229+ as of v1.12.0). TDD: write the
   failing test first; fix the implementation, not the test.
 - Coverage floor 80%; branch coverage is a soft ratchet (non-deterministic spawn-race jitter).
-- **Doc gate** — any `README.md` change must keep the composed doc gate at/above target:
-  ```
-  node scorers/composite.mjs --scorers-file examples/doc-depth.scorers --output README.md --repo .
-  ```
-  It MIN-combines `doc-coverage` (recall vs the committed `scorers/doc-required.json` manifest),
-  `doc-lint` (precision — refs resolve, version matches `package.json`), and `doc-exec` (every fenced
-  `js` example that imports from the repo is executed in the iso child). `scorers/doc-required.json` is
-  the **editor-unwritable required-token oracle**; a drift-tripwire test asserts it matches
-  `driver.mjs`'s flags. Every required flag / scorer / config-key / module must stay **substantively**
-  mentioned — a table row, a heading with a body, or a prose line clearing the word floor — **never** a
-  bare list item or a code-fence-only mention (those do not count).
+- **Doc gate (split)** — two composed gates, run from the repo root:
+  - **SPEC.md is the completeness surface** — `node scorers/composite.mjs --scorers-file examples/spec-gate.scorers --output SPEC.md` MIN-combines `doc-coverage` (recall vs the committed `scorers/doc-required.json` manifest) + `doc-lint` (precision). SPEC must substantively document **every** required flag / scorer / config-key / module — a table row, a heading with a body, or a prose line clearing the word floor — **never** a bare list item or a code-fence-only mention (those don't count). Add a new flag → document it in SPEC.md.
+  - **README is lint + exec only** — `node scorers/composite.mjs --scorers-file examples/readme-gate.scorers --output README.md` runs `doc-lint` (refs resolve, version matches `package.json`) + `doc-exec` (every fenced `js` example importing from the repo runs in the iso child). The README is the readable concept/usage doc, **not** completeness-gated — keep the full reference in SPEC.md, not the README.
+  - `scorers/doc-required.json` is the editor-unwritable required-token oracle; a drift-tripwire test (`test/doc-required.test.mjs`) asserts it matches `driver.mjs`'s flags.
 
 ## Docs & diagrams
 
-- `README.md` describes **what the tool does and why** (Understand → Use → Reference). Release history
-  goes in `CHANGELOG.md`, not the README.
+- `README.md` describes **what the tool does and why** (concepts + usage). The complete flag / scorer /
+  config / module reference lives in `SPEC.md` (the completeness-gated doc); release history goes in
+  `CHANGELOG.md`. Don't grow the README with reference tables — add them to SPEC.md.
 - **Diagrams**: edit the HTML design source (`assets/whetstone-*.html`) first, then hand-port the layout
   to a **native SVG** — GitHub strips raw HTML and SVG `<foreignObject>`, so the committed diagram must
   be native SVG. SVG has no auto-wrap: use a card-stack layout, pre-split lines by hand, and stack a

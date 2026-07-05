@@ -1,0 +1,7 @@
+# README.md gate — the README is the readable concept + usage doc, NOT the completeness surface
+# (that is SPEC.md, examples/spec-gate.scorers). Here the gate only guarantees the README is not WRONG:
+# doc-lint (precision) — every repo ref resolves + the advertised version matches package.json;
+# doc-exec (accuracy) — every fenced js example that imports from the repo runs in the locked child.
+# Usage: node scorers/composite.mjs --scorers-file examples/readme-gate.scorers --output README.md
+node scorers/doc-lint.mjs
+node scorers/doc-exec.mjs
