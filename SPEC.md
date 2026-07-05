@@ -31,6 +31,12 @@ checks are consumed at the next fresh run's start: with a base confirm cmd they 
 self-quiets the easy trigger. Checks from the easy pair pass the current final by construction (they
 cannot veto the run that learned them; the payoff is strictly next-run).
 
+**Thin-scorer suspicion (v1.7.0).** A run that reaches `done` in ≤1 edit pass with NO done-edge check
+wired (`--confirm-scorer` / `--stability-runs`) also raises a code-owned warning in the final report
+(`src/summary.mjs`) — fixed prose + numbers, never model text — flagging that the *scorer* may be thin,
+not that the artifact is genuinely good. It stays quiet when the done edge already paid skepticism or
+when convergence took real work.
+
 **Done-branch confirmation (optional, `confirm_scorer_cmd`).** When the gate would declare
 `done`, an INDEPENDENT confirm scorer re-scores the same output — but ONLY on the done edge, so
 normal passes stay cheap and the skepticism is paid only at the finish line. If the confirm score

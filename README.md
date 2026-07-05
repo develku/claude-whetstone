@@ -207,7 +207,7 @@ Forge also fires on the *opposite* signal — an **easy done** (one edit pass, n
 learns from the baseline→final pair instead of a gamed snapshot, and the next run consumes the learned
 checks. That, the admission rules (oracle corroboration, mutation-admit, exploit-regression), and the
 per-run discard-memory (`TRIED-AREAS`, the nonce-fenced list of areas already attacked without gain) are
-documented in [SPEC.md](SPEC.md) §1 and §3.
+documented in [SPEC.md](SPEC.md).
 
 ## Backends & the Claude Code Workflow tool
 
@@ -424,7 +424,7 @@ On a plateau the strong editor runs in **rescue mode** — told a cheaper model 
 makes a *bolder, different-strategy* edit, one decisive jump per proven stall (never a blind cheap→top
 schedule), stepping reasoning effort up as it climbs. The ladder order (`fable` expands to `opus,fable`),
 its effort-floor mechanics, and the code-owned **thin-scorer-suspicion** warning on a suspiciously easy
-`done` are documented in [SPEC.md](SPEC.md) §1.
+`done` are documented in [SPEC.md](SPEC.md).
 
 ## When to use (and not)
 
@@ -470,8 +470,8 @@ src/scope-*.mjs / src/forge/   experimental whole-repo loop + per-file verifier 
 src/converge*.mjs / src/plan*.mjs / src/replan*.mjs / src/outer*.mjs / src/whet.mjs   alpha control plane + intake router
 ```
 
-Maturity is the Architecture table above; contracts + the full flag/scorer/config/module reference are
-in [SPEC.md](SPEC.md).
+Maturity is covered in [Architecture & maturity](#architecture--maturity) above; the contracts + the
+full flag/scorer/config/module reference are in [SPEC.md](SPEC.md).
 
 ## Prior art & inspiration
 
