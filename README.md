@@ -15,7 +15,7 @@ A deterministic <b>loop-engineering</b> driver for Claude Code: <b>code owns the
 > with `module.registerHooks` + the Permission Model. The full release history lives in
 > [CHANGELOG.md](CHANGELOG.md); this README stays a description of *what the tool does and why*.
 > Just want to run it? Jump to [Install](#install-as-a-claude-code-plugin). See
-> [What's stable in v1](#whats-stable-in-v1).
+> [Architecture & maturity](#architecture--maturity).
 
 This README is in three movements: **Understand** the ideas, **Use** the tool, then the full **Reference**.
 
@@ -121,7 +121,7 @@ state.history.push({ score: 98.2 })
 assert.equal(gateVerdict(state).status, 'done') // a measured score cleared the target: code declares done
 ```
 
-## Architecture — the whole stack
+## Architecture & maturity
 
 That one loop is the foundation. Everything above it reuses the *same* code-owned gate, just at a
 wider scope — and the gate gets weaker (more subjective) the wider it reaches, which is why the upper
@@ -132,22 +132,13 @@ layers are unsupported and two seats stay human. From the bottom up:
        alt="The whetstone architecture as a stack of layers under one code-owned gate. Intake & launcher routes a request and blocks without a cost ceiling. The stable single-objective inner loop (baseline → ACT → observe+score → keep-best → GATE, five verdicts, only running loops back) is the core. The experimental whole-repo scope loop applies the same gate to a --scope dir with git-backed keep-best and the Forge per-file verifier learner. The alpha dynamic control plane (converge) adds multi-objective AND-gating, a tournament, a user-authored hash-pinned global held-out truth, and a human-accepted replan. A cross-cutting scorers & isolation layer produces the 0–100 number the gate reads at every layer.">
 </p>
 
-| Layer | Raises | Maturity | Surface · gate owner · keep-best |
-|---|---|---|---|
-| **Inner loop** | *one* file | **stable** — the supported v1 | `driver.mjs` + objective scorers (`test-pass-rate`, `contains`, `io-assert`, `io-trace`, `io-invariant`, `io-effect`, `composite`, `floor`, `doc-lint`, `doc-coverage`, `doc-exec`) + confirm-scorer, keep-best, plateau-escalate, crash-resume · gate `gateVerdict` (`gate.mjs`) · keep-best = a per-pass artifact snapshot |
-| **Scope loop** | a *whole repo* | **experimental** | `scope-cli.mjs` (git-backed) · the subjective `llm-judge` gate lives here · keep-best = a **git** commit per pass (needs a clean git repo) |
-| **+ Forge** | a *learned* per-file verifier when a `done` is vetoed *or reached too easily* | **experimental** | the recovered confirm signal, or the baseline→final pair, trains it; the learned check is stored outside the scope |
-| **Control plane** | *N objectives* at once | **alpha** | `converge-cli` · `--parallel` batched fan-out (editors run wall-clock concurrent) · `plan-cli` · `--candidates` tournament · `replan-cli`/`outer-cli` · gate `globalVerdict` (`converge-gate.mjs`), `done` only when **every** objective is MET · keep-best = a selective squash-merge per round |
-
-## What's stable in v1
-
-whetstone is honest about maturity. **v1 declares the single-file core stable**; the multi-file and
-orchestration layers exist and are tested at $0 but are **not** promoted to the supported surface —
-promoting them would assert sufficiency / scorer-capture guarantees that are not yet proven (the loop
-proves each leaf *measurable*, not that a *set* of leaves is *sufficient*). The layer table above doubles
-as the maturity map: the **Inner loop** is the supported surface; **Scope**, **Forge**, and the
-**Control plane** are experimental/alpha — built and $0-tested (several PAID-validated NON-NULL), kept out
-of the supported surface and the `/whet` launcher until an external benchmark proves them.
+**v1 declares the single-file inner loop stable.** The whole-repo **Scope** loop, the **Forge**
+verifier-learner, and the multi-objective **Control plane** above it are built and $0-tested (several
+PAID-validated NON-NULL) but **not** promoted to the supported surface — promoting them would assert
+sufficiency / scorer-capture guarantees not yet proven (the loop proves each leaf *measurable*, not that
+a *set* of leaves is *sufficient*), so they stay out of the `/whet` launcher until an external benchmark
+proves them. The per-layer surface — each layer's gate owner, keep-best unit, and scorers — is in
+[SPEC.md](SPEC.md).
 
 The gate is **objective for code** (tests/assertions) and **subjective for non-code** (an `llm-judge`
 rubric): whetstone runs on any artifact a scorer can measure, but it is only as strong as the scorer.
