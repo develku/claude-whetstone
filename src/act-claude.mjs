@@ -81,6 +81,44 @@ export function editorFailureReason(stdout, stderr) {
   return tail ? tail.slice(-500) : '(no editor output)'
 }
 
+// Distinguish an AUTH-class editor failure (expired OAuth token, missing/invalid API key, keychain lock)
+// from a TRANSIENT one (rate limit, API overload). This is the SPEC.md:254 seam ("detect OAuth vs API-key
+// auth?") answered at the act layer: auth won't self-heal across the retry backoff, so surfacing it lets
+// makeClaudeAct short-circuit the 3-retry burn and hand back a one-line remedy instead of a cryptic
+// "editor claude exited 1". Two signals, precise-first:
+//   (a) STRUCTURED — the terminal result element's api_error_status is (or contains) 401. This is the
+//       primary, unambiguous numeric signal; findLast mirrors editorFailureReason (forward-proof against
+//       an intermediate result element).
+//   (b) TEXT fallback on stderr+stdout — auth-SPECIFIC phrasings only. Deliberately kept tight (no bare
+//       "401" in free text: an artifact merely discussing HTTP 401 would false-positive; the numeric
+//       signal is the structured field's job). Rate-limit / overload text (429, "overloaded_error") is NOT
+//       matched, so a transient failure still flows to the normal retry ladder. Pure + exported for test.
+export function isAuthFailure(stdout, stderr) {
+  try {
+    const parsed = JSON.parse(stdout)
+    const arr = Array.isArray(parsed) ? parsed : [parsed]
+    const status = arr.findLast((e) => e?.type === 'result')?.api_error_status
+    // A DEFINITIVE structured status wins OUTRIGHT: 401 (in the number, a "…401…" string, or a nested status
+    // object — the CLI is inconsistent about the shape) => auth; any OTHER present status (429/529/
+    // "overloaded_error") => NOT auth, and we must NOT fall through to let incidental auth-phrase text
+    // override it — else a transient rate-limit whose body happens to say "unauthorized"/"invalid api key"
+    // would be misclassified as auth and skip the retries it needs, regressing the v1.5.1 "one blip kills a
+    // paid run" fix. Only when there is NO usable structured status (null, or an unparseable/truncated
+    // stream that throws below) do we fall through to the text signal.
+    if (status != null) return /\b401\b/.test(typeof status === 'string' ? status : JSON.stringify(status))
+  } catch { /* unparseable/truncated stream — fall through to the text signal */ }
+  const text = `${String(stderr ?? '')}\n${String(stdout ?? '')}`
+  return /oauth token (has )?expired|not logged in|please run \/login|invalid api key|\bunauthorized\b|errsecinteractionnotallowed/i.test(text)
+}
+
+// The single actionable self-heal line appended to an auth-failure throw. Covers both auth modes the loop
+// can hit: interactive `/login`, and the unattended/cron path (a long-lived OAuth token). The last clause
+// is the non-obvious footgun: a stray ANTHROPIC_API_KEY overrides subscription auth and silently bills
+// metered API credits — so an auth failure under a Max/Pro plan is often "unset the API key", not "log in".
+export function authRemedyMessage() {
+  return 'authentication failed — run `claude /login` (interactive), or for unattended/cron runs `claude setup-token` and export CLAUDE_CODE_OAUTH_TOKEN. If ANTHROPIC_API_KEY is set, unset it (it overrides subscription auth and bills metered API credits).'
+}
+
 // The subtype of the terminal result element ('success', 'error_max_turns', 'error_during_execution', …),
 // or null if the output can't be parsed. Pure + exported for test.
 export function editorResultSubtype(stdout) {
@@ -233,6 +271,10 @@ export function makeClaudeAct({ artifactPath, maxTurns = 12, model = null, claud
         return { changed: before !== after, costUsd: extractCost(res.stdout), tokens: extractTokens(res.stdout) }
       }
       lastErr = new Error(`editor ${claudeBin} exited ${res.status}: ${editorFailureReason(res.stdout, res.stderr)}`)
+      // FAIL FAST + LOUD on an auth-class failure: it will NOT self-heal across the backoff, so burning the
+      // remaining retries just wastes a paid run and delays a cryptic throw. Short-circuit with the remedy
+      // appended — every OTHER fatal exit (rate limit / overload) keeps the retry/backoff ladder below.
+      if (isAuthFailure(res.stdout, res.stderr)) throw new Error(`${lastErr.message}\n${authRemedyMessage()}`)
       if (i < attempts - 1) {
         const ms = backoffMs[Math.min(i, backoffMs.length - 1)] ?? 0
         // Each retry warns (never silent); the LAST error is rethrown unchanged below, so the loop's
