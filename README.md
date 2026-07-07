@@ -10,7 +10,8 @@ A deterministic <b>loop-engineering</b> driver for Claude Code: <b>code owns the
 </p>
 
 > **Status: v1.12.0** — the single-file core is **stable**; the multi-file and orchestration layers are
-> alpha. Matured by running it on itself (dogfooding), so the cost, auth, and security model are exercised
+> **beta — in active dogfooding**: run for real (findings tracked), not yet stable-pinned and with `done`
+> still provisional. Matured by running it on itself, so the cost, auth, and security model are exercised
 > end-to-end, not speculative. Requires **Node ≥ 23.5** — the behavioural scorers isolate untrusted code
 > with `module.registerHooks` + the Permission Model. The full release history lives in
 > [CHANGELOG.md](CHANGELOG.md); this README stays a description of *what the tool does and why*.
@@ -52,7 +53,7 @@ it makes it — read them before the mechanics, and the rest of this README is j
 | **A gate is only as strong as its scorer** | the gate is whatever scorer returns 0–100; different scorers measure different truths — do the tests pass, do the claims hold, is anything important missing | pick the wrong axis and a bad artifact sails through; the composed doc gate exists precisely because one scorer measured claim precision but was blind to omission |
 | **Forge — the verifier that learns** | when a `done` is vetoed or reached too easily, the loop learns a new per-file check that separates the good version from the bad and stores it beyond the editor's reach | a fixed target gets gamed over a long unattended run, so the gate has to grow stronger rather than stay a static bar a clever editor eventually walks around |
 | **Sandbox the untrusted code** | every behavioural scorer runs candidate code inside a locked-down out-of-process child — no filesystem writes, no network, no subprocess spawning | scoring by *running* the artifact means executing code the model wrote, which must never reach the scorer's own process or the host machine around it |
-| **Widen scope under an AND-gate** | the alpha control plane raises many objectives at once and only calls the whole thing done when every objective is met, picking winners on a held-out truth | one file is not a whole repo; a repo-wide goal is a set of objectives, and "each part looks done" is emphatically not "the real goal is done" |
+| **Widen scope under an AND-gate** | the beta control plane raises many objectives at once and only calls the whole thing done when every objective is met, picking winners on a held-out truth | one file is not a whole repo; a repo-wide goal is a set of objectives, and "each part looks done" is emphatically not "the real goal is done" |
 
 ## How the loop works
 
@@ -125,31 +126,32 @@ assert.equal(gateVerdict(state).status, 'done') // a measured score cleared the 
 
 That one loop is the foundation. Everything above it reuses the *same* code-owned gate, just at a
 wider scope — and the gate gets weaker (more subjective) the wider it reaches, which is why the upper
-layers are unsupported and two seats stay human. From the bottom up:
+layers are **beta** (dogfooded, not yet stable) and two seats stay human. From the bottom up:
 
 <p align="center">
   <img src="assets/whetstone-architecture.svg" width="900"
-       alt="The whetstone architecture as a stack of layers under one code-owned gate. Intake & launcher routes a request and blocks without a cost ceiling. The stable single-objective inner loop (baseline → ACT → observe+score → keep-best → GATE, five verdicts, only running loops back) is the core. The experimental whole-repo scope loop applies the same gate to a --scope dir with git-backed keep-best and the Forge per-file verifier learner. The alpha dynamic control plane (converge) adds multi-objective AND-gating, a tournament, a user-authored hash-pinned global held-out truth, and a human-accepted replan. A cross-cutting scorers & isolation layer produces the 0–100 number the gate reads at every layer.">
+       alt="The whetstone architecture as a stack of layers under one code-owned gate. Intake & launcher routes a request and blocks without a cost ceiling. The stable single-objective inner loop (baseline → ACT → observe+score → keep-best → GATE, five verdicts, only running loops back) is the core. The beta whole-repo scope loop applies the same gate to a --scope dir with git-backed keep-best and the Forge per-file verifier learner. The beta dynamic control plane (converge) adds multi-objective AND-gating, a tournament, a user-authored hash-pinned global held-out truth, and a human-accepted replan. A cross-cutting scorers & isolation layer produces the 0–100 number the gate reads at every layer.">
 </p>
 
 **v1 declares the single-file inner loop stable.** The whole-repo **Scope** loop, the **Forge**
-verifier-learner, and the multi-objective **Control plane** above it are built and $0-tested (several
-PAID-validated NON-NULL) but **not** promoted to the supported surface — promoting them would assert
-sufficiency / scorer-capture guarantees not yet proven (the loop proves each leaf *measurable*, not that
-a *set* of leaves is *sufficient*), so they stay out of the `/whet` launcher until an external benchmark
-proves them. The per-layer surface — each layer's gate owner, keep-best unit, and scorers — is in
-[SPEC.md](SPEC.md).
+verifier-learner, and the multi-objective **Control plane** above it are **beta — in active dogfooding**:
+reachable through the `/whet` router (`--scope` / `--objectives`), run for real, with findings tracked in
+[`docs/quality-loop/findings-register.md`](docs/quality-loop/findings-register.md). They are **not** stable
+and their `done` is **provisional** — the loop proves each leaf *measurable*, not that a *set* of leaves is
+*sufficient*, and indirect scorer-capture is not yet closed; those open holes are exactly why they are
+beta, not stable, and why dogfooding (not a claim of correctness) is how they harden. The per-layer
+surface — each layer's gate owner, keep-best unit, and scorers — is in [SPEC.md](SPEC.md).
 
 The gate is **objective for code** (tests/assertions) and **subjective for non-code** (an `llm-judge`
 rubric): whetstone runs on any artifact a scorer can measure, but it is only as strong as the scorer.
 
-The alpha surfaces are security-hardened as they mature: v1.4.0 closed a model-authored RCE on the
+The beta surfaces are security-hardened as they mature: v1.4.0 closed a model-authored RCE on the
 scope `--decompose` sub-gate boundary — a `test-pass-rate` sub-gate now re-uses the run's **code-owned**
 scorer command instead of one the editor could author, and shell scorers with no safe adapter are rejected.
 
-### The dynamic control plane (alpha)
+### The dynamic control plane (beta)
 
-Above the single-objective loop, an alpha layer turns whetstone into a repo-wide, self-adapting loop —
+Above the single-objective loop, a beta layer turns whetstone into a repo-wide, self-adapting loop —
 still under a code-owned **measured** gate, with two seats that stay **permanently human**: authoring the
 held-out truth, and accepting a structural replan.
 
@@ -166,7 +168,7 @@ never the orchestrator or the gate owner (see [Backends & the Workflow tool](#ba
 Caveat on "portable": only the single-file `driver` is VCS-free (any artifact, cron, no repo). `scope`
 and `converge` use **git** commits as their keep-best unit, so they require a clean git repo.
 
-## Scaling to a whole repo (experimental)
+## Scaling to a whole repo (beta)
 
 The `whetstone-scope` loop (`src/scope-cli.mjs`, design in
 [`docs/orchestrator-design.md`](docs/orchestrator-design.md)) points the *same* code-owned loop at a whole
@@ -201,7 +203,7 @@ versions into separate worktrees and learns a new **per-file** check that tells 
 by an independent oracle, regression-tested against the exploit it just caught, and auto-retired if it
 later turns flaky. The learned checks are stored *outside* the scope (`--forge-store`) so the editor
 can't reach them. It's how the gate gets *stronger* over a long run instead of staying a fixed target —
-experimental, and (for the veto trigger) it needs `--confirm-scorer`.
+beta, and (for the veto trigger) it needs `--confirm-scorer`.
 
 Forge also fires on the *opposite* signal — an **easy done** (one edit pass, no done-edge check wired)
 learns from the baseline→final pair instead of a gamed snapshot, and the next run consumes the learned
@@ -466,8 +468,8 @@ src/iso-runner.mjs           locked-down out-of-process runner for io-*/doc-exec
 src/prompt-fence.mjs         shared nonce-fence for untrusted, editor-influenced text
 src/blast-radius.mjs         reverts sibling-file edits each pass (--allow-sibling-edits opts out)
 src/gate-audit.mjs / src/forge/gate-probe.mjs   opt-in done-edge hardening (--gate-audit / --gate-self-probe)
-src/scope-*.mjs / src/forge/   experimental whole-repo loop + per-file verifier learning (--forge)
-src/converge*.mjs / src/plan*.mjs / src/replan*.mjs / src/outer*.mjs / src/whet.mjs   alpha control plane + intake router
+src/scope-*.mjs / src/forge/   beta whole-repo loop + per-file verifier learning (--forge)
+src/converge*.mjs / src/plan*.mjs / src/replan*.mjs / src/outer*.mjs / src/whet.mjs   beta control plane + intake router
 ```
 
 Maturity is covered in [Architecture & maturity](#architecture--maturity) above; the contracts + the

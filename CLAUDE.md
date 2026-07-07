@@ -9,7 +9,9 @@ A deterministic **loop-engineering** driver for Claude Code. The thesis is **cod
 a pure function (`src/gate.mjs` `gateVerdict`) decides continue/stop; the **model** only diagnoses and
 makes one edit per pass; a **scorer** only produces the 0–100 number. The single-file inner loop
 (`driver.mjs`) is the **stable v1**; the whole-repo `scope` loop and the multi-objective `converge`
-control plane are experimental/alpha and deliberately unsupported.
+control plane are **beta — actively dogfooded** (supported and run for real, findings →
+`docs/quality-loop/findings-register.md`), not yet stable-pinned like `driver.mjs`; their `done` stays
+provisional until the known holes (leaf-set *sufficiency*, indirect scorer-capture) close.
 
 ## Golden rules — do not break these
 
@@ -57,7 +59,7 @@ control plane are experimental/alpha and deliberately unsupported.
 
 `src/gate.mjs` pure gate · `src/loop.mjs` control flow (deps injected) · `src/driver.mjs` CLI + wiring +
 config · `src/act-claude.mjs` the headless `claude -p` edit step · `scorers/` the 0–100 scorers ·
-`src/forge/` per-file verifier learning · `src/converge*.mjs` the alpha control plane ·
+`src/forge/` per-file verifier learning · `src/converge*.mjs` the beta control plane ·
 `src/iso-runner.mjs` / `src/prompt-fence.mjs` / `src/blast-radius.mjs` the hardening primitives.
 
 ## Working style
