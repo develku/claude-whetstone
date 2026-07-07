@@ -7,6 +7,24 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 The dates are the landing commit's date; the short SHA points at the squash on `main`.
 
+## [1.13.0] — 2026-07-07
+### Added
+- **Auth-failure preflight** — the act step classifies an auth-class `claude -p`
+  failure (expired OAuth / invalid key / 401 / Keychain
+  `errSecInteractionNotAllowed`) distinctly from a transient rate-limit and fails
+  FAST + LOUD with a one-line self-heal remedy (`claude /login` | `claude
+  setup-token` + `CLAUDE_CODE_OAUTH_TOKEN`, and the `ANTHROPIC_API_KEY`-overrides-
+  subscription footgun) instead of burning 3 identical retries then throwing a
+  cryptic "editor claude exited 1". A definitive non-401 structured status wins
+  over incidental auth-phrase text, so a rate-limit still retries. (`5d56e62`)
+### Changed
+- The whole-repo **scope** loop, the **Forge** verifier-learner, and the
+  **converge** control plane are promoted from "experimental/alpha, deliberately
+  unsupported" to **beta — in active dogfooding**: supported and run for real,
+  findings tracked in `docs/quality-loop/findings-register.md`. Still honestly
+  NOT stable — `done` is provisional and the known holes (leaf-set *sufficiency*,
+  indirect scorer-capture) stay disclosed. (`1af8ef2`)
+
 ## [1.12.0] — 2026-07-04
 ### Added
 - **DOC-DEPTH-FLOOR** — a composed doc gate that closes `doc-lint`'s omission
