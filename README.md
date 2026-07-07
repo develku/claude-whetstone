@@ -233,8 +233,16 @@ Workflow-backed `act` would be a drop-in if anyone ever wants it — a future op
 
 ## Install as a Claude Code plugin
 
-whetstone ships as a single-plugin Claude Code marketplace (`.claude-plugin/`). Register it by
-`owner/repo` and install — the repo *is* the marketplace, so `source: "./"` resolves to its root:
+whetstone is published in the **develku** marketplace, alongside develku's other Claude Code plugins.
+Add the marketplace once, then install:
+
+```bash
+claude plugin marketplace add develku/develku-plugins
+claude plugin install whetstone@develku
+```
+
+It also ships as its **own** single-plugin marketplace — the repo *is* the marketplace, so
+`source: "./"` resolves to its root:
 
 ```bash
 claude plugin marketplace add develku/claude-whetstone
