@@ -4,7 +4,7 @@
 // snapshotted or reverted, so the loop's artifact-hash change-detection is unaffected.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { snapshotSiblings, settleSiblings, withBlastRadius } from '../src/blast-radius.mjs'
@@ -69,6 +69,45 @@ test('withBlastRadius reverts a sibling even when act throws (containment on err
   assert.equal(readFileSync(join(dir, 's.mjs'), 'utf8'), 'orig', 'sibling reverted despite the throw')
   assert.equal(records.length, 1)
   assert.ok(warnings.some((w) => /reverted/.test(w)))
+})
+
+test('capped snapshot: deleting a tracked sibling never destroys pre-existing beyond-cap files (detect-only, not reverted)', () => {
+  const dir = scratch('capslide')
+  const artifact = join(dir, 'artifact.mjs'); writeFileSync(artifact, 'export const a = 1\n')
+  const files = []
+  for (let i = 0; i < 12; i++) { const f = `s${String(i).padStart(2, '0')}.txt`; writeFileSync(join(dir, f), `orig-${i}\n`); files.push(f) }
+  const snap = snapshotSiblings(artifact, { walkCap: 8 })
+  assert.equal(snap.capped, true, 'walk caps at 8 of 12 siblings')
+  const tracked = [...snap.files.keys()]
+  const beyondCap = files.filter((f) => !snap.files.has(f))
+  assert.ok(beyondCap.length > 0, 'some siblings are beyond the cap (absent from the snapshot)')
+  // editor deletes 4 TRACKED siblings -> the settle walk's window slides down onto the beyond-cap files
+  for (const f of tracked.slice(0, 4)) rmSync(join(dir, f))
+  const settled = settleSiblings(snap)
+  // a containment control must never destroy files it never snapshotted
+  for (const f of beyondCap) {
+    assert.equal(existsSync(join(dir, f)), true, `pre-existing beyond-cap file ${f} preserved`)
+    assert.ok(!settled.reverted.includes(f), `${f} not falsely reported reverted`)
+    assert.ok(settled.detectedOnly.includes(f), `${f} surfaced loudly in detectedOnly`)
+  }
+  assert.equal(settled.violated, true, 'detectedOnly entries still count as a violation')
+})
+
+test('withBlastRadius: editor deleting a snapshotted sibling\'s parent dir does not throw; settle completes', async () => {
+  const dir = scratch('rmparent')
+  const artifact = join(dir, 'a.mjs'); writeFileSync(artifact, 'x')
+  mkdirSync(join(dir, 'sub')); writeFileSync(join(dir, 'sub', 'inner.txt'), 'orig\n')
+  const warnings = []
+  const records = []
+  const act = withBlastRadius(async () => { rmSync(join(dir, 'sub'), { recursive: true, force: true }); return { changed: true } },
+    { artifactPath: artifact, warn: (m) => warnings.push(m), record: (r) => records.push(r) })
+  const out = await act({ pass: 1 }) // must NOT throw out of the finally
+  assert.deepEqual(out, { changed: true }, 'act result passes through — settle did not mask it')
+  assert.equal(records.length, 1, 'a violation was recorded')
+  const rel = join('sub', 'inner.txt')
+  const rec = records[0]
+  assert.ok(rec.reverted.includes(rel) || rec.detectedOnly.includes(rel), 'sibling surfaced as reverted or detectedOnly — never silently swallowed')
+  if (rec.reverted.includes(rel)) assert.equal(readFileSync(join(dir, 'sub', 'inner.txt'), 'utf8'), 'orig\n', 'restored with the parent dir recreated')
 })
 
 test('withBlastRadius is a no-op (no record/warn) when the editor stays in bounds', async () => {

@@ -9,7 +9,7 @@
 // Bounded by design: content is copied for up to copyCap files (revertable); beyond that, up to walkCap files are
 // hash-tracked (detect-only — changes are reported but NOT reverted); beyond walkCap the walk stops and reports
 // `capped` (edits there are UNMONITORED — surfaced loudly, never silently swallowed). Symlinks are not followed.
-import { readdirSync, lstatSync, readFileSync, writeFileSync, rmSync, realpathSync } from 'node:fs'
+import { readdirSync, lstatSync, readFileSync, writeFileSync, rmSync, mkdirSync, realpathSync } from 'node:fs'
 import { join, dirname, relative } from 'node:path'
 import { createHash } from 'node:crypto'
 
@@ -74,16 +74,25 @@ export function settleSiblings(snap) {
     const now = current.files.get(rel)
     const changed = !now || now.hash !== before.hash
     if (!changed) continue
-    if (before.content != null) { writeFileSync(join(snap.dir, rel), before.content); reverted.push(rel) }
+    if (before.content != null) {
+      // fail SOFT: if the editor deleted the parent dir, recreate it; a file we cannot restore is surfaced
+      // loudly in detectedOnly, never a silent swallow that throws out of settle and masks the act's result.
+      try { mkdirSync(dirname(join(snap.dir, rel)), { recursive: true }); writeFileSync(join(snap.dir, rel), before.content); reverted.push(rel) }
+      catch { detectedOnly.push(rel) }
+    }
     else detectedOnly.push(rel) // over copy cap -> we saw it change but cannot restore it
   }
-  // added siblings (absent from the snapshot) -> delete
+  // added siblings (absent from the snapshot) -> delete, but ONLY when both walks provably saw the whole tree.
+  // If either walk capped, "absent from snap.files" no longer proves "added": the settle window may have slid
+  // onto pre-existing files beyond the snapshot's cap — deleting those would destroy data the guard never saw.
+  const canDelete = !snap.capped && !current.capped
   for (const rel of current.files.keys()) {
     if (!snap.files.has(rel)) {
+      if (!canDelete) { detectedOnly.push(rel); continue } // capped -> detect-only, never rmSync
       try { rmSync(join(snap.dir, rel), { force: true }); reverted.push(rel) } catch { detectedOnly.push(rel) }
     }
   }
-  return { violated: reverted.length > 0 || detectedOnly.length > 0, reverted, detectedOnly }
+  return { violated: reverted.length > 0 || detectedOnly.length > 0, reverted, detectedOnly, capped: current.capped }
 }
 
 // Wrap an act so any sibling edit it makes is reverted (revert runs even if act throws — containment on error
@@ -95,11 +104,12 @@ export function withBlastRadius(act, { artifactPath, warn = () => {}, record = (
       return await act(state)
     } finally {
       const settled = settleSiblings(snap)
-      if (settled.violated || snap.capped) {
-        record({ pass: state?.pass ?? null, reverted: settled.reverted, detectedOnly: settled.detectedOnly, capped: snap.capped })
+      const capped = snap.capped || settled.capped // either walk capping means edits beyond are unmonitored
+      if (settled.violated || capped) {
+        record({ pass: state?.pass ?? null, reverted: settled.reverted, detectedOnly: settled.detectedOnly, capped })
         if (settled.reverted.length) warn(`blast-radius: reverted ${settled.reverted.length} out-of-bounds sibling edit(s): ${settled.reverted.slice(0, 5).join(', ')}${settled.reverted.length > 5 ? ' …' : ''}`)
-        if (settled.detectedOnly.length) warn(`blast-radius: ${settled.detectedOnly.length} large sibling(s) changed but NOT reverted (over copy budget): ${settled.detectedOnly.slice(0, 5).join(', ')}`)
-        if (snap.capped) warn(`blast-radius: sibling monitoring capped at ${snap.walkCap} files — edits beyond are UNMONITORED`)
+        if (settled.detectedOnly.length) warn(`blast-radius: ${settled.detectedOnly.length} sibling(s) changed but NOT reverted (over copy budget or beyond monitoring cap): ${settled.detectedOnly.slice(0, 5).join(', ')}`)
+        if (capped) warn(`blast-radius: sibling monitoring capped at ${snap.walkCap} files — edits beyond are UNMONITORED`)
       }
     }
   }
