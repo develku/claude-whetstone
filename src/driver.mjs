@@ -253,7 +253,11 @@ async function runPrepared(cfg, state, deps, { skipBaseline = false } = {}) {
   if (cfg.gateSelfProbe && verdict.status === 'done') {
     try {
       const gate = (final.confirm_scorer_cmd ?? '').trim()
-      if (!gate || !cfg.forge || !cfg.forgeStorePath) {
+      if (final.observe_cmd) {
+        // Symmetric with AUD-08: the confirm gate scores OBSERVE output, so mutating the raw artifact
+        // source probes the wrong input domain (wasted paid gate runs, or a bogus survivor polluting Forge).
+        final = { ...final, gate_self_probe: { skipped: 'the confirm gate scores observe output, not the artifact' } }
+      } else if (!gate || !cfg.forge || !cfg.forgeStorePath) {
         final = { ...final, gate_self_probe: { skipped: !gate ? 'no composed confirm gate to probe' : 'no --forge/--forge-store to learn into' } }
       } else {
         const runCheck = (cmd, artifact) => {

@@ -142,6 +142,31 @@ test('AUD-10: --gate-self-probe routes survivors to forge learning + stamps stat
   assert.equal(called, 0)
 })
 
+test('AUD-10: --gate-self-probe skips (no mutation / no forge routing) when the scorer scores observe output', async () => {
+  // Sibling-symmetric with the AUD-08 gate-audit observe skip: the confirm gate scores observe OUTPUT, so
+  // feeding it raw-artifact-source mutants probes the wrong input domain — trivial fails waste paid gate runs,
+  // a trivial pass routes a bogus SURVIVOR into paid Forge learning. Skip before either happens.
+  const dir = mkdtempSync(join(tmpdir(), 'whetstone-sprobe-obs-'))
+  const artifact = join(dir, 'a.txt'); writeFileSync(artifact, 'v0'); let n = 0
+  let probed = 0, forged = 0
+  const scoreQ = [50, 95]
+  const { state } = await runFromConfig(
+    // forge + store + a base confirm gate => WITHOUT the observe skip the probe WOULD fire (gate is present).
+    { goal: 'g', artifactPath: artifact, observeCmd: 'echo x', scorerCmd, targetScore: 90, hardCap: 10, loopDir: join(dir, '.loop'),
+      gateSelfProbe: true, forge: true, forgeStorePath: join(dir, 'checks.json'), confirmScorerCmd: 'node confirm.mjs' },
+    {
+      buildContext: () => ({ evaluate: async () => ({ score: scoreQ.shift(), critique: 'c' }), persist: (s, ev) => recordPass(s, { ...ev, snapshot: `iter_${s.history.length}.txt` }), confirm: null }),
+      act: async () => { writeFileSync(artifact, `v${++n}`); return { changed: true, costUsd: 0 } },
+      runGateSelfProbe: async () => { probed++; return { sampled: 4, survivors: [], cleanup: () => {} } },
+      runForgeHook: async () => { forged++; return { admitted: [], rejected: [] } },
+      log: () => {},
+    },
+  )
+  assert.equal(probed, 0, 'observe_cmd -> gate self-probe skipped before any artifact mutation')
+  assert.equal(forged, 0, 'no survivor routed into paid forge learning under observe')
+  assert.match(state.gate_self_probe.skipped, /observe/)
+})
+
 test('AUD-08: a gate-audit error never fails an already-done run (fail-safe)', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'whetstone-gaudit-err-'))
   const artifact = join(dir, 'a.txt'); writeFileSync(artifact, 'v0'); let n = 0
