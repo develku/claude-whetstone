@@ -61,6 +61,17 @@ test('a mention ONLY inside a code fence never counts (any language)', () => {
   assert.equal(substantiveMention(md, '--observe', FLOORS), false)
 })
 
+test('a mention ONLY inside a TILDE code fence never counts either (anti-gaming: ~~~ is a fence too)', () => {
+  // A model editing SPEC.md to pass the doc gate could wrap a help-string dump in a ~~~ fence to get a
+  // required flag counted as prose — exactly the "flag flashed in a command example" the header rejects.
+  // The header promises a mention inside ANY fenced block never counts, so ~~~ must be stripped like ```.
+  const tilde = 'Usage:\n\n~~~bash\nnode driver.mjs --observe "npm test" --cap 10 and eight more words here\n~~~\n'
+  assert.equal(substantiveMention(tilde, '--observe', FLOORS), false)
+  // Positive control: the SAME token genuinely described in a prose line still counts (fix didn't over-strip).
+  const prose = 'Pass `--observe` to run a shell command before each pass so the editor sees fresh evidence.\n'
+  assert.equal(substantiveMention(prose, '--observe', FLOORS), true)
+})
+
 test('word-count stuffing is dead: repeated/nonsense filler never clears a floor (distinct words count)', () => {
   // power-review HIGH: raw word counts let '| `--observe` | the the the the |' pass. Floors count DISTINCT words.
   assert.equal(substantiveMention('| `--observe` | the the the the |\n', '--observe', FLOORS), false)
