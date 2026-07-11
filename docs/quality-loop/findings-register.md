@@ -16,14 +16,19 @@ intentional / not worth the cost).
 
 Via `npm run coverage` (src + scorers, deterministic). Ratcheted up by cycle 1.
 
-| Metric | Cycle 0 | Cycle 1 | Cycle 2 | Cycle 3 | Cycle 4 (2026-06-30) | Audit (2026-07-02) | Cycle 5 (2026-07-02) |
-|--------|---------|---------|---------|---------|----------------------|--------------------|----------------------|
-| Line | 96.03% | 96.10% | 96.27% | 96.31% | 96.31% | 96.42% | **96.42%** |
-| Branch | 82.15% | 82.54% | 82.89% | 83.11% | 83.48% | 84.12% ◇ | **84.03%** ◇ |
-| Function | 91.83% | 92.12% | 92.28% | 93.73% | 93.89% | 94.22% | **94.22%** |
+| Metric | Cycle 0 | Cycle 3 | Cycle 4 | Audit (2026-07-02) | Cycle 5 (2026-07-02) | Cycle 6 (2026-07-12) |
+|--------|---------|---------|---------|--------------------|----------------------|----------------------|
+| Line | 96.03% | 96.31% | 96.31% | 96.42% | 96.42% | **96.76%** |
+| Branch | 82.15% | 83.11% | 83.48% | 84.12% ◇ | 84.03% ◇ | **84.03%** ◇ (obs. 85.10) |
+| Function | 91.83% | 93.73% | 93.89% | 94.22% | 94.22% | **94.57%** |
 
 The loop must not drop below the latest column; ratchet **line / function** (stable, exact) upward as
-coverage improves.
+coverage improves. (Early cycles 1–2 columns dropped from this table for width; full history in git.)
+
+Cycle 6 ratcheted line 96.42→**96.76** and function 94.22→**94.57**. Branch observed 85.10 this run (up
+from the band's prior peak 84.12) but the **floor stays the reproducible minimum 84.03** per the QL-01
+jitter rule below — the +1pt observed gain is real coverage of the new blast-radius/gate-probe/spend
+tests, not a floor move.
 
 ◇ **Branch floor recalibrated in cycle 5 (84.12 → 84.03).** Branch coverage is NOT deterministic — it
 jitters across ~[84.03, 84.12] run-to-run because three spawn-based tests flip a branch on an
@@ -185,6 +190,31 @@ A 15-agent audit vs field prior art (evaluator-optimizer / DSPy / Agent Capsules
 |---|---|---|---|---|---|
 | AUD-09 | correctness | LOW | `src/converge.mjs`, `src/state.mjs`, `src/scope-act.mjs` | fixed | **Converge retries started blind** — a failed objective retried in a fresh child could repeat the exact dead approach the last attempt already failed (`state.rounds` recorded the failures but nothing fed them forward). Fix (v1.10.0): `composeRetryMemo(rounds, objId)` summarizes THIS objective's prior failed rounds (code-authored `reason`s + finite floor scores only); `buildObjectiveCfg` carries it as `retryMemo` → `initState` `retry_memo` → `buildScopePrompt` renders it as a nonce-**fenced** `PRIOR-ATTEMPTS` DATA block (own nonce). No invariant file touched; no model spawn; the child is in-process `runFromConfig` so the memo flows straight through. TDD RED→GREEN. |
 | AUD-10 | verification | LOW | `src/forge/gate-probe.mjs`, `src/forge/hook.mjs`, `src/driver.mjs`, `src/summary.mjs` | fixed | **A `done` was only as trustworthy as its confirm gate — never adversarially tested.** Opt-in `--gate-self-probe` (v1.11.0, full hacker-fixer): post-done, `runGateSelfProbe` mutates the accepted artifact and probes the COMPOSED confirm gate; a mutant the gate reproducibly PASSES is a survivor (a hole), routed via a new `runForgeHook` `'gate-survivor'` trigger (good=final so admission can't veto the final; the branch never indexes history, requires both deps, fails loud) into Forge learning. PAID → bounded per DCA `20260703T222155`: sample ≤4 mutants, ≤1 survivor default, SEQUENTIAL with early-stop (bounds both paid gate runs and paid generations); only outcome-`'pass'` routes; fires only with a composed gate + `--forge --forge-store`, else skip-LOUD; fail-safe (never changes the verdict). Store-poisoning risk is inherited from forge learning generally (existing admit/mutation-admit/corroborate/prune mitigations apply). No invariant file touched. TDD RED→GREEN ($0; the self-heal itself needs a paid smoke). |
+
+### Cycle 6 (2026-07-12) — post-v1.13.0 surface (v1.9→v1.13 new modules) 4-axis audit (9 candidates → 5 confirmed → 5 fixed)
+
+First cycle over the ~1300 lines added since cycle 5 (blast-radius, gate-audit, forge/gate-probe, doc-coverage,
+doc-exec, area-registry, act-claude auth classification + editor retry, llm-judge retry/spend, escalation ladder).
+A 22-agent Workflow (4 parallel axis finders — correctness/security/architecture/performance, all **no-web** +
+empirical probing — then 2-lens refute-by-default verification on every deduped finding), with a Fable firsthand
+read of the whole diff before and during triage. The invariant `loop.mjs` change in this window (AUD-05) was
+confirmed a **clean deliberate hash bump** (tripwire rebaselined with DCA `20260703T203705` provenance, all
+pre-existing loop/restore tests pass unchanged). 4 findings rejected by adversarial verify (a false symlink
+security escalation, a harmless isAuthFailure false-positive on the fatal-exit path, and 2 tolerated-dup framings).
+The **blast-radius module — brand new in v1.9.0 — carried the cycle's only HIGH**, a reminder that the newest
+surface, not the battle-tested core, is where cycle N+1's bugs live.
+
+| ID | Axis | Sev | File(s) | Status | Note / provenance |
+|----|------|-----|---------|--------|-------------------|
+| C6-01 | correctness | **HIGH** | `src/blast-radius.mjs` | fixed | **Containment control destroys data it never saw.** When the sibling snapshot hit `walkCap`, files beyond the cap are absent from `snap.files`; `settleSiblings`' added-file pass `rmSync`'d every current file not in the snapshot, so an editor deleting a tracked sibling slid the settle window onto formerly-beyond-cap **pre-existing** files → permanently deleted (and mislabelled `reverted`). Fix: delete only when BOTH walks saw the whole tree — `!snap.capped && !current.capped`; else detect-only. Surfaces `current.capped` so an AFTER-walk cap also warns. TDD RED→GREEN (`275cc95`). |
+| C6-02 | correctness | MEDIUM | `src/blast-radius.mjs` | fixed | **Uncaught ENOENT crashes the paid run.** The revert-modified branch did a bare `writeFileSync` (no parent-dir create, no try/catch, unlike the wrapped `rmSync` branch); if the editor deleted a snapshotted sibling's parent dir, the throw propagated out of `withBlastRadius`'s `finally`, masking the act result, aborting the run, leaving other siblings un-reverted, stamping no violation. Fix: `mkdirSync` recursive + try/catch → `detectedOnly` (fail soft, surfaced loudly). Same commit `275cc95`. |
+| C6-03 | correctness | MEDIUM | `src/driver.mjs` | fixed | **`--gate-self-probe` missing the `--observe` skip that `--gate-audit` has.** Under `--observe` the confirm gate scores observe output, so feeding it raw-artifact mutants tested the wrong input domain — wasted paid gate runs, or a bogus survivor routed into PAID Forge learning that pollutes the store future confirm gates compose from. Fix: mirror AUD-08's driver-level observe skip as the first branch condition; `gate-probe.mjs` stays observe-agnostic. TDD (`2f2682e`). |
+| C6-04 | correctness | MEDIUM | `src/scope-context.mjs`, `src/driver.mjs`, `src/state.mjs` | fixed | **Judge-spend accounting twin-persist drift.** The v1.13 fix (charge a scorer's own `review.usage` to the budget dials) landed on only `driver.buildContext`'s persist; `scopeBuildContext`'s twin still dropped it, so a scope/converge run with a usage-emitting scorer (reachable via a fixed-file-pinned `llm-judge`) silently under-charged `--budget`/`--budget-tokens` every pass — the C3-01 "one twin drifted" class, under a comment claiming the shared helper prevented it. Root-cause fix: extract one `passSpend(ev)` in `state.mjs`, both twins call it (driver byte-identical, scope now charges). Confirm-path spend left uncharged (would touch invariant `loop.mjs`). TDD (`c3f9907`). |
+| C6-05 | security | LOW | `scorers/doc-coverage.mjs` | fixed | **Tilde-fence anti-gaming bypass.** `stripFences` matched backtick fences only, so a `~~~`-fenced help dump had its words counted as prose — a model could wrap a required flag in `~~~` to mint it "documented", contradicting the header's "ANY fenced code block never counts". Fix: delimiter-agnostic `FENCE` with a `\1` backreference (backtick behaviour byte-identical, `~~~` now stripped). `doc-lint`/`doc-exec` keep backtick-only (their tilde gap is precision/recall, not inflation; the 3-regex unification is settled tolerated-dup). Committed docs use no `~~~`, both doc gates stay 100. TDD (`f4c7c14`). |
+| C6-rej-1 | security | — | `src/blast-radius.mjs` | wontfix | Symlink-follow revert framed as HIGH security REFUTED: the revert writes the sibling's OWN snapshotted content and replacing a tracked file with a symlink is itself a detected change; the real robustness gap is the ENOENT/cap pair (C6-01/02), already fixed. |
+| C6-rej-2 | security | — | `src/act-claude.mjs` | wontfix | `isAuthFailure` text fallback scanning full stdout REFUTED: a definitive structured `api_error_status` wins outright, so the text branch fires only when status is absent; and it runs only on the fatal-exit path — a false auth classification merely skips retries a truly-fatal call didn't need. Not exploitable. |
+| C6-rej-3 | architecture | — | `scorers/doc-coverage.mjs`, `doc-exec.mjs`, `doc-lint.mjs` | wontfix | 3× identical `FENCE` regex unification REFUTED as before (C1-12/C4-03 tolerated-dup): the three consume the capture groups differently; a shared regex would change extraction/ref semantics. C6-05 fixes the one that had a real bug and documents the deliberate divergence. |
+| C6-rej-4 | correctness | — | `src/scope-context.mjs` | superseded | The correctness finder's own framing of the judge-spend drop was refuted on a narrow "bare llm-judge can't read a directory" reachability argument; the architecture finder's C3-01-drift framing of the SAME issue survived both verifiers and reachability was resolved firsthand (fixed-file pin) → fixed as **C6-04**. |
 
 ---
 
