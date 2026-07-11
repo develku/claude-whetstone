@@ -12,6 +12,7 @@ import { parseScorerJson } from './parse-scorer.mjs'
 import {
   initState,
   recordPass,
+  passSpend,
   ensureLoopDir,
   loadState,
   saveState,
@@ -99,17 +100,15 @@ export function buildContext(loopDir) {
     const pass = s.history.length
     const snapshot = snapshotArtifact(loopDir, s.artifact_path, pass)
     const reviewRef = writeReview(loopDir, pass, ev.review ?? { score: ev.score, critique: ev.critique })
-    // Charge BOTH spend sources on the pass: the editor's (act) and the scorer's own (review.usage —
-    // an llm-judge scorer pays a second model call every pass; before v1.6.0 that spend was invisible
-    // to the budget dials, measured on a real run at ~20% of tokens / ~30% of USD). Number()||0 so a
-    // scorer without the optional usage field (every deterministic scorer) charges 0, never NaN.
+    // Charge BOTH spend sources on the pass — editor (act) + scorer's own review.usage — via the
+    // shared passSpend helper (state.mjs), the ONE boundary scopeBuildContext's persist twin also
+    // calls so the two budget-accounting paths can't drift.
     const next = recordPass(s, {
       score: ev.score,
       critique: ev.critique,
       snapshot,
       reviewRef,
-      costUsd: (ev.costUsd ?? 0) + (Number(ev.review?.usage?.costUsd) || 0),
-      tokens: (ev.tokens ?? 0) + (Number(ev.review?.usage?.tokens) || 0),
+      ...passSpend(ev),
     })
     // Fold the pass's findings into the discard-memory registry (area-registry.mjs) before the save,
     // so the editor prompt can steer away from areas already attacked with no gain.

@@ -82,6 +82,18 @@ export function recordPass(state, { score, critique = null, snapshot = null, rev
   }
 }
 
+// The summed spend of one scored pass: the editor's (act) spend PLUS the scorer's own (an llm-judge
+// scorer pays a second model call each pass, reported as review.usage). The ONE shared helper both
+// persist twins (driver.buildContext + scopeBuildContext) call, so single-file and scope/converge
+// budget accounting can't drift — one boundary, one summing rule. Number()||0 so a scorer without the
+// optional usage field (every deterministic scorer) charges 0, never NaN.
+export function passSpend(ev) {
+  return {
+    costUsd: (ev?.costUsd ?? 0) + (Number(ev?.review?.usage?.costUsd) || 0),
+    tokens: (ev?.tokens ?? 0) + (Number(ev?.review?.usage?.tokens) || 0),
+  }
+}
+
 // --- file I/O (the run directory is the durable record) ---
 
 export function ensureLoopDir(loopDir) {

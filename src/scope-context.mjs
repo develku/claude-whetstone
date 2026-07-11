@@ -5,7 +5,7 @@
 // the keep-best ref and a self-commit/audit trail. The scope dir is carried in state.artifact_path
 // (the "artifact" is the directory); everything else — escalation, confirm-veto, budget — is reused.
 import { spawnSync } from 'node:child_process'
-import { writeReview, recordPass, saveState, zeroPad } from './state.mjs'
+import { writeReview, recordPass, passSpend, saveState, zeroPad } from './state.mjs'
 import { withAreaLedger } from './area-registry.mjs'
 import { gitSnapshot, gitVerifyAt } from './git-snapshot.mjs'
 import { shq } from './shq.mjs'
@@ -32,9 +32,12 @@ export function scopeBuildContext(loopDir) {
     const pass = s.history.length
     const snapshot = gitSnapshot(s.artifact_path, `pass ${zeroPad(pass)}`)
     const reviewRef = writeReview(loopDir, pass, ev.review ?? { score: ev.score, critique: ev.critique })
-    const next = recordPass(s, { score: ev.score, critique: ev.critique, snapshot, reviewRef, costUsd: ev.costUsd ?? 0, tokens: ev.tokens ?? 0 })
-    // Same discard-memory fold as driver.buildContext's persist — the ONE shared helper keeps the two
-    // persist paths from drifting.
+    // Charge editor (act) + scorer review.usage via the shared passSpend helper — the SAME summing the
+    // driver twin uses, so budget accounting can't drift (a scope llm-judge scorer's own model spend
+    // is now billed to --budget/--budget-tokens too, not silently dropped).
+    const next = recordPass(s, { score: ev.score, critique: ev.critique, snapshot, reviewRef, ...passSpend(ev) })
+    // Same discard-memory fold as driver.buildContext's persist — withAreaLedger and passSpend are the
+    // shared helpers that keep the two persist paths from drifting.
     const withAreas = withAreaLedger(s, next, ev.review)
     saveState(loopDir, withAreas)
     return withAreas
