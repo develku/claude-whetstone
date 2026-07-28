@@ -1,38 +1,14 @@
 // The multi-file ACT step for the scope (repo/dir) loop — the twin of act-claude's single-file editor.
-// Reuses act-claude's argv/cost/token helpers verbatim; only the blast radius (a whole --scope), the
-// changed-detection (git status, not one sha256), and the read-only gate guard are new. As with
-// act-claude, the spawn itself is live-validated, not unit-tested; the three exports below are the
-// testable seams.
-import { execFileSync } from 'node:child_process'
+// Reuses act-claude's argv/cost/token helpers verbatim; only the blast radius (a whole --scope) is new.
+// The changed-detection and the read-only gate guard live in scope-guard.mjs — the code-owned controls are
+// kept apart from this prompt/spawn code, which changes shape whenever the editor prompt is tuned. As with
+// act-claude, the spawn itself is live-validated, not unit-tested; buildScopePrompt is the testable seam.
 import { spawnEditorAsync } from './spawn-editor.mjs'
 import { buildLedger } from './ledger.mjs'
 import { extractCost, extractTokens, resolveMcpConfig, buildClaudeArgs, editorFailureReason, editorExitDisposition } from './act-claude.mjs'
 import { makeNonce, fenceUntrusted } from './prompt-fence.mjs'
 import { qualifyStale, renderTriedAreas } from './area-registry.mjs'
-
-const git = (dir, args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim()
-
-// Changed-detection for a multi-file scope: any uncommitted change in the tree. Replaces the
-// single-file sha256 before/after — the editor may touch N files, so we ask git what moved.
-export function scopeChanged(scopeDir) {
-  return git(scopeDir, ['status', '--porcelain']).length > 0
-}
-
-// RISK #1 (highest severity) — the editor must NOT edit the gate it is scored by. After the editor
-// runs, hard-revert any change to a read-only path (tests / scorer config), whether a tracked edit or
-// a newly-added file. This is CODE-OWNED enforcement, not the prompt: the fence in buildScopePrompt is
-// advisory; THIS is the control that makes a gate-tampering edit a no-op instead of a moat breach.
-export function enforceReadOnly(scopeDir, readOnly = []) {
-  if (!readOnly.length) return { violated: false, reverted: [] }
-  const status = git(scopeDir, ['status', '--porcelain', '--', ...readOnly])
-  const reverted = status.split('\n').filter(Boolean).map((l) => l.slice(3).trim())
-  if (!reverted.length) return { violated: false, reverted: [] }
-  for (const p of readOnly) {
-    try { git(scopeDir, ['checkout', 'HEAD', '--', p]) } catch { /* path may have only untracked additions */ }
-  }
-  git(scopeDir, ['clean', '-fdq', '--', ...readOnly]) // remove newly-added files under the read-only paths
-  return { violated: true, reverted }
-}
+import { enforceReadOnly, scopeChanged } from './scope-guard.mjs'
 
 // Multi-file editor prompt: same trusted-ledger + fenced-untrusted-critique shape as act-claude, but
 // the blast radius is the whole --scope minus the read-only gate. Pure + exported for test.

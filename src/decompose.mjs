@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { gateVerdict } from './gate.mjs'
 import { gitHead, gitTreeChanged, gitRestore } from './git-snapshot.mjs'
-import { scopeChanged } from './scope-act.mjs'
+import { scopeChanged } from './scope-guard.mjs'
 import { shq } from './shq.mjs'
 import { SHELL_SCORERS } from './scorer-safety.mjs'
 

@@ -2,7 +2,7 @@
 // Code-owned edit-boundary enforcement for the single-file loop (AUD-06). The editor prompt asks the model to
 // "edit ONLY <artifact>" (act-claude.mjs), but that is advisory: a model that also writes a sibling file can
 // launder the measured signal (io-* scorers can import repo siblings). Scope mode enforces this with git
-// (scope-act.mjs enforceReadOnly); single-file mode has no git guarantee (the artifact's dir need not be a repo),
+// (scope-guard.mjs enforceReadOnly); single-file mode has no git guarantee (the artifact's dir need not be a repo),
 // so this module enforces it directly: snapshot the artifact's sibling files before the edit, revert any that
 // changed after. The artifact ITSELF is never touched, so the loop's artifact-hash change-detection is unaffected.
 //
