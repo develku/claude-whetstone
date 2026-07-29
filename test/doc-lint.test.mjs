@@ -39,6 +39,33 @@ test('extractRefs dedupes a path referenced twice', () => {
   assert.deepEqual(extractRefs(md), ['src/gate.mjs'])
 })
 
+test('extractRefs skips home and absolute paths in a non-shell fence (not repo-relative)', () => {
+  // a correct `~/.config/...` doc claim is NOT a repo ref — scoring it dangling is a false positive
+  // that the model can only "fix" by deleting true documentation
+  const md = ['```text', 'loadConfig reads ~/.config/whetstone/config.json', 'hooks live in /etc/whetstone/config.json', '```'].join('\n')
+  assert.deepEqual(extractRefs(md), [])
+})
+
+test('extractRefs keeps the leading dot on a hidden-directory repo path', () => {
+  const md = ['```text', '.github/workflows/ci.yml', '```'].join('\n')
+  assert.deepEqual(extractRefs(md), ['.github/workflows/ci.yml'])
+})
+
+test('extractRefs does not open a fence on an inline triple-backtick phrase in prose', () => {
+  // prose describing a fenced ```js example must not desynchronize fence pairing: doing so makes
+  // ordinary prose "authoritative" and hides the real fence that follows
+  const md = [
+    'doc-exec runs every fenced ```js example that imports from the repo.',
+    '',
+    'Config lives at ~/.config/whetstone/config.json on the operator machine.',
+    '',
+    '```',
+    'src/gate.mjs',
+    '```',
+  ].join('\n')
+  assert.deepEqual(extractRefs(md), ['src/gate.mjs'])
+})
+
 test('isCheckableRef rejects a path-traversal ref (no out-of-repo existence oracle)', () => {
   // a model-authored doc must not be able to probe the filesystem outside --repo via `..`
   assert.equal(isCheckableRef('../sibling/secret.mjs'), false)

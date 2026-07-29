@@ -16,9 +16,11 @@
 // stay inside realpath(--repo) — an in-repo symlink to an external target is NOT followed (no out-of-repo
 // existence oracle via the score/critique). See refResolves.
 //
-// Known limitations: (1) a ragged ```` ```bash ```` block that itself contains a bare ```` ``` ````
-// can close early and leak the trailing line into the next plain fence (a possible false-positive ref
-// in docs that print raw Markdown inside a shell block — rare; a proper nesting-aware parser is the fix).
+// Known limitations: (1) a ragged ```` ```bash ```` block that itself contains a bare column-0
+// ```` ``` ```` can close early and leak the trailing line into the next plain fence (a possible
+// false-positive ref in docs that print raw Markdown inside a shell block — rare; a proper
+// nesting-aware parser is the fix). Fence delimiters are line-anchored, so an INDENTED or inline
+// ```` ``` ```` no longer opens or closes a block.
 // (2) within a single --repo the score still reveals which doc-named paths exist; constraining a
 // model-authorable --repo (so a plan can't widen the probe surface) belongs in the Track A arg schema
 // (plan-allowlist), not here.
@@ -28,11 +30,19 @@ import { isMainModule } from '../src/is-main.mjs'
 import { resolveOutput } from '../src/safe-rel.mjs'
 
 const SHELL_LANGS = new Set(['bash', 'sh', 'shell', 'console', 'zsh'])
-const FENCE = /```(\w*)[^\n]*\n([\s\S]*?)```/g
+// Both delimiters are LINE-ANCHORED (`^` + the `m` flag): an unanchored ``` matched a triple-backtick
+// written inline in prose (e.g. "runs every fenced ```js example"), which opened a phantom fence and
+// desynchronized every later pair — turning ordinary prose into "authoritative" ref territory while
+// hiding the real fence that followed. Only a fence delimiter at column 0 opens or closes a block.
+const FENCE = /^```(\w*)[^\n]*\n([\s\S]*?)^```/gm
 // Quantifiers are BOUNDED (not `*`): an unbounded run of slash/dot tokens before the required `.ext`
 // drove O(n^2) catastrophic backtracking (a pathological long line burned seconds). No real repo path
 // approaches these caps, so the bound is behaviour-preserving on real docs while keeping matching linear.
-const PATH_TOKEN = /[A-Za-z0-9_][A-Za-z0-9_.-]{0,512}\/[A-Za-z0-9_./-]{0,512}\.[A-Za-z0-9]+/g
+// The optional `~/`-or-`/` prefix and leading `.` are CAPTURED, not skipped: without them a home path
+// (`~/.config/x/y.json`) or absolute path (`/etc/x.json`) was silently truncated to a repo-relative-
+// looking token, so the home/absolute guard in isCheckableRef never saw the character it filters on and
+// a correct doc claim scored as a dangling ref. The leading dot likewise keeps `.github/...` intact.
+const PATH_TOKEN = /(?:~\/|\/)?\.?[A-Za-z0-9_][A-Za-z0-9_.-]{0,512}\/[A-Za-z0-9_./-]{0,512}\.[A-Za-z0-9]+/g
 const MD_LINK = /\[[^\]]{0,2048}\]\(([^)\s]+)\)/g
 const HTML_ATTR = /\b(?:src|href)\s*=\s*["']([^"']+)["']/gi
 
