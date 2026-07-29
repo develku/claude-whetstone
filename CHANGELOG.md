@@ -7,6 +7,35 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 The dates are the landing commit's date; the short SHA points at the squash on `main`.
 
+## [1.14.2] — 2026-07-29
+### Fixed
+- **One shared fence parser for the three doc scorers** — `src/fence.mjs` replaces
+  three divergent local regexes, closing a partial fix and an anti-gaming bypass in
+  the same move. 1.14.1 repaired the fence regex in `doc-lint` and left the identical
+  defect in `doc-exec`, whose comment still claimed "same shape as doc-lint's". The
+  three scorers grade the **same** document, so a fence misparse in one silently
+  moves another's verdict — precisely how the 2026-07-04 run damaged `doc-coverage`
+  and `doc-lint` at once. The divergence removed: `doc-coverage` delimiter-agnostic
+  but *not* anchored, `doc-lint` anchored but backtick-only, `doc-exec` neither.
+
+  The shared parser is line-anchored **and** delimiter-agnostic. Anchoring (`^` + `m`)
+  means an inline ```` ``` ```` in prose no longer opens a block, so prose can't be
+  swallowed and a real fence can't be hidden. Delimiter-agnosticism means ```` ``` ````
+  closes with ```` ``` ```` and `~~~` closes with `~~~`, matched by a `\1`
+  backreference — this half is **anti-gaming, not tidiness**: a backtick-only checker
+  lets a dangling ref or a stale `js` example be parked in a `~~~` block where it
+  stops being counted, so the score rises without anything being fixed. `f4c7c14`
+  closed exactly that bypass for `doc-coverage` (C6-05) and left its two siblings
+  open; extracting one parser makes the class unable to recur. Delimiters stay
+  exactly three characters, so ```` ```` ```` behaves as before.
+
+  The parser lives in `src/`, not `scorers/` — `test/plan-allowlist.test.mjs` is a
+  fail-closed tripwire requiring every shipped `scorers/*.mjs` to be consciously
+  classified data-only or shell, because anything there is a model-authorable
+  `--scorer` target. A shared helper is not a scorer, so it belongs beside
+  `is-main.mjs` and `safe-rel.mjs`. Six new regression tests across the three scorer
+  suites (1263 → **1269**); `SPEC.md` and `README.md` both gate at 100. (`e4b2d29`)
+
 ## [1.14.1] — 2026-07-29
 ### Fixed
 - **`doc-lint` misread the docs it grades** — two regex defects in
@@ -181,6 +210,10 @@ The dates are the landing commit's date; the short SHA points at the squash on `
 - Initial release: the deterministic single-file loop-engineering driver under a
   code-owned gate, with an honest stable / experimental / alpha tiering. (`f30ee4c`)
 
+[1.14.2]: https://github.com/develku/claude-whetstone/commit/e4b2d29
+[1.14.1]: https://github.com/develku/claude-whetstone/commit/b56b792
+[1.14.0]: https://github.com/develku/claude-whetstone/commit/a7624d5
+[1.13.0]: https://github.com/develku/claude-whetstone/commit/d04abad
 [1.12.0]: https://github.com/develku/claude-whetstone/commit/8dfd2db
 [1.11.0]: https://github.com/develku/claude-whetstone/commit/8a64086
 [1.10.0]: https://github.com/develku/claude-whetstone/commit/761392b
