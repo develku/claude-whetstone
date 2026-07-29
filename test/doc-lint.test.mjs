@@ -66,6 +66,18 @@ test('extractRefs does not open a fence on an inline triple-backtick phrase in p
   assert.deepEqual(extractRefs(md), ['src/gate.mjs'])
 })
 
+test('extractRefs reads a tilde-fenced block (a ~~~ block must not hide broken refs)', () => {
+  // backtick-only fence detection is a score-gaming bypass: move a dangling ref into a ~~~ block
+  // and it stops being counted, so the score rises without the ref being fixed
+  const md = ['~~~text', 'src/gate.mjs', '~~~'].join('\n')
+  assert.deepEqual(extractRefs(md), ['src/gate.mjs'])
+})
+
+test('extractRefs still exempts a tilde-fenced SHELL block (illustrative commands)', () => {
+  const md = ['~~~bash', 'node src/driver.mjs --artifact src/imaginary.mjs', '~~~'].join('\n')
+  assert.deepEqual(extractRefs(md), [])
+})
+
 test('isCheckableRef rejects a path-traversal ref (no out-of-repo existence oracle)', () => {
   // a model-authored doc must not be able to probe the filesystem outside --repo via `..`
   assert.equal(isCheckableRef('../sibling/secret.mjs'), false)

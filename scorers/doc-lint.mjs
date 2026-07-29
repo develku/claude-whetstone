@@ -28,13 +28,9 @@ import { readFileSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
 import { isMainModule } from '../src/is-main.mjs'
 import { resolveOutput } from '../src/safe-rel.mjs'
+import { eachFence } from '../src/fence.mjs'
 
 const SHELL_LANGS = new Set(['bash', 'sh', 'shell', 'console', 'zsh'])
-// Both delimiters are LINE-ANCHORED (`^` + the `m` flag): an unanchored ``` matched a triple-backtick
-// written inline in prose (e.g. "runs every fenced ```js example"), which opened a phantom fence and
-// desynchronized every later pair — turning ordinary prose into "authoritative" ref territory while
-// hiding the real fence that followed. Only a fence delimiter at column 0 opens or closes a block.
-const FENCE = /^```(\w*)[^\n]*\n([\s\S]*?)^```/gm
 // Quantifiers are BOUNDED (not `*`): an unbounded run of slash/dot tokens before the required `.ext`
 // drove O(n^2) catastrophic backtracking (a pathological long line burned seconds). No real repo path
 // approaches these caps, so the bound is behaviour-preserving on real docs while keeping matching linear.
@@ -62,10 +58,9 @@ export function isCheckableRef(r) {
 export function extractRefs(md) {
   const candidates = []
   let m
-  FENCE.lastIndex = 0
-  while ((m = FENCE.exec(md))) {
-    if (SHELL_LANGS.has((m[1] || '').toLowerCase())) continue // command example — illustrative paths
-    for (const t of m[2].match(PATH_TOKEN) || []) candidates.push(t)
+  for (const { lang, body } of eachFence(md)) {
+    if (SHELL_LANGS.has(lang.toLowerCase())) continue // command example — illustrative paths
+    for (const t of body.match(PATH_TOKEN) || []) candidates.push(t)
   }
   for (const re of [MD_LINK, HTML_ATTR]) {
     re.lastIndex = 0

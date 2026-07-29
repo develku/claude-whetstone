@@ -36,20 +36,16 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { isMainModule } from '../src/is-main.mjs'
 import { resolveOutput } from '../src/safe-rel.mjs'
+import { stripFences } from '../src/fence.mjs'
 
-// Delimiter-agnostic (backtick AND tilde), UNLIKE doc-lint's/doc-exec's backtick-only FENCE: the `\1`
-// backreference makes a ``` block still close with ``` (identical to before) and a ~~~ block close with
-// ~~~ — anti-gaming, so a tilde-fenced example can't be counted as prose and the header's "ANY fenced
-// code block never counts" claim actually holds (a ~~~ help dump must not mint a required flag as documented).
-const FENCE = /(```|~~~)(\w*)[^\n]*\n([\s\S]*?)\1/g
 const HEADING = /^#{1,6}\s/
 const DEFAULT_FLOORS = { desc: 4, prose: 8 }
 
-// Drop every fenced block (any language) but keep inline `code` — flags/modules are typographically
-// written in backticks in prose, and that must still count as a mention.
-export function stripFences(md) {
-  return String(md).replace(FENCE, '\n')
-}
+// Fence parsing is shared with doc-lint and doc-exec (`../src/fence.mjs`) so the three cannot drift: it is
+// line-anchored (an inline ``` in prose no longer opens a block) and delimiter-agnostic with a `\1`
+// backreference, so the header's "ANY fenced code block never counts" claim holds for ~~~ blocks too
+// (a ~~~ help dump must not mint a required flag as documented). Re-exported: it is public surface.
+export { stripFences }
 
 const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 // Boundary-anchored token matcher: not embedded in a longer word/flag, optional `.mjs` suffix.

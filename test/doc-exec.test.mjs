@@ -16,6 +16,28 @@ const scorer = join(here, '..', 'scorers', 'doc-exec.mjs')
 
 // ---------- extractJsBlocks ----------
 
+test('an inline triple-backtick in prose does not open a phantom js block', () => {
+  // the phrase below mentions a fenced js example; an unanchored fence regex treats it as an opener,
+  // swallowing the prose AND hiding the real block that follows
+  const md = [
+    'doc-exec runs every fenced ```js example that imports from the repo.',
+    '',
+    '```js',
+    'const real = 1',
+    '```',
+  ].join('\n')
+  const blocks = extractJsBlocks(md)
+  assert.equal(blocks.length, 1)
+  assert.match(blocks[0], /const real/)
+})
+
+test('extracts a tilde-fenced js block (a ~~~ block must not hide a stale example)', () => {
+  const md = ['~~~js', 'const t = 1', '~~~'].join('\n')
+  const blocks = extractJsBlocks(md)
+  assert.equal(blocks.length, 1)
+  assert.match(blocks[0], /const t/)
+})
+
 test('extracts js/javascript/mjs fences, ignores bash/text/plain fences', () => {
   const md = [
     '```js', 'const a = 1', '```', '',

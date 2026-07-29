@@ -108,6 +108,33 @@ test('stripFences removes every fenced block but keeps inline code', () => {
   assert.doesNotMatch(out, /drop/)
 })
 
+test('stripFences does not open a block on an inline triple-backtick in prose', () => {
+  // an unanchored fence regex swallows the prose that follows, so genuinely documented items
+  // read as "code-fence-only mentions" and silently stop counting
+  // the inline ```js pairs with the REAL fence opener below, so everything between them —
+  // ordinary prose documenting --observe — is stripped and stops counting as documentation
+  const md = [
+    'doc-exec runs every fenced ```js example.',
+    '',
+    'Pass `--observe` to refresh evidence.',
+    '',
+    '```',
+    'src/gate.mjs',
+    '```',
+  ].join('\n')
+  const out = stripFences(md)
+  assert.match(out, /Pass `--observe` to refresh evidence/)
+  assert.doesNotMatch(out, /src\/gate\.mjs/)
+})
+
+test('stripFences drops a tilde-fenced block and closes it with its own delimiter', () => {
+  const md = 'keep `--cap` here\n~~~js\ndrop --cap here\n~~~\ntail\n'
+  const out = stripFences(md)
+  assert.match(out, /keep `--cap` here/)
+  assert.match(out, /tail/)
+  assert.doesNotMatch(out, /drop/)
+})
+
 // ---------- scoreCoverage: the number the gate reads ----------
 
 test('score = 100 * documented/required, missing items become findings', () => {

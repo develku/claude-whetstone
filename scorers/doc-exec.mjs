@@ -32,20 +32,16 @@ import { isMainModule } from '../src/is-main.mjs'
 import { resolveOutput } from '../src/safe-rel.mjs'
 import { runIsolated } from '../src/iso-runner.mjs'
 import { loadRequired, scoreCoverage } from './doc-coverage.mjs'
+import { eachFence } from '../src/fence.mjs'
 
-const FENCE = /```(\w*)[^\n]*\n([\s\S]*?)```/g // same shape as doc-lint's
 const JS_LANGS = new Set(['js', 'javascript', 'mjs'])
 const MAX_BLOCKS = 10 // bound scoring wall-clock; anything beyond is REPORTED in the critique, never silent
 
 // Pull the source of every js-language fenced block, in order. Exported for test.
 export function extractJsBlocks(md) {
-  const blocks = []
-  let m
-  FENCE.lastIndex = 0
-  while ((m = FENCE.exec(md))) {
-    if (JS_LANGS.has((m[1] || '').toLowerCase())) blocks.push(m[2])
-  }
-  return blocks
+  return eachFence(md)
+    .filter((f) => JS_LANGS.has(f.lang.toLowerCase()))
+    .map((f) => f.body)
 }
 
 // Rewrite relative import specifiers against the repo root (README examples are written as if run from
