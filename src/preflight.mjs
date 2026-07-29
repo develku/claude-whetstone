@@ -18,6 +18,24 @@ function readSettings(path, read) {
   try { return JSON.parse(read(path, 'utf8')) } catch { return null }
 }
 
+// The NESTED-CONFIG hazard, and the twin of the check below: that one asks whether the target's OWN
+// .claude grants too much, this one asks whether the target sits INSIDE somebody's .claude at all.
+// Claude Code merges every .claude config it finds walking UP from cwd, and the editor's cwd IS the
+// artifact's directory — so an artifact inside a live config tree inherits that tree's whole hook stack.
+// The editor then spends its turn on hook ceremony and edits nothing. Measured on the maintainer's
+// machine: ~USD 2.08 / 1.04M tokens for ZERO edits, ending in ERROR. Deliberately a PURE path check with
+// no fs and no cwd comparison: the burn happened with the target inside cwd (where crossRepoPermission-
+// Warning returns null by design) and with permissions that were never too broad. Returns null or a
+// one-line warning naming the offending tree.
+export function nestedClaudeConfigWarning({ targetDir } = {}) {
+  if (!targetDir) return null
+  const parts = resolve(targetDir).split(sep)
+  const at = parts.indexOf('.claude') // outermost wins — that is the first tree the walk-up reaches
+  if (at === -1) return null
+  const tree = parts.slice(0, at + 1).join(sep)
+  return `⚠ nested config: ${resolve(targetDir)} sits inside the live Claude config tree ${tree}. The editor runs with cwd there and inherits that tree's whole hook stack — measured ~USD 2.08 / 1.04M tokens of hook ceremony for ZERO edits. Copy the artifact to a scratch dir outside every .claude ancestor, loop there, then diff back.`
+}
+
 // A one-line warning when `targetDir` is OUTSIDE cwd AND carries a broad Claude permission surface, else null.
 // Broad = a non-empty permissions.allow, or a bypass-by-default mode (defaultMode:'bypassPermissions' /
 // dangerouslySkipPermissions). Same-repo targets return null: that is the operator's own surface, not a

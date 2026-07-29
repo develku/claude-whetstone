@@ -53,6 +53,13 @@ Collect these (use AskUserQuestion; treat any other inline `$ARGUMENTS` text as 
      `node ${CLAUDE_PLUGIN_ROOT}/scorers/llm-judge.mjs --goal "<goal>" --mcp-config ${CLAUDE_PLUGIN_ROOT}/empty-mcp.json [--rubric @file]`
      (the judge spawns its OWN `claude -p` every pass — pass `--mcp-config` so it skips the ~44K
      MCP tax too, and count its per-pass spend in the cost estimate, not just the editor's).
+     ⚠ **Say the expected outcome out loud before running one.** A judge anchors below 100, so `done`
+     never fires; plateau detection keys off a running max that judge noise keeps bumping, so plateau
+     never fires either. The run therefore stops on its BUDGET by construction, not on convergence —
+     measured: 13 passes, best at pass 8 and worse after, ~USD 12.34 on one 24KB prose artifact, versus
+     ~USD 0.32–0.54 for deterministic runs that converged in a single pass. For prose, one critique pass
+     plus a human edit is usually the better tool; if the user still wants the loop, keep `--cap` tight
+     (2–3) and tell them the budget, not the score, will end it.
    - or a **custom** shell command — warn the user it is exec'd with their full privileges
      (arbitrary code execution; no sandbox).
 4. **target** — score that means done (default `90`).
@@ -121,6 +128,17 @@ Report the final verdict the driver prints, then render the run trajectory:
 - **Otherwise** (widget tool absent — headless run, other host), report the text score
   trajectory the driver prints. This is the fallback, never an error.
 
+**A score is not a result — report the gap, not just the number.** A deterministic run can reach 100 in
+one pass and still have missed the defect class entirely, because the assertions were written by
+whoever also wrote the fix. If the driver printed its **thin-scorer suspicion** warning, surface that
+warning to the user rather than the score alone. Say plainly what the gate did NOT cover, and treat a
+one-pass 100 with no independent check as a result to flag, not to celebrate. What counts as
+independent: replaying the gate over real inputs that predate the task, or a genuinely held-out
+`--confirm-scorer` — not the same cases re-wrapped. `--stability-runs` detects noise in a
+nondeterministic scorer, never blind spots in a deterministic one, and on a thin deterministic gate it
+actually suppresses the thin-scorer warning. `--gate-audit` and `--gate-self-probe` are diagnostics,
+not qualification. Full rationale in `SPEC.md` §8.
+
 ## RESUME
 
 Continue a stopped run from its `state.json`. Ask for the run dir (`--loop-dir`) and which
@@ -150,3 +168,12 @@ After it finishes, render the trajectory the same way as **NEW RUN** — the cha
   `CLAUDE.md` grants broad write/exec permissions — the loop will auto-accept edits there every
   pass with no human in the loop. Point it at the artifact's own project, scoped so the edit is
   permitted but the blast radius is just that artifact.
+- **Never point the loop at a file inside a live `.claude` config tree** (a skill, a rule, a hook, a
+  settings file). The editor's cwd is the artifact's directory and Claude Code merges every `.claude`
+  config found walking up, so the editor inherits that tree's whole hook stack, spends its turn on
+  ceremony, edits nothing, and ERRORs — measured at ~USD 2.08 / 1.04M tokens for zero edits. The driver
+  prints a `⚠ nested config` warning here, but it is non-fatal by design: **stop and re-stage rather
+  than confirming through it.** Copy the artifact to a scratch directory that has no `.claude` ancestor,
+  point `--artifact` and `--loop-dir` there, and diff the result back to the real file by hand
+  afterwards. Verify the stage with:
+  `p=<stage>; while [ "$p" != "/" ]; do [ -d "$p/.claude" ] && echo "UNSAFE: $p"; p=$(dirname "$p"); done`

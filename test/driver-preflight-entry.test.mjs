@@ -36,3 +36,25 @@ test('driver CLI: warns (non-fatal) when the --artifact lives in a cross-repo wi
     rmSync(target, { recursive: true, force: true }); rmSync(loopDir, { recursive: true, force: true })
   }
 })
+
+test('driver CLI: warns (non-fatal) when the --artifact sits INSIDE a .claude config tree', () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'whet-nested-'))
+  const loopDir = mkdtempSync(join(realpathSync(tmpdir()), 'whet-run-'))
+  try {
+    // No settings file at all, and the target is a plain temp dir — the cross-repo permission check has
+    // nothing to say here. Only the nested-config check can catch this one.
+    const dir = join(root, '.claude', 'skills', 's')
+    mkdirSync(dir, { recursive: true })
+    const artifact = join(dir, 'SKILL.md')
+    writeFileSync(artifact, 'already good\n')
+    const r = spawnSync(process.execPath, [
+      driver, 'improve it', '--artifact', artifact, '--scorer', SCORER_100,
+      '--target', '90', '--cap', '1', '--loop-dir', join(loopDir, 'run'),
+    ], { encoding: 'utf8', input: '' })
+    assert.match(r.stderr, /nested config/, `expected the nested-config warning on stderr (stderr: ${JSON.stringify(r.stderr)})`)
+    assert.doesNotMatch(r.stderr, /cross-repo target/, 'the other preflight has no finding here')
+    assert.equal(r.status, 0, 'the warning is NON-fatal: a baseline-done run still exits 0')
+  } finally {
+    rmSync(root, { recursive: true, force: true }); rmSync(loopDir, { recursive: true, force: true })
+  }
+})

@@ -7,6 +7,30 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 The dates are the landing commit's date; the short SHA points at the squash on `main`.
 
+## [1.14.0] — 2026-07-29
+### Added
+- **Nested-config preflight** — `nestedClaudeConfigWarning` (`src/preflight.mjs`),
+  wired into both the single-file driver and the `scope` CLI, warns before a run
+  when the target sits inside a live `.claude` config tree. The editor's cwd is
+  the artifact's directory and Claude Code merges every `.claude` config found
+  walking up, so such a run inherits that tree's whole hook stack, spends its turn
+  on ceremony, edits nothing and ERRORs — measured at ~USD 2.08 / 1.04M tokens for
+  zero edits. A pure path check (no filesystem access, so no false positives) and
+  deliberately independent of the cross-repo permission check beside it: that burn
+  happened with the target *inside* cwd and with permissions that were never broad,
+  so neither of that check's conditions applied. Non-fatal, like its twin.
+### Changed
+- The launcher and SPEC now carry two judgments that previously lived only in the
+  maintainer's local notes, so the plugin stands on its own: **when the loop is the
+  wrong tool** (a judge anchors below 100 so `done` never fires, and plateau keys
+  off a running max that judge noise keeps bumping, so a judged run stops on budget
+  by construction — measured ~USD 12.34 over 13 passes versus ~USD 0.32–0.54 for
+  deterministic runs converging in one), and **why a score is not a result** (what
+  qualifies as an oracle the gate's author did not write, and why
+  `--stability-runs`, `--gate-audit` and `--gate-self-probe` do not qualify).
+  New `SPEC.md` §8; `commands/whet.md` gains the matching run-time guidance and a
+  SAFETY entry for the nested-config hazard.
+
 ## [1.13.0] — 2026-07-07
 ### Added
 - **Auth-failure preflight** — the act step classifies an auth-class `claude -p`

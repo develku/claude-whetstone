@@ -1,6 +1,6 @@
 # whetstone contracts
 
-The durable design record for **v1.13.0** — the complete, gated reference (flags, scorers, config,
+The durable design record for **v1.14.0** — the complete, gated reference (flags, scorers, config,
 modules). Three contracts make the loop work; keep them stable.
 
 ## 1. The gate (`gateVerdict(state) -> { status, reason }`)
@@ -241,6 +241,18 @@ Every knob you repeat has a camelCase key in `whetstone.config.json` / `~/.confi
 | `src/forge/gate-probe.mjs` | `--gate-self-probe`, paid: mutates the accepted artifact and runs the composed confirm gate against each mutant; a mutant the gate passes is a hole, and Forge learns a check that catches it |
 | `src/prompt-fence.mjs` | the shared nonce-fence primitive: wraps untrusted, editor-influenced text (scorer critiques, TRIED-AREAS, doc-exec output) in an unforgeable per-run marker so it can never be read as instructions |
 | `src/iso-runner.mjs` | the locked-down out-of-process child every behavioural scorer runs untrusted candidate code in — no fs-write, no network, no child_process — keeping that code out of the scorer's own process |
+| `src/preflight.mjs` | two always-on, non-fatal warnings written to stderr before a run starts, both about what the editor INHERITS from the target's directory: `crossRepoPermissionWarning` fires when the target lives outside cwd and its own `.claude/settings*.json` carries a broad permission surface; `nestedClaudeConfigWarning` fires when the target sits inside a `.claude` tree at all |
+
+**The nested-config hazard.** The editor spawns with cwd set to the artifact's own directory, and Claude
+Code merges every `.claude` config it finds walking up from there. Point a loop at a file inside a live
+config tree — a skill, a rule, a hook — and the editor inherits that tree's whole hook stack: it spends
+its turn on hook ceremony, edits nothing, and the pass ends in ERROR. Measured on the maintainer's
+machine, roughly USD 2.08 and 1.04M tokens for zero edits. `nestedClaudeConfigWarning` is a pure path
+check with no filesystem access, so it cannot produce a false positive, and it is deliberately
+independent of the permission check beside it: that burn happened with the target *inside* cwd and with
+permissions that were never broad, so neither of the other check's conditions would have caught it. The
+remedy the warning prints is to copy the artifact to a scratch directory outside every `.claude`
+ancestor, run the loop there, and diff the result back by hand.
 
 **The composed doc gate.** A doc fails two ways, so three scorers cover it under `composite`: `doc-lint`
 (precision), `doc-coverage` (recall — walks the committed required-token set and scores the percentage
@@ -248,6 +260,46 @@ substantively documented, excluding bare name-drops and code-block-only mentions
 (executable accuracy — runs every fenced `js` example that imports from the repo in the locked-down
 `iso-runner.mjs` child). `examples/spec-gate.scorers` gates this SPEC for completeness + precision;
 `examples/readme-gate.scorers` gates the README for precision + runnable examples.
+
+## 8. Run fit, and when a score may be trusted
+
+Two judgments the code cannot make for you. Both are cheap to get wrong and expensive to discover late.
+
+**Is the loop the right tool at all?** It earns its cost against a deterministic gate with a real
+gradient — a pass/fail measure that moves when the artifact improves. Against a subjective judge it
+does not, and the failure is structural rather than bad luck: judges anchor below 100, so `done` never
+fires, and plateau detection keys off a running max that judge noise keeps bumping, so plateau never
+fires either. The run therefore stops on its budget by construction, whatever the artifact is worth.
+Measured on the maintainer's machine, same day: two `test-pass-rate` runs each converged in one edit
+pass, at roughly USD 0.54 and USD 0.32. One `llm-judge` run over a 24KB prose artifact scored
+71-78-72-72-80-74-72-83-88-66-82-74-63 — best at pass 8, worse afterwards — and stopped on budget, not
+convergence, at roughly USD 12.34. For prose, one critique pass and a human edit is usually the better
+tool; if you must loop it, use a tight `--cap` and expect the budget to bind.
+
+**A score is not a result.** A deterministic run can reach 100 in a single pass and still have missed
+the defect class entirely, because the assertions were written by whoever also wrote the fix. The
+driver prints a thin-scorer suspicion warning when a run finishes suspiciously easily, and that warning
+should be read as a finding. Before a run's diff is trusted, the gate wants an oracle its author did
+not write:
+
+- **Corpus replay is primary.** Run the candidate gate over real historical inputs and diff
+  accept/reject per item against current behaviour. It works precisely because the corpus predates the
+  task, so the gate cannot have been fitted to it. A corpus stops being an oracle the moment you revise
+  the gate in response to it — after that it is development data, and re-qualifying needs an untouched
+  partition or a different oracle.
+- **Invented adversarial variants are secondary.** Mutations you author come from the same mental model
+  as the assertions, so more of them adds ceremony, not independence.
+- **`--confirm-scorer` counts only if genuinely held out** — not the same cases re-wrapped, and not a
+  second suite derived from the same intended fix.
+- **`--stability-runs` is for nondeterministic scorers only.** It detects noise, not blind spots. On a
+  deterministic thin scorer it repeats the same mistake and suppresses the thin-scorer warning, which
+  makes the report more misleading rather than less.
+- **`--gate-audit` and `--gate-self-probe` are diagnostics, not qualification**, and
+  `--forge-mutation-admit` validates forge-generated checks rather than your primary scorer.
+
+Write the scorer and freeze it before editing starts, and keep it outside the directory the editor may
+edit. A gate the editor can reach is not a gate — that is what `--scope`'s read-only enforcement
+(`src/scope-guard.mjs`) and `src/blast-radius.mjs` exist to guarantee when the two must share a tree.
 
 ## Open questions for the self-hosting phase (running whetstone on its own codebase — dogfooding)
 

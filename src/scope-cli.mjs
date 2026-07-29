@@ -18,7 +18,7 @@ import { makeDecomposeAct } from './decompose.mjs'
 import { isUnsafeScorer } from './scorer-safety.mjs'
 import { runScopeForgeHook } from './forge/scope-hook.mjs'
 import { floorConfirmCmd } from '../scorers/floor.mjs'
-import { crossRepoPermissionWarning } from './preflight.mjs'
+import { crossRepoPermissionWarning, nestedClaudeConfigWarning } from './preflight.mjs'
 
 // driver's parseCli plus --scope (becomes the artifact) and --read-only (comma list of gate paths
 // the editor may not touch — the tests/scorer it is graded by).
@@ -239,6 +239,10 @@ if (isMainModule(import.meta.url)) {
   // permission surface the editor would inherit (runs --permission-mode acceptEdits inside the scope).
   const permWarn = crossRepoPermissionWarning({ targetDir: rpath(cfg.scope) })
   if (permWarn) process.stderr.write(permWarn + '\n')
+  // ...and the twin check: a --scope INSIDE a .claude tree inherits that tree's hook stack, which the
+  // permission check above cannot see (it skips same-cwd targets and looks only at permission breadth).
+  const nestWarn = nestedClaudeConfigWarning({ targetDir: rpath(cfg.scope) })
+  if (nestWarn) process.stderr.write(nestWarn + '\n')
   const { state, verdict } = await runFromConfig(cfg, scopeDeps(cfg))
   process.stdout.write(`\n${verdict.reason}\n${formatReport(state)}\n`)
   process.exit(verdict.status === 'done' ? 0 : 1)

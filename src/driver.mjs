@@ -33,7 +33,7 @@ import { forgeShouldFire, easyForgeShouldFire, runForgeHook, composeConfirmFromS
 import { withAreaLedger } from './area-registry.mjs'
 import { composeConfirm } from './forge/gate.mjs'
 import { loadStore, saveStore, findCheckKeys, retireCheck } from './forge/store.mjs'
-import { crossRepoPermissionWarning } from './preflight.mjs'
+import { crossRepoPermissionWarning, nestedClaudeConfigWarning } from './preflight.mjs'
 
 export { shq } // re-exported so callers can keep importing shq from driver (the canonical impl is shq.mjs)
 
@@ -508,8 +508,13 @@ if (process.argv[1] && (
   }
   // F2 preflight: warn (non-fatal) when editing a file in a DIFFERENT repo that carries a broad Claude
   // permission surface — the editor inherits it (runs --permission-mode acceptEdits in the artifact's dir).
-  const permWarn = crossRepoPermissionWarning({ targetDir: dirname(resolve(cfg.artifactPath)) })
+  const targetDir = dirname(resolve(cfg.artifactPath))
+  const permWarn = crossRepoPermissionWarning({ targetDir })
   if (permWarn) process.stderr.write(permWarn + '\n')
+  // ...and the twin check: an artifact INSIDE a .claude tree inherits that tree's hook stack, which the
+  // permission check above cannot see (it skips same-cwd targets and looks only at permission breadth).
+  const nestWarn = nestedClaudeConfigWarning({ targetDir })
+  if (nestWarn) process.stderr.write(nestWarn + '\n')
   const { state, verdict } = await runFromConfig(cfg)
   process.stdout.write(`\n${verdict.reason}\n${formatReport(state)}\n`)
   process.exit(verdict.status === 'done' ? 0 : 1)
