@@ -7,6 +7,42 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 The dates are the landing commit's date; the short SHA points at the squash on `main`.
 
+## [1.14.1] — 2026-07-29
+### Fixed
+- **`doc-lint` misread the docs it grades** — two regex defects in
+  `scorers/doc-lint.mjs`, one of which corrupted a *sibling* scorer through the
+  shared parse. (1) `FENCE` was unanchored, so a triple-backtick written **inline
+  in prose** (e.g. the phrase "runs every fenced ```` ```js ```` example") opened a
+  phantom fence; every later delimiter then paired wrongly, turning 153 lines of
+  ordinary prose into "authoritative" ref territory while skipping the real fence
+  that followed. (2) `PATH_TOKEN` began matching at `[A-Za-z0-9_]`, so it could
+  never capture a leading `~` or `/`: `~/.config/whetstone/config.json` was clipped
+  to a repo-relative-*looking* `config/whetstone/config.json`, so the home/absolute
+  guard in `isCheckableRef` never received the character it filters on and a correct
+  doc claim scored as a dangling ref. The same gap ate the leading dot on
+  `.github/…` refs. Both delimiters are now line-anchored (`^` + `m`), and the
+  `~/`-or-`/` prefix and leading `.` are captured rather than skipped.
+
+  Measured on the recorded artifact `.loop/doc-depth/snapshots/iter_004.md` — file
+  unchanged, scorer fixed: `doc-coverage` 92.73 → **96.36** (`--forge-retire` and
+  `effort` were documented all along; the phantom fence hid them), `doc-lint`
+  89.47 → **100** (36/36 claims valid), composite 89.47 → **96.36**. Refs actually
+  verified went 18 → **35**: nearly half the doc's claims were never checked while
+  the gate reported a confident number. The bad critique also told the model to
+  "fix the path or remove the reference", whose only satisfiable action was
+  deleting true documentation — a scorer bug that inverted the loop's objective.
+
+  Root cause independently derived and the first diagnosis adversarially
+  refuted-as-stated by a cross-model reviewer, which identified the unanchored
+  `FENCE` as the activating defect and corrected four points: the 2026-07-04 run's
+  terminal cause was the token budget, `doc-lint` was 96.77 at pass 0 (no ceiling
+  from the start), target 98 was reachable, and `escalated:false` was correct with
+  no plateau present.
+
+  Known narrowing: an **indented** fence (inside a list item or blockquote) no
+  longer opens a block. Nothing in-repo relies on it — suite green, SPEC and README
+  both gate at 100.
+
 ## [1.14.0] — 2026-07-29
 ### Added
 - **Nested-config preflight** — `nestedClaudeConfigWarning` (`src/preflight.mjs`),

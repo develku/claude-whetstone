@@ -1,6 +1,6 @@
 # whetstone contracts
 
-The durable design record for **v1.14.0** — the complete, gated reference (flags, scorers, config,
+The durable design record for **v1.14.1** — the complete, gated reference (flags, scorers, config,
 modules). Three contracts make the loop work; keep them stable.
 
 ## 1. The gate (`gateVerdict(state) -> { status, reason }`)
